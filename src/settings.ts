@@ -1,3 +1,5 @@
+import type { DateFormat } from "./jd/files";
+
 export type JdexNoteType = "id" | "cabecera" | "categoria" | "area";
 
 export interface JdexManagerSettings {
@@ -21,6 +23,10 @@ export interface JdexManagerSettings {
   renamePairsWithoutAsking: boolean;
   /** Keep the children list of header notes up to date automatically. */
   liveHeaders: boolean;
+  /** Prefix used by "Date file name" and when archiving. */
+  dateFormat: DateFormat;
+  /** Date new files inside an ID folder as they are created. */
+  dateOnCreate: boolean;
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -39,6 +45,8 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   noteWithoutFolderIsFinding: false,
   renamePairsWithoutAsking: false,
   liveHeaders: true,
+  dateFormat: "YYYY-MM-DD",
+  dateOnCreate: false,
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */

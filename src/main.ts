@@ -8,6 +8,10 @@ import { extractJdPrefix } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
 import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
 import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
+import { IdSuggestModal, openEntry } from "./ui/go-to-id";
+import { ProcessInboxModal } from "./ui/inbox";
+import { categoryOfPath, isDatable, zeroOf } from "./jd/files";
+import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
 import { headersToMigrate, updateHeaders } from "./vault/headers";
@@ -20,6 +24,7 @@ export default class JdexManagerPlugin extends Plugin {
   /** Findings of the last audit run in this session. */
   lastFindings: Finding[] | null = null;
   private statusBar: HTMLElement | null = null;
+  private inboxBar: HTMLElement | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -31,11 +36,15 @@ export default class JdexManagerPlugin extends Plugin {
     // eslint-disable-next-line obsidianmd/ui/sentence-case
     this.statusBar.setText("JD: not audited");
     this.registerDomEvent(this.statusBar, "click", () => void this.audit());
+    this.inboxBar = this.addStatusBarItem();
+    this.inboxBar.addClass("mod-clickable");
+    this.registerDomEvent(this.inboxBar, "click", () => void this.processInbox());
 
     // Folders are only known once the vault has loaded; detect then, and only into empty fields.
     this.app.workspace.onLayoutReady(() => {
       void (async () => {
         await this.detectFolders(false);
+        this.refreshInboxCount();
         if (this.settings.auditOnStartup) await this.audit(false);
       })();
     });
@@ -113,7 +122,36 @@ export default class JdexManagerPlugin extends Plugin {
       }),
     );
 
+    this.addCommand({
+      id: "send-to-inbox",
+      name: "Send active file to its inbox (.01)",
+      checkCallback: (checking) => this.fileCommand(checking, (file) => this.sendToZero(file, "01")),
+    });
+    this.addCommand({
+      id: "archive",
+      name: "Archive active file (.09, dated)",
+      checkCallback: (checking) => this.fileCommand(checking, (file) => this.sendToZero(file, "09")),
+    });
+    this.addCommand({
+      id: "date-file",
+      name: "Date file name with its creation date",
+      checkCallback: (checking) => this.fileCommand(checking, (file) => this.dateActive(file)),
+    });
+    this.addCommand({ id: "process-inbox", name: "Process inboxes", callback: () => void this.processInbox() });
+    this.addCommand({
+      id: "go-to-id",
+      name: "Go to ID",
+      callback: () => {
+        if (!this.ready()) return;
+        const index = scanVault(this.app, this.settings);
+        new IdSuggestModal(this.app, index, (entry, openFolder) => {
+          void openEntry(this.app, entry, openFolder).then((msg) => msg && new Notice(msg));
+        }).open();
+      },
+    });
+
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => void this.onRename(file, oldPath)));
+    this.registerEvent(this.app.vault.on("delete", () => this.refreshInboxCount()));
     this.registerEvent(this.app.vault.on("create", (file) => void this.onCreate(file)));
 
     this.addRibbonIcon("file-plus-2", "Create ID", () => void this.createIdFlow());
@@ -281,12 +319,102 @@ export default class JdexManagerPlugin extends Plugin {
       const parsed = extractJdPrefix(file.name);
       if (parsed?.number.kind === "id") await this.refreshHeaders(parsed.number.category, false);
     }
+    this.refreshInboxCount();
+  }
+
+  private fileCommand(checking: boolean, run: (file: TFile) => Promise<void>): boolean {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || this.settings.jdexFolder === "") return false;
+    if (!checking) void run(file);
+    return true;
+  }
+
+  /** Moves the file to the `.01` or `.09` of its category (00 when it lives outside the system). */
+  async sendToZero(file: TFile, zero: "01" | "09"): Promise<void> {
+    const index = scanVault(this.app, this.settings);
+    let category = categoryOfPath(this.settings.systemRoot, file.path);
+    if (category === null) {
+      const pick = await new Promise<string | null>((resolve) => {
+        const modal = new CategorySuggestModal(this.app, index, (c) => resolve(c.number));
+        modal.onClose = () => resolve(null);
+        modal.open();
+      });
+      if (pick === null) return;
+      category = pick;
+    }
+    const target = zeroOf(index, category, zero);
+    if (!target?.folderPath) {
+      new Notice(`${category}.${zero} has no folder. Create the category zeros first (Create category, or make the folder by hand).`, 8000);
+      return;
+    }
+    try {
+      const to = await moveInto(
+        this.app,
+        file,
+        target.folderPath,
+        zero === "09" ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined,
+      );
+      new Notice(`Moved to ${to}.`);
+      this.refreshInboxCount();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async dateActive(file: TFile): Promise<void> {
+    const index = scanVault(this.app, this.settings);
+    if (!isDatable(index, this.settings, file.path)) {
+      new Notice("Only files inside a content ID folder are dated; JDex notes and management files are left alone.");
+      return;
+    }
+    try {
+      const to = await dateFile(this.app, file, this.settings.dateFormat);
+      new Notice(to ? `Renamed to ${to.slice(to.lastIndexOf("/") + 1)}.` : "Already dated.");
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async processInbox(): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    const files = inboxFiles(this.app, index);
+    if (files.length === 0) {
+      new Notice("Every inbox is empty.");
+      this.refreshInboxCount();
+      return;
+    }
+    new ProcessInboxModal(this.app, files, { index, systemRoot: this.settings.systemRoot, dateFormat: this.settings.dateFormat }, async () => {
+      this.refreshInboxCount();
+    }).open();
+  }
+
+  refreshInboxCount(): void {
+    if (!this.inboxBar) return;
+    if (this.settings.jdexFolder === "") {
+      this.inboxBar.setText("");
+      return;
+    }
+    const n = inboxFiles(this.app, scanVault(this.app, this.settings)).length;
+    this.inboxBar.setText(n === 0 ? "Inbox: empty" : `Inbox: ${n}`);
   }
 
   async onCreate(file: TAbstractFile): Promise<void> {
     // Obsidian fires "create" for every file while the vault loads; only react to files created afterwards.
     if (!this.app.workspace.layoutReady) return;
-    if (!this.settings.liveHeaders || this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
+    if (this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
+    this.refreshInboxCount();
+    if (this.settings.dateOnCreate) {
+      const index = scanVault(this.app, this.settings);
+      if (isDatable(index, this.settings, file.path)) {
+        try {
+          await dateFile(this.app, file, this.settings.dateFormat);
+        } catch {
+          // A clash on the dated name is not worth a notice at creation time.
+        }
+      }
+    }
+    if (!this.settings.liveHeaders) return;
     const rel = relativeTo(this.settings.jdexFolder, file.path);
     if (rel === null || rel === "" || rel.includes("/")) return;
     const parsed = extractJdPrefix(file.basename);
@@ -514,6 +642,34 @@ class JdexManagerSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.liveHeaders).onChange(async (value) => {
           this.plugin.settings.liveHeaders = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).setName("Files").setHeading();
+
+    new Setting(containerEl)
+      .setName("Date format")
+      .setDesc("Prefix added when dating a file name and when archiving.")
+      .addDropdown((d) =>
+        d
+          // eslint-disable-next-line obsidianmd/ui/sentence-case
+          .addOption("YYYY-MM-DD", "YYYY-MM-DD")
+          // eslint-disable-next-line obsidianmd/ui/sentence-case
+          .addOption("YYYY-MM", "YYYY-MM")
+          .setValue(this.plugin.settings.dateFormat)
+          .onChange(async (value) => {
+            this.plugin.settings.dateFormat = value === "YYYY-MM" ? "YYYY-MM" : "YYYY-MM-DD";
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Date files when they are created inside an ID")
+      .setDesc("Off by default. Never touches JDex notes or management folders (.00 to .09).")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.dateOnCreate).onChange(async (value) => {
+          this.plugin.settings.dateOnCreate = value;
           await this.plugin.saveSettings();
         }),
       );
