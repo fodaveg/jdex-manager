@@ -1,5 +1,5 @@
 import { type App, Modal, Notice, normalizePath, Setting, SuggestModal, TFile, TFolder } from "obsidian";
-import { areaCode, areaOfCategory, type CategoryEntry, findId, type JdIndex, knownIds } from "../jd/index";
+import { areaCode, areaOfCategory, type CategoryEntry, categoryUsage, findId, type JdIndex, knownIds } from "../jd/index";
 import { isReserved, jdexNoteName, nextFreeId, parseJdNumber } from "../jd/parse";
 import { renderTemplate, todayIso } from "../jd/template";
 import type { JdexManagerSettings } from "../settings";
@@ -7,14 +7,16 @@ import { resolveTemplate } from "../vault/templates";
 
 /** Picks a category from the index, ordered by number. */
 export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
+  private readonly index: JdIndex;
   private readonly categories: CategoryEntry[];
   private readonly onPick: (category: CategoryEntry) => void;
 
-  constructor(app: App, index: JdIndex, onPick: (category: CategoryEntry) => void) {
+  constructor(app: App, index: JdIndex, onPick: (category: CategoryEntry) => void, placeholder = "Category for the new ID") {
     super(app);
+    this.index = index;
     this.categories = index.categories;
     this.onPick = onPick;
-    this.setPlaceholder("Category for the new ID");
+    this.setPlaceholder(placeholder);
   }
 
   getSuggestions(query: string): CategoryEntry[] {
@@ -25,7 +27,9 @@ export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
 
   renderSuggestion(category: CategoryEntry, el: HTMLElement): void {
     el.createDiv({ text: category.label });
-    el.createDiv({ text: areaCode(category.areaNumber), cls: "jdex-suggestion-note" });
+    const usage = categoryUsage(this.index, category.number);
+    const next = usage.next ? ` · next ${usage.next}` : " · full";
+    el.createDiv({ text: `${areaCode(category.areaNumber)} · ${usage.used} of ${usage.total} used${next}`, cls: "jdex-suggestion-note" });
   }
 
   onChooseSuggestion(category: CategoryEntry): void {

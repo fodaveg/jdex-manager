@@ -27,6 +27,8 @@ export interface JdexManagerSettings {
   dateFormat: DateFormat;
   /** Date new files inside an ID folder as they are created. */
   dateOnCreate: boolean;
+  /** What to open after Create ID when the folder was created too. */
+  afterCreateOpen: "note" | "folder";
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   liveHeaders: true,
   dateFormat: "YYYY-MM-DD",
   dateOnCreate: false,
+  afterCreateOpen: "note",
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */

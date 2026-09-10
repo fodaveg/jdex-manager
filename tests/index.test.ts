@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { areaCode, areaOfCategory, buildIndex, findId, knownIds } from "../src/jd/index";
+import { areaCode, areaOfCategory, buildIndex, categoryUsage, findId, knownIds } from "../src/jd/index";
 import { nextFreeId } from "../src/jd/parse";
 import { FOLDERS, JDEX, NOTES } from "./fixtures";
 
@@ -82,5 +82,13 @@ describe("helpers", () => {
     expect(areaCode(20)).toBe("20-29");
     expect(areaOfCategory("21")).toBe(20);
     expect(areaOfCategory("05")).toBe(0);
+  });
+});
+
+describe("categoryUsage", () => {
+  it("counts content ids out of 81 and names the next free one", () => {
+    expect(categoryUsage(index, "21")).toEqual({ used: 3, total: 81, next: "21.23" });
+    expect(categoryUsage(index, "11")).toEqual({ used: 1, total: 81, next: "11.12" });
+    expect(categoryUsage(index, "22")).toEqual({ used: 0, total: 81, next: "22.11" });
   });
 });

@@ -10,7 +10,7 @@
  */
 
 import { relativeTo } from "./detect";
-import { extractJdPrefix } from "./parse";
+import { extractJdPrefix, nextFreeId } from "./parse";
 
 export interface AreaEntry {
   /** First category of the area: 20 for `20-29`. */
@@ -244,4 +244,16 @@ export function findId(index: JdIndex, id: string): IdEntry | undefined {
 /** The `+` children of an ID. */
 export function childrenPlus(index: JdIndex, id: string): IdEntry[] {
   return index.ids.filter((e) => e.id === `${id}+`);
+}
+
+/** Content IDs (.11 to .99, X0 headers excluded) in use in a category, out of the 81 available. */
+export function categoryUsage(index: JdIndex, category: string): { used: number; total: number; next: string | null } {
+  const used = new Set<string>();
+  for (const e of index.ids) {
+    if (e.category !== category || e.id.endsWith("+")) continue;
+    const last = Number(e.id.split(".")[1]);
+    if (last >= 11 && last % 10 !== 0) used.add(e.id);
+  }
+  // Same rule as Create ID: the highest in use plus one, gaps are never refilled.
+  return { used: used.size, total: 81, next: nextFreeId(category, knownIds(index)) };
 }

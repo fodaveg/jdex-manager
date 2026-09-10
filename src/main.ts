@@ -117,6 +117,26 @@ export default class JdexManagerPlugin extends Plugin {
 
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
+        if (this.settings.jdexFolder === "") return;
+        const index = scanVault(this.app, this.settings);
+        const loc = locate(index, this.settings, file.path);
+        if (!loc) return;
+        if (loc.atNote && loc.entry.folderPath) {
+          menu.addItem((item) =>
+            item
+              .setTitle(`Open folder of ${loc.entry.id}`)
+              .setIcon("folder-open")
+              .onClick(() => void openEntry(this.app, loc.entry, true).then((msg) => msg && new Notice(msg))),
+          );
+        }
+        if (!loc.atNote && loc.entry.notePath) {
+          menu.addItem((item) =>
+            item
+              .setTitle(`Open JDex note of ${loc.entry.id}`)
+              .setIcon("book-open")
+              .onClick(() => void openEntry(this.app, loc.entry, false).then((msg) => msg && new Notice(msg))),
+          );
+        }
         const entry = this.entryFor(file);
         if (!entry) return;
         menu.addItem((item) =>
@@ -151,6 +171,35 @@ export default class JdexManagerPlugin extends Plugin {
         this.fileCommand(checking, async (file) => {
           const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
           new Notice(loc ? loc.text : "The active file is not inside an ID.");
+        }),
+    });
+    this.addCommand({
+      id: "copy-id",
+      name: "Copy ID of the active file",
+      checkCallback: (checking) =>
+        this.fileCommand(checking, async (file) => {
+          const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+          if (!loc) {
+            new Notice("The active file is not inside an ID.");
+            return;
+          }
+          await navigator.clipboard.writeText(loc.entry.id);
+          new Notice(`Copied ${loc.entry.id}.`);
+        }),
+    });
+    this.addCommand({
+      id: "copy-jd-path",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      name: "Copy JD path of the active file",
+      checkCallback: (checking) =>
+        this.fileCommand(checking, async (file) => {
+          const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+          if (!loc) {
+            new Notice("The active file is not inside an ID.");
+            return;
+          }
+          await navigator.clipboard.writeText(loc.text);
+          new Notice(`Copied ${loc.text}.`);
         }),
     });
     this.addCommand({
@@ -560,7 +609,13 @@ export default class JdexManagerPlugin extends Plugin {
         try {
           const note = await createId(this.app, this.settings, index, category, request);
           new Notice(`Created ${note.basename}.`);
-          await this.app.workspace.getLeaf(false).openFile(note);
+          if (request.createFolder && this.settings.afterCreateOpen === "folder" && category.path) {
+            // No public API reveals a folder in the explorer: open the note and say where the folder is.
+            await this.app.workspace.getLeaf(false).openFile(note);
+            new Notice(`Folder: ${category.path}/${note.basename}`, 8000);
+          } else {
+            await this.app.workspace.getLeaf(false).openFile(note);
+          }
         } catch (error) {
           new Notice(error instanceof Error ? error.message : String(error));
         }
@@ -720,6 +775,21 @@ class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl).setName("Create ID").setHeading();
+
+    new Setting(containerEl)
+      .setName("After creating an ID with its folder")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("Open the JDex note, or the note plus a notice with the folder path (Obsidian has no API to reveal a folder).")
+      .addDropdown((d) =>
+        d
+          .addOption("note", "Open the note")
+          .addOption("folder", "Open the note and show the folder path")
+          .setValue(this.plugin.settings.afterCreateOpen)
+          .onChange(async (value) => {
+            this.plugin.settings.afterCreateOpen = value === "folder" ? "folder" : "note";
+            await this.plugin.saveSettings();
+          }),
+      );
 
     new Setting(containerEl)
       .setName("Create the folder by default")
