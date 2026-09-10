@@ -13,6 +13,10 @@ export interface JdexManagerSettings {
   templateNames: Record<JdexNoteType, string>;
   /** Last choice of the "also create the folder" checkbox in the Create ID dialog. */
   createFolderByDefault: boolean;
+  /** Run the audit when the vault has loaded. */
+  auditOnStartup: boolean;
+  /** Count a JDex note without a folder as a problem instead of information. */
+  noteWithoutFolderIsFinding: boolean;
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -27,6 +31,8 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
     area: "JDex - area",
   },
   createFolderByDefault: false,
+  auditOnStartup: false,
+  noteWithoutFolderIsFinding: false,
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */

@@ -47,10 +47,30 @@ export interface IdEntry {
   folderPath?: string;
 }
 
+/** A folder that carries a JD number but sits under the wrong parent (`12.31` inside `11`, `35` inside `20-29`). */
+export interface MisplacedEntry {
+  path: string;
+  label: string;
+  /** `21.22`, `35` … */
+  number: string;
+  /** Number of the folder it sits in. */
+  parent: string;
+}
+
+/** Every validated ID folder or JDex ID note, before merging by number. Lets the audit find duplicates. */
+export interface RawIdEntry {
+  id: string;
+  path: string;
+  label: string;
+}
+
 export interface JdIndex {
   areas: AreaEntry[];
   categories: CategoryEntry[];
   ids: IdEntry[];
+  misplaced: MisplacedEntry[];
+  rawIdFolders: RawIdEntry[];
+  rawIdNotes: RawIdEntry[];
 }
 
 export interface IndexInput {
@@ -77,6 +97,9 @@ export function buildIndex(input: IndexInput): JdIndex {
   const areas = new Map<number, AreaEntry>();
   const categories = new Map<string, CategoryEntry>();
   const ids = new Map<string, IdEntry>();
+  const misplaced: MisplacedEntry[] = [];
+  const rawIdFolders: RawIdEntry[] = [];
+  const rawIdNotes: RawIdEntry[] = [];
 
   // System folders, shallowest first so parents are known before children.
   const folders = input.folderPaths
@@ -103,7 +126,10 @@ export function buildIndex(input: IndexInput): JdIndex {
       const parent = extractJdPrefix(f.parts[0]);
       if (!parent || parent.number.kind !== "area") continue;
       const value = Number(n.category);
-      if (value < parent.number.area || value > parent.number.area + 9) continue;
+      if (value < parent.number.area || value > parent.number.area + 9) {
+        misplaced.push({ path: f.path, label: name, number: n.category, parent: areaCode(parent.number.area) });
+        continue;
+      }
       const entry = categories.get(n.category) ?? {
         number: n.category,
         areaNumber: parent.number.area,
@@ -117,10 +143,15 @@ export function buildIndex(input: IndexInput): JdIndex {
     } else {
       if (n.kind !== "id") continue;
       const parent = extractJdPrefix(f.parts[1]);
-      if (!parent || parent.number.kind !== "category" || parent.number.category !== n.category) continue;
+      if (!parent || parent.number.kind !== "category") continue;
       const grand = extractJdPrefix(f.parts[0]);
       if (!grand || grand.number.kind !== "area") continue;
+      if (parent.number.category !== n.category) {
+        misplaced.push({ path: f.path, label: name, number: idKey(n.id, n.extension), parent: parent.number.category });
+        continue;
+      }
       const key = idKey(n.id, n.extension);
+      rawIdFolders.push({ id: key, path: f.path, label: name });
       const entry = ids.get(key) ?? { id: key, category: n.category, title: parsed.title, label: name };
       entry.folderPath = f.path;
       if (!entry.notePath) {
@@ -142,6 +173,7 @@ export function buildIndex(input: IndexInput): JdIndex {
       const n = parsed.number;
       if (n.kind === "id") {
         const key = idKey(n.id, n.extension);
+        rawIdNotes.push({ id: key, path, label: name });
         const entry = ids.get(key) ?? { id: key, category: n.category, title: parsed.title, label: name };
         entry.notePath = path;
         entry.title = parsed.title;
@@ -176,6 +208,9 @@ export function buildIndex(input: IndexInput): JdIndex {
     areas: [...areas.values()].sort((a, b) => a.number - b.number),
     categories: [...categories.values()].sort((a, b) => a.number.localeCompare(b.number)),
     ids: [...ids.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    misplaced,
+    rawIdFolders,
+    rawIdNotes,
   };
 }
 

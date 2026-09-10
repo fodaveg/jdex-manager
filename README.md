@@ -16,11 +16,12 @@ Early but usable. What works today:
 - **Settings with auto-detection**: JDex folder, system root, templates folder and reports folder. Empty fields are filled on startup from `00-09*/00*/00.00`, `00.02` and `00.03`; a button and a command run the detection again. A configured value is never replaced.
 - **Templates per note type** (`id`, `cabecera`, `categoria`, `area`): a note in the templates folder (names configurable, `JDex - id` by default) wins over the built-in template. Variables: `{{id}}`, `{{title}}`, `{{area}}`, `{{areaTitle}}`, `{{category}}`, `{{categoryTitle}}`, `{{date}}`. A command writes the built-in templates into the templates folder so you can edit them.
 
+- **Audit** (command, status bar counter on desktop, optional run on startup): writes `Auditoría JD - YYYY-MM-DD.md` in the reports folder with eight sections: folders without a JDex note, note and folder with different names, frontmatter that does not match the name or position, duplicate IDs, management numbers (`.00`, `.02` to `.08`) holding content, headers with files inside, numbers outside their parent, and (for information) notes without a folder. Sub-folders inside an ID are never a finding. "Apply mechanical fixes from last audit" fixes frontmatter and renames folders after their note, with a checklist first.
+
 Categories come from the folders under the system root (`20-29 …/21 …`) and from any `AC Title` notes in the JDex; IDs come from both the JDex notes and the ID folders.
 
 ## Roadmap
 
-- **Audit**: a report note listing folders without a JDex note, notes without a folder, mismatched frontmatter, duplicate IDs and reserved numbers used for content.
 - **Rename in pairs**: renaming a JDex note renames its folder, and the other way round.
 - **Live headers**: keep the list of children of each `AC.X0 ■` note up to date.
 - **Create category or area**, with the standard zeros on request.

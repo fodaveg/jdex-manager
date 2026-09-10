@@ -1,20 +1,49 @@
-import { type App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { type App, Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
 import { type JdexManagerSettings, type JdexNoteType, mergeSettings } from "./settings";
+import { countProblems, type Finding } from "./jd/audit";
+import { FixFindingsModal } from "./ui/audit";
 import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
+import { runAudit } from "./vault/audit";
 import { applyDetection } from "./vault/detect";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
 
 export default class JdexManagerPlugin extends Plugin {
   settings: JdexManagerSettings = mergeSettings(null);
+  /** Findings of the last audit run in this session. */
+  lastFindings: Finding[] | null = null;
+  private statusBar: HTMLElement | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new JdexManagerSettingTab(this.app, this));
 
+    // The status bar does not exist on mobile; addStatusBarItem is a no-op there.
+    this.statusBar = this.addStatusBarItem();
+    this.statusBar.addClass("mod-clickable");
+    // eslint-disable-next-line obsidianmd/ui/sentence-case
+    this.statusBar.setText("JD: not audited");
+    this.registerDomEvent(this.statusBar, "click", () => void this.audit());
+
     // Folders are only known once the vault has loaded; detect then, and only into empty fields.
     this.app.workspace.onLayoutReady(() => {
-      void this.detectFolders(false);
+      void (async () => {
+        await this.detectFolders(false);
+        if (this.settings.auditOnStartup) await this.audit(false);
+      })();
+    });
+
+    this.addCommand({
+      id: "audit",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      name: "Audit JD system",
+      callback: () => void this.audit(),
+    });
+
+    this.addCommand({
+      id: "apply-fixes",
+      name: "Apply mechanical fixes from last audit",
+      callback: () => void this.applyFixes(),
     });
 
     this.addRibbonIcon("file-plus-2", "Create ID", () => void this.createIdFlow());
@@ -58,6 +87,37 @@ export default class JdexManagerPlugin extends Plugin {
     if (found === 0) new Notice("No 00.00, 00.02 or 00.03 folders found under 00-09/00. Check the system root.");
     else if (changed) new Notice(`Detected ${found} folder(s); empty settings filled.`);
     else new Notice(`Detected ${found} folder(s); settings already set, nothing changed.`);
+  }
+
+  /** Runs the audit, writes the report, updates the status bar and opens the report when asked. */
+  async audit(openReport = true): Promise<void> {
+    if (this.settings.jdexFolder === "") await this.detectFolders(false);
+    if (this.settings.jdexFolder === "") {
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      new Notice("Set the JDex folder in the plugin settings first.");
+      return;
+    }
+    try {
+      const { findings, reportPath } = await runAudit(this.app, this.settings);
+      this.lastFindings = findings;
+      const problems = countProblems(findings);
+      this.statusBar?.setText(`JD: ${problems} finding${problems === 1 ? "" : "s"}`);
+      new Notice(`Audit: ${problems} finding${problems === 1 ? "" : "s"}.`);
+      if (openReport && reportPath) {
+        const file = this.app.vault.getAbstractFileByPath(reportPath);
+        if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
+      }
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async applyFixes(): Promise<void> {
+    if (!this.lastFindings) {
+      await this.audit(false);
+      if (!this.lastFindings) return;
+    }
+    new FixFindingsModal(this.app, this.lastFindings, () => this.audit(false)).open();
   }
 
   async createTemplates(): Promise<void> {
@@ -174,6 +234,29 @@ class JdexManagerSettingTab extends PluginSettingTab {
       .setName("Write built-in templates")
       .setDesc("Creates the four built-in templates in the templates folder so you can edit them. Existing notes are kept.")
       .addButton((button) => button.setButtonText("Write").onClick(() => void this.plugin.createTemplates()));
+
+    new Setting(containerEl).setName("Audit").setHeading();
+
+    new Setting(containerEl)
+      .setName("Audit on startup")
+      .setDesc("Runs the audit when the vault has loaded and writes the report without opening it.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.auditOnStartup).onChange(async (value) => {
+          this.plugin.settings.auditOnStartup = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Notes without a folder count as findings")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("Off by default: a JDex note without a system folder is listed for information only.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.noteWithoutFolderIsFinding).onChange(async (value) => {
+          this.plugin.settings.noteWithoutFolderIsFinding = value;
+          await this.plugin.saveSettings();
+        }),
+      );
 
     new Setting(containerEl).setName("Create ID").setHeading();
 
