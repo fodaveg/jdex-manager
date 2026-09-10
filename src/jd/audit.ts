@@ -19,7 +19,8 @@ export type FindingKind =
   | "reserved-used-as-content"
   | "header-with-files"
   | "out-of-parent"
-  | "missing-description";
+  | "missing-description"
+  | "structure-without-note";
 
 export const FINDING_KINDS: FindingKind[] = [
   "folder-without-note",
@@ -30,6 +31,7 @@ export const FINDING_KINDS: FindingKind[] = [
   "header-with-files",
   "out-of-parent",
   "missing-description",
+  "structure-without-note",
   "note-without-folder",
 ];
 
@@ -68,6 +70,8 @@ export interface AuditInput {
     noteWithoutFolderIsFinding?: boolean;
     /** Treat an empty `descripcion` as a problem. Default true. */
     descriptionIsFinding?: boolean;
+    /** Treat a category or area folder without a JDex note as a problem. Default false. */
+    structureNotesAreFindings?: boolean;
   };
 }
 
@@ -232,6 +236,28 @@ export function auditSystem(input: AuditInput): Finding[] {
       number: entry.id,
       paths: [entry.folderPath, ...files.slice(0, 5)],
       message: `La cabecera ${entry.label} contiene ${files.length} fichero(s); una cabecera solo agrupa.`,
+    });
+  }
+
+  // 7b: areas and categories that exist as folders but have no note in the JDex.
+  for (const area of index.areas) {
+    if (area.notePath || !area.path) continue;
+    findings.push({
+      kind: "structure-without-note",
+      number: area.code,
+      paths: [area.path],
+      message: `El área ${area.label} no tiene nota en el JDex.`,
+      informative: !input.options?.structureNotesAreFindings,
+    });
+  }
+  for (const category of index.categories) {
+    if (category.notePath || !category.path) continue;
+    findings.push({
+      kind: "structure-without-note",
+      number: category.number,
+      paths: [category.path],
+      message: `La categoría ${category.label} no tiene nota en el JDex.`,
+      informative: !input.options?.structureNotesAreFindings,
     });
   }
 

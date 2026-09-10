@@ -35,6 +35,12 @@ export interface JdexManagerSettings {
   autocomplete: boolean;
   /** What the autocomplete inserts by default. */
   autocompleteInsert: "link" | "number";
+  /** Count a category or area folder without a JDex note as a problem. */
+  structureNotesAreFindings: boolean;
+  /** Note that holds the system index between markers. Empty = the note of 00.00. */
+  systemIndexNote: string;
+  /** Regenerate the system index after creating an ID, category or area. */
+  updateSystemIndexOnCreate: boolean;
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -59,6 +65,9 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   descriptionIsFinding: true,
   autocomplete: true,
   autocompleteInsert: "link",
+  structureNotesAreFindings: false,
+  systemIndexNote: "",
+  updateSystemIndexOnCreate: false,
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */

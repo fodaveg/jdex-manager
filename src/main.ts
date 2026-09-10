@@ -17,6 +17,7 @@ import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
 import { headersToMigrate, updateHeaders } from "./vault/headers";
+import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex } from "./vault/structure";
 import { applyDetection } from "./vault/detect";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
@@ -113,6 +114,16 @@ export default class JdexManagerPlugin extends Plugin {
       callback: () => void this.migrateHeaders(),
     });
 
+    this.addCommand({
+      id: "create-structure-notes",
+      name: "Create missing category and area notes",
+      callback: () => void this.createStructureNotes(),
+    });
+    this.addCommand({
+      id: "update-system-index",
+      name: "Update system index note",
+      callback: () => void this.refreshSystemIndex(true),
+    });
     this.addCommand({ id: "create-category", name: "Create category", callback: () => void this.createCategoryFlow() });
     this.addCommand({ id: "create-area", name: "Create area", callback: () => void this.createAreaFlow() });
     this.addCommand({ id: "create-header", name: "Create header", callback: () => void this.createHeaderFlow() });
@@ -529,6 +540,12 @@ export default class JdexManagerPlugin extends Plugin {
         }
       }
     }
+    if (this.settings.updateSystemIndexOnCreate) {
+      const inJdex = relativeTo(this.settings.jdexFolder, file.path);
+      if (inJdex !== null && inJdex !== "" && !inJdex.includes("/") && extractJdPrefix(file.basename)) {
+        await this.refreshSystemIndex(false);
+      }
+    }
     if (!this.settings.liveHeaders) return;
     const rel = relativeTo(this.settings.jdexFolder, file.path);
     if (rel === null || rel === "" || rel.includes("/")) return;
@@ -559,6 +576,39 @@ export default class JdexManagerPlugin extends Plugin {
     // eslint-disable-next-line obsidianmd/ui/sentence-case
     new Notice("Set the JDex folder in the plugin settings first.");
     return false;
+  }
+
+  async createStructureNotes(): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    const missing = missingStructureNotes(index);
+    const total = missing.areas.length + missing.categories.length;
+    if (total === 0) {
+      new Notice("Every area and category folder already has a note.");
+      return;
+    }
+    const names = [...missing.areas.map((a) => a.label), ...missing.categories.map((c) => c.label)];
+    const ok = await confirm(
+      this.app,
+      "Create missing category and area notes",
+      [`${total} note(s) will be created in the JDex folder from the templates:`, ...names.slice(0, 15), ...(names.length > 15 ? [`… and ${names.length - 15} more`] : [])],
+      "Create",
+    );
+    if (!ok) return;
+    try {
+      const created = await createMissingStructureNotes(this.app, this.settings, index);
+      new Notice(`${created} note(s) created.`);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Regenerates the system index note. With `announce`, adds the markers when missing and reports. */
+  async refreshSystemIndex(announce: boolean): Promise<void> {
+    if (this.settings.jdexFolder === "") return;
+    const index = scanVault(this.app, this.settings);
+    const changed = await updateSystemIndex(this.app, this.settings, index, announce);
+    if (announce) new Notice(changed ? "System index updated." : "System index unchanged.");
   }
 
   async createCategoryFlow(): Promise<void> {
@@ -751,6 +801,41 @@ class JdexManagerSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.descriptionIsFinding).onChange(async (value) => {
           this.plugin.settings.descriptionIsFinding = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Areas and categories without a note count as findings")
+      .setDesc("Off by default. Turn it on once the missing category and area notes have been created.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.structureNotesAreFindings).onChange(async (value) => {
+          this.plugin.settings.structureNotesAreFindings = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).setName("System index").setHeading();
+
+    new Setting(containerEl)
+      .setName("Index note")
+      .setDesc("Note that holds the whole system between jdex:indice markers. Empty = the note of 00.00.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Empty = note of 00.00")
+          .setValue(this.plugin.settings.systemIndexNote)
+          .onChange(async (value) => {
+            this.plugin.settings.systemIndexNote = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Update the index when an ID is created")
+      .setDesc("Regenerates the block after a new note appears in the index folder.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.updateSystemIndexOnCreate).onChange(async (value) => {
+          this.plugin.settings.updateSystemIndexOnCreate = value;
           await this.plugin.saveSettings();
         }),
       );

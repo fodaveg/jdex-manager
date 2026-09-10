@@ -44,6 +44,7 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
     options: {
       noteWithoutFolderIsFinding: settings.noteWithoutFolderIsFinding,
       descriptionIsFinding: settings.descriptionIsFinding,
+      structureNotesAreFindings: settings.structureNotesAreFindings,
     },
   });
 

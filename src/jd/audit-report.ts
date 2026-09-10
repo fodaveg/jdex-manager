@@ -14,6 +14,7 @@ export const KIND_TITLES: Record<FindingKind, string> = {
   "header-with-files": "Cabeceras con ficheros dentro",
   "out-of-parent": "Números fuera de su padre",
   "missing-description": "Notas sin descripción",
+  "structure-without-note": "Áreas y categorías sin nota en el JDex",
   "note-without-folder": "Notas sin carpeta (informativo)",
 };
 

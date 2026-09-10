@@ -91,8 +91,16 @@ describe("auditSystem", () => {
   });
 
   it("counts problems without the informative ones, and can promote them", () => {
-    expect(countProblems(findings)).toBe(findings.length - 3);
-    const strict = auditSystem({ index, notes: NOTES, filePaths: FILES, options: { noteWithoutFolderIsFinding: true } });
+    const informative = findings.filter((f) => f.informative).length;
+    // 3 notes without folder + areas 00-09/10-19 and categories 00/11 without a note in this fixture.
+    expect(informative).toBe(7);
+    expect(countProblems(findings)).toBe(findings.length - informative);
+    const strict = auditSystem({
+      index,
+      notes: NOTES,
+      filePaths: FILES,
+      options: { noteWithoutFolderIsFinding: true, structureNotesAreFindings: true },
+    });
     expect(countProblems(strict)).toBe(strict.length);
   });
 
@@ -101,11 +109,15 @@ describe("auditSystem", () => {
       systemRoot: "",
       folderPaths: ["10-19 Vida", "10-19 Vida/11 Salud", "10-19 Vida/11 Salud/11.11 Limpio"],
       jdexFolder: "JDex",
-      notePaths: ["JDex/11.11 Limpio.md"],
+      notePaths: ["JDex/10-19 Vida.md", "JDex/11 Salud.md", "JDex/11.11 Limpio.md"],
     });
     const out = auditSystem({
       index: clean,
-      notes: [{ path: "JDex/11.11 Limpio.md", frontmatter: { jd: "11.11", tipo: "id", descripcion: "x", area: "10-19 Vida", categoria: "11 Salud" } }],
+      notes: [
+        { path: "JDex/10-19 Vida.md", frontmatter: { jd: "10-19", tipo: "area", descripcion: "x" } },
+        { path: "JDex/11 Salud.md", frontmatter: { jd: "11", tipo: "categoria", descripcion: "x", area: "10-19 Vida" } },
+        { path: "JDex/11.11 Limpio.md", frontmatter: { jd: "11.11", tipo: "id", descripcion: "x", area: "10-19 Vida", categoria: "11 Salud" } },
+      ],
       filePaths: ["JDex/11.11 Limpio.md"],
     });
     expect(out).toEqual([]);
