@@ -1,1 +1,12 @@
-/* JDex Manager: no styles yet. */
+/* JDex Manager */
+
+.jdex-suggestion-note {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.jdex-validation {
+  min-height: 1.5em;
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
