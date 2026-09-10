@@ -1,34 +1,63 @@
 name: Release
 
+# Owns the tag path: runs the gate, checks that the tag is exactly the manifest
+# version, publishes the three loose assets BRAT downloads by name (never a zip)
+# and reads the release back from GitHub to prove the upload happened.
+#
+# `contents: write` lives here only. ci.yml runs on every branch and pull
+# request and stays read-only.
+
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to upload assets to"
-        required: true
-        type: string
+  push:
+    tags: ['*']
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build-release-assets:
+  publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
-          files: |
-            main.js
-            manifest.json
-            styles.css
-          overwrite_files: true
+
+      - name: Gate
+        run: npm run check
+
+      - name: Refuse a tag that is not the manifest version
+        run: |
+          set -euo pipefail
+          MANIFEST=$(node -p "require('./manifest.json').version")
+          PKG=$(node -p "require('./package.json').version")
+          test "$TAG" = "$MANIFEST" || { echo "tag $TAG != manifest.json $MANIFEST"; exit 1; }
+          test "$TAG" = "$PKG" || { echo "tag $TAG != package.json $PKG"; exit 1; }
+          node -e "const v=require('./versions.json'); const m=require('./manifest.json'); if (v[m.version]!==m.minAppVersion) { console.error('versions.json lacks', m.version, '->', m.minAppVersion); process.exit(1); }"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" main.js manifest.json styles.css \
+            --title "$TAG" \
+            --notes "JDex Manager $TAG"
+
+      - name: Check the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json tagName,isDraft,assets > published.json
+          node -e "const r=require('./published.json'); const names=r.assets.map(a=>a.name).sort(); const want=['main.js','manifest.json','styles.css']; if (r.isDraft || JSON.stringify(names)!==JSON.stringify(want)) { console.error('unexpected release', r); process.exit(1); } console.log('ok', r.tagName, names.join(' '));"
