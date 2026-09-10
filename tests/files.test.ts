@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categoryOfPath, datedName, directFiles, formatDate, idFolderOfPath, inboxFolders, isDatable, isDated, zeroOf } from "../src/jd/files";
+import { categoryOfPath, datedName, directFiles, formatDate, idFolderOfPath, inboxFolders, isDatable, isDated, locate, zeroOf } from "../src/jd/files";
 import { buildIndex } from "../src/jd/index";
 import { FOLDERS, JDEX, NOTES, REPORTS, TEMPLATES } from "./fixtures";
 
@@ -55,5 +55,19 @@ describe("dates", () => {
 describe("directFiles", () => {
   it("returns shallow children only", () => {
     expect(directFiles("a/b", ["a/b/x.md", "a/b/c/y.md", "a/bb/z.md", "a/b"])).toEqual(["a/b/x.md"]);
+  });
+});
+
+describe("locate", () => {
+  it("names the ID of a JDex note, of a folder and of a file inside it", () => {
+    expect(locate(index, settings, `${JDEX}/21.22 JDex Manager.md`)).toMatchObject({
+      atNote: true,
+      text: "21 Productos de software propios › 21.22 JDex Manager",
+    });
+    expect(locate(index, settings, ID)?.atNote).toBe(false);
+    expect(locate(index, settings, `${ID}/40 Audits y revisiones/x.md`)?.entry.id).toBe("21.22");
+    expect(locate(index, settings, "Suelto.md")).toBeNull();
+    // A loose note inside the JDex folder is not an ID note, but it does live inside 00.00.
+    expect(locate(index, settings, `${JDEX}/Notas sueltas.md`)).toMatchObject({ atNote: false, entry: { id: "00.00" } });
   });
 });

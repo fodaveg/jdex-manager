@@ -10,7 +10,7 @@ import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
 import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
 import { IdSuggestModal, openEntry } from "./ui/go-to-id";
 import { ProcessInboxModal } from "./ui/inbox";
-import { categoryOfPath, isDatable, zeroOf } from "./jd/files";
+import { categoryOfPath, isDatable, locate, zeroOf } from "./jd/files";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
@@ -25,6 +25,7 @@ export default class JdexManagerPlugin extends Plugin {
   lastFindings: Finding[] | null = null;
   private statusBar: HTMLElement | null = null;
   private inboxBar: HTMLElement | null = null;
+  private whereBar: HTMLElement | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -39,12 +40,17 @@ export default class JdexManagerPlugin extends Plugin {
     this.inboxBar = this.addStatusBarItem();
     this.inboxBar.addClass("mod-clickable");
     this.registerDomEvent(this.inboxBar, "click", () => void this.processInbox());
+    this.whereBar = this.addStatusBarItem();
+    this.whereBar.addClass("mod-clickable");
+    this.registerDomEvent(this.whereBar, "click", () => void this.toggleNoteAndFolder());
+    this.registerEvent(this.app.workspace.on("file-open", () => this.refreshWhere()));
 
     // Folders are only known once the vault has loaded; detect then, and only into empty fields.
     this.app.workspace.onLayoutReady(() => {
       void (async () => {
         await this.detectFolders(false);
         this.refreshInboxCount();
+        this.refreshWhere();
         if (this.settings.auditOnStartup) await this.audit(false);
       })();
     });
@@ -138,6 +144,21 @@ export default class JdexManagerPlugin extends Plugin {
       checkCallback: (checking) => this.fileCommand(checking, (file) => this.dateActive(file)),
     });
     this.addCommand({ id: "process-inbox", name: "Process inboxes", callback: () => void this.processInbox() });
+    this.addCommand({
+      id: "where-am-i",
+      name: "Show where the active file lives",
+      checkCallback: (checking) =>
+        this.fileCommand(checking, async (file) => {
+          const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+          new Notice(loc ? loc.text : "The active file is not inside an ID.");
+        }),
+    });
+    this.addCommand({
+      id: "toggle-note-folder",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      name: "Toggle between JDex note and folder",
+      checkCallback: (checking) => this.fileCommand(checking, () => this.toggleNoteAndFolder()),
+    });
     this.addCommand({
       id: "go-to-id",
       name: "Go to ID",
@@ -387,6 +408,30 @@ export default class JdexManagerPlugin extends Plugin {
     new ProcessInboxModal(this.app, files, { index, systemRoot: this.settings.systemRoot, dateFormat: this.settings.dateFormat }, async () => {
       this.refreshInboxCount();
     }).open();
+  }
+
+  refreshWhere(): void {
+    if (!this.whereBar) return;
+    const file = this.app.workspace.getActiveFile();
+    if (!file || this.settings.jdexFolder === "") {
+      this.whereBar.setText("");
+      return;
+    }
+    const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+    this.whereBar.setText(loc ? loc.text : "");
+  }
+
+  /** From the JDex note, opens the first note of the ID folder; from inside the folder, opens the JDex note. */
+  async toggleNoteAndFolder(): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || !this.ready()) return;
+    const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+    if (!loc) {
+      new Notice("The active file is not inside an ID.");
+      return;
+    }
+    const msg = await openEntry(this.app, loc.entry, loc.atNote);
+    if (msg) new Notice(msg);
   }
 
   refreshInboxCount(): void {

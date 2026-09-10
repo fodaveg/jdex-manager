@@ -83,3 +83,27 @@ export function directFiles(folder: string, filePaths: string[]): string[] {
   const prefix = folder + "/";
   return filePaths.filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"));
 }
+
+export interface Location {
+  entry: IdEntry;
+  /** `21 Productos de software propios › 21.22 JDex Manager`. */
+  text: string;
+  /** Whether `path` is the JDex note of the ID (as opposed to a file inside its folder). */
+  atNote: boolean;
+}
+
+/** The ID a path belongs to: its JDex note, or a file or folder inside its system folder. */
+export function locate(index: JdIndex, settings: { jdexFolder: string }, path: string): Location | null {
+  let entry: IdEntry | null = null;
+  let atNote = false;
+  const rel = settings.jdexFolder === "" ? null : relativeTo(settings.jdexFolder, path);
+  if (rel !== null && rel !== "" && !rel.includes("/") && rel.endsWith(".md")) {
+    entry = index.ids.find((e) => e.notePath === path) ?? null;
+    atNote = entry !== null;
+  }
+  if (!entry) entry = index.ids.find((e) => e.folderPath === path) ?? idFolderOfPath(index, path);
+  if (!entry) return null;
+  const found = entry;
+  const category = index.categories.find((c) => c.number === found.category);
+  return { entry: found, atNote, text: `${category?.label ?? found.category} › ${found.label}` };
+}
