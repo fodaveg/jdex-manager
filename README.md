@@ -22,11 +22,14 @@ Early but usable. What works today:
 - **Frontmatter from the name**: "Normalize JDex frontmatter" fills or corrects `jd`, `tipo`, `area` and `categoria` from the note's number and the system folders, for the active note or the whole JDex, with a checklist before writing.
 - **Live header lists**: the children of each `AC.X0 ■` note are regenerated between `<!-- jdex:hijos -->` and `<!-- /jdex:hijos -->` when an ID of that range is created or renamed, and on demand with "Update header lists". "Wrap existing header lists in markers" migrates the notes you already have, after a preview.
 
+- **Create category / Create area**: next free number proposed, JDex note from the `categoria` / `area` template, optional folder, and the standard zeros on request with explicit names (`A0 Gestión del área A0-A9`, `AC.01 Inbox de la categoría AC`, `AC.09 Archivo de la categoría AC`). `.02` to `.08` are never created unasked.
+- **Create header**: `AC.X0 ■ emoji Title` note with `tipo: cabecera`, the next free X0 proposed, and an empty children block that the live header list fills.
+- **Create child ID (+)**: from the command palette on the active JDex note or from the file menu of an ID note or folder. The child is `AC.ID+ Title` with `jd: "AC.ID+"` and a link to its parent; the folder, if asked, is `+ Title` inside the parent folder.
+
 Categories come from the folders under the system root (`20-29 …/21 …`) and from any `AC Title` notes in the JDex; IDs come from both the JDex notes and the ID folders.
 
 ## Roadmap
 
-- **Create category or area**, with the standard zeros on request.
 - **Inbox and archive**: send to `.01`, archive to `.09` with a date prefix, process the inboxes.
 - **Go to ID**: a picker that shows the note and the folder of every ID on one row.
 

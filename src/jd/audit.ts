@@ -164,7 +164,10 @@ export function auditSystem(input: AuditInput): Finding[] {
     ["carpetas", index.rawIdFolders],
   ] as const) {
     const byId = new Map<string, string[]>();
-    for (const r of raw) byId.set(r.id, [...(byId.get(r.id) ?? []), r.path]);
+    for (const r of raw) {
+      if (r.id.endsWith("+")) continue; // several + children of one ID are expected
+      byId.set(r.id, [...(byId.get(r.id) ?? []), r.path]);
+    }
     for (const [id, paths] of byId) {
       if (paths.length < 2) continue;
       findings.push({

@@ -74,6 +74,9 @@ categoria: "{{categoryTitle}}"
 # {{id}} ■ {{title}}
 Cabecera del JDex: agrupa los IDs de este bloque y no contiene archivos.
 
+<!-- jdex:hijos -->
+<!-- /jdex:hijos -->
+
 `,
   categoria: `---
 jd: "{{category}}"

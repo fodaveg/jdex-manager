@@ -93,6 +93,11 @@ function idKey(id: string, extension?: "+"): string {
   return extension ? `${id}+` : id;
 }
 
+/** Map key: `+` children of one ID are different entries, told apart by title. */
+function mapKey(id: string, extension: "+" | undefined, title: string): string {
+  return extension ? `${id}+ ${title}` : id;
+}
+
 export function buildIndex(input: IndexInput): JdIndex {
   const areas = new Map<number, AreaEntry>();
   const categories = new Map<string, CategoryEntry>();
@@ -151,14 +156,15 @@ export function buildIndex(input: IndexInput): JdIndex {
         continue;
       }
       const key = idKey(n.id, n.extension);
+      const mk = mapKey(n.id, n.extension, parsed.title);
       rawIdFolders.push({ id: key, path: f.path, label: name });
-      const entry = ids.get(key) ?? { id: key, category: n.category, title: parsed.title, label: name };
+      const entry = ids.get(mk) ?? { id: key, category: n.category, title: parsed.title, label: name };
       entry.folderPath = f.path;
       if (!entry.notePath) {
         entry.title = parsed.title;
         entry.label = name;
       }
-      ids.set(key, entry);
+      ids.set(mk, entry);
     }
   }
 
@@ -173,12 +179,13 @@ export function buildIndex(input: IndexInput): JdIndex {
       const n = parsed.number;
       if (n.kind === "id") {
         const key = idKey(n.id, n.extension);
+        const mk = mapKey(n.id, n.extension, parsed.title);
         rawIdNotes.push({ id: key, path, label: name });
-        const entry = ids.get(key) ?? { id: key, category: n.category, title: parsed.title, label: name };
+        const entry = ids.get(mk) ?? { id: key, category: n.category, title: parsed.title, label: name };
         entry.notePath = path;
         entry.title = parsed.title;
         entry.label = name;
-        ids.set(key, entry);
+        ids.set(mk, entry);
       } else if (n.kind === "category") {
         const entry = categories.get(n.category) ?? {
           number: n.category,
@@ -207,7 +214,7 @@ export function buildIndex(input: IndexInput): JdIndex {
   return {
     areas: [...areas.values()].sort((a, b) => a.number - b.number),
     categories: [...categories.values()].sort((a, b) => a.number.localeCompare(b.number)),
-    ids: [...ids.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    ids: [...ids.values()].sort((a, b) => a.id.localeCompare(b.id) || a.title.localeCompare(b.title)),
     misplaced,
     rawIdFolders,
     rawIdNotes,
@@ -232,4 +239,9 @@ export function knownIds(index: JdIndex): string[] {
 /** The entry that already uses `id` (without `+`), if any. */
 export function findId(index: JdIndex, id: string): IdEntry | undefined {
   return index.ids.find((e) => e.id === id);
+}
+
+/** The `+` children of an ID. */
+export function childrenPlus(index: JdIndex, id: string): IdEntry[] {
+  return index.ids.filter((e) => e.id === `${id}+`);
 }

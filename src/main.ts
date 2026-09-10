@@ -2,10 +2,12 @@ import { type App, Notice, Plugin, PluginSettingTab, Setting, type TAbstractFile
 import { type JdexManagerSettings, type JdexNoteType, mergeSettings } from "./settings";
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
+import type { IdEntry } from "./jd/index";
 import { pairAction } from "./jd/pair";
 import { extractJdPrefix } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
 import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
+import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
 import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
 import { headersToMigrate, updateHeaders } from "./vault/headers";
@@ -83,6 +85,33 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Wrap existing header lists in markers",
       callback: () => void this.migrateHeaders(),
     });
+
+    this.addCommand({ id: "create-category", name: "Create category", callback: () => void this.createCategoryFlow() });
+    this.addCommand({ id: "create-area", name: "Create area", callback: () => void this.createAreaFlow() });
+    this.addCommand({ id: "create-header", name: "Create header", callback: () => void this.createHeaderFlow() });
+    this.addCommand({
+      id: "create-child",
+      name: "Create child ID (+) of the active note",
+      checkCallback: (checking) => {
+        const entry = this.activeIdEntry();
+        if (!entry) return false;
+        if (!checking) void this.createChildFlow(entry);
+        return true;
+      },
+    });
+
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        const entry = this.entryFor(file);
+        if (!entry) return;
+        menu.addItem((item) =>
+          item
+            .setTitle(`Create child ID (${entry.id}+)`)
+            .setIcon("git-branch-plus")
+            .onClick(() => void this.createChildFlow(entry)),
+        );
+      }),
+    );
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => void this.onRename(file, oldPath)));
     this.registerEvent(this.app.vault.on("create", (file) => void this.onCreate(file)));
@@ -255,11 +284,77 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   async onCreate(file: TAbstractFile): Promise<void> {
+    // Obsidian fires "create" for every file while the vault loads; only react to files created afterwards.
+    if (!this.app.workspace.layoutReady) return;
     if (!this.settings.liveHeaders || this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
     const rel = relativeTo(this.settings.jdexFolder, file.path);
     if (rel === null || rel === "" || rel.includes("/")) return;
     const parsed = extractJdPrefix(file.basename);
     if (parsed?.number.kind === "id") await this.refreshHeaders(parsed.number.category, false);
+  }
+
+  /** Index entry of the ID a file or folder IS: a JDex ID note or an ID folder (not a `+` child). */
+  entryFor(file: TAbstractFile | null): IdEntry | null {
+    if (!file || this.settings.jdexFolder === "") return null;
+    const parsed = extractJdPrefix(file.name);
+    if (!parsed || parsed.number.kind !== "id" || parsed.number.extension) return null;
+    const id = parsed.number.id;
+    const index = scanVault(this.app, this.settings);
+    const entry = index.ids.find((e) => e.id === id);
+    if (!entry) return null;
+    const isNote = file instanceof TFile && entry.notePath === file.path;
+    const isFolder = file instanceof TFolder && entry.folderPath === file.path;
+    return isNote || isFolder ? entry : null;
+  }
+
+  activeIdEntry(): IdEntry | null {
+    return this.entryFor(this.app.workspace.getActiveFile());
+  }
+
+  private ready(): boolean {
+    if (this.settings.jdexFolder !== "") return true;
+    // eslint-disable-next-line obsidianmd/ui/sentence-case
+    new Notice("Set the JDex folder in the plugin settings first.");
+    return false;
+  }
+
+  async createCategoryFlow(): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    if (index.areas.length === 0) {
+      new Notice("No areas found. Create an area first.");
+      return;
+    }
+    new AreaSuggestModal(this.app, index, (area) => {
+      new CreateCategoryModal(this.app, index, area, this.settings, () => this.refreshHeaders(undefined, false)).open();
+    }).open();
+  }
+
+  async createAreaFlow(): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    new CreateAreaModal(this.app, index, this.settings, async () => {}).open();
+  }
+
+  async createHeaderFlow(): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    if (index.categories.length === 0) {
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      new Notice("No categories found. Check the system root and the JDex folder.");
+      return;
+    }
+    new CategorySuggestModal(this.app, index, (category) => {
+      new CreateHeaderModal(this.app, index, category, this.settings, () => this.refreshHeaders(category.number, false)).open();
+    }).open();
+  }
+
+  async createChildFlow(parent: { id: string }): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    const entry = index.ids.find((e) => e.id === parent.id);
+    if (!entry) return;
+    new CreateChildModal(this.app, index, entry, this.settings, async () => {}).open();
   }
 
   async createTemplates(): Promise<void> {
