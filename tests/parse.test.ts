@@ -5,6 +5,7 @@ import {
   isReserved,
   jdexNoteName,
   nextFreeCategory,
+  normalizeSystemId,
   nextFreeId,
   parseJdNumber,
 } from "../src/jd/parse";
@@ -31,8 +32,22 @@ describe("parseJdNumber", () => {
     expect(parseJdNumber("13.41+")).toEqual({ kind: "id", category: "13", id: "13.41", extension: "+" });
   });
 
+  it("accepts a SYS prefix for several systems", () => {
+    expect(parseJdNumber("D01.11.11")).toEqual({ kind: "id", category: "11", id: "11.11", system: "D01" });
+    expect(parseJdNumber("D01.11")).toEqual({ kind: "category", category: "11", system: "D01" });
+    expect(parseJdNumber("D01.10-19")).toEqual({ kind: "area", area: 10, system: "D01" });
+    expect(extractJdPrefix("D01.21.22 JDex Manager")).toEqual({
+      number: { kind: "id", category: "21", id: "21.22", system: "D01" },
+      title: "JDex Manager",
+    });
+    expect(jdexNoteName("21.22", "JDex Manager", "D01")).toBe("D01.21.22 JDex Manager");
+    expect(normalizeSystemId(" d01 ")).toBe("D01");
+    expect(normalizeSystemId("")).toBe("");
+    expect(normalizeSystemId("D1")).toBeNull();
+  });
+
   it("rejects what is not a JD number", () => {
-    for (const bad of ["", "9", "9.5", "11.111", "D01.11.11", "11.11.01", "A11.01", "11.11 Title"]) {
+    for (const bad of ["", "9", "9.5", "11.111", "11.11.01", "d01.11.11", "AB1.11.11", "11.11 Title"]) {
       expect(parseJdNumber(bad), bad).toBeNull();
     }
   });

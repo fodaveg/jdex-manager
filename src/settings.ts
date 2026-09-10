@@ -47,6 +47,10 @@ export interface JdexManagerSettings {
   subfolderPatternsByCategory: Record<string, string>;
   /** Create the subfolder pattern by default when Create ID also creates the folder. */
   createPatternByDefault: boolean;
+  /** Identifier of this system when there are several (`D01`). Empty = single system. */
+  systemId: string;
+  /** Put the system identifier in front of new note and folder names (`D01.21.22 Title`). */
+  prefixNamesWithSystem: boolean;
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -77,6 +81,8 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   subfolderPattern: "",
   subfolderPatternsByCategory: {},
   createPatternByDefault: true,
+  systemId: "",
+  prefixNamesWithSystem: false,
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */
@@ -85,4 +91,9 @@ export function mergeSettings(stored: Partial<JdexManagerSettings> | null | unde
   base.templateNames = { ...DEFAULT_SETTINGS.templateNames, ...(stored?.templateNames ?? {}) };
   base.subfolderPatternsByCategory = { ...(stored?.subfolderPatternsByCategory ?? {}) };
   return base;
+}
+
+/** The `SYS` prefix to use in new names, or empty. */
+export function namePrefix(settings: Pick<JdexManagerSettings, "systemId" | "prefixNamesWithSystem">): string {
+  return settings.prefixNamesWithSystem ? settings.systemId : "";
 }

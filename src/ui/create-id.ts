@@ -2,7 +2,7 @@ import { type App, Modal, Notice, normalizePath, Setting, SuggestModal, TFile, T
 import { areaCode, areaOfCategory, type CategoryEntry, categoryUsage, findId, type JdIndex, knownIds } from "../jd/index";
 import { isReserved, jdexNoteName, nextFreeId, parseJdNumber } from "../jd/parse";
 import { renderTemplate, todayIso } from "../jd/template";
-import type { JdexManagerSettings } from "../settings";
+import { type JdexManagerSettings, namePrefix } from "../settings";
 import { resolveTemplate } from "../vault/templates";
 import { patternFor } from "../jd/patterns";
 import { ensureFolder } from "../vault/create";
@@ -183,7 +183,7 @@ export async function createId(
   category: CategoryEntry,
   request: CreateIdRequest,
 ): Promise<TFile> {
-  const name = jdexNoteName(request.id, request.title);
+  const name = jdexNoteName(request.id, request.title, namePrefix(settings));
   const notePath = normalizePath(`${settings.jdexFolder}/${name}.md`);
   const existing = findId(index, request.id);
   if (existing) throw new Error(`${request.id} is already used by ${existing.label}.`);

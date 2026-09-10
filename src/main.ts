@@ -4,7 +4,7 @@ import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
 import type { IdEntry } from "./jd/index";
 import { pairAction } from "./jd/pair";
-import { extractJdPrefix } from "./jd/parse";
+import { extractJdPrefix, normalizeSystemId } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
 import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
 import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
@@ -793,6 +793,37 @@ class JdexManagerSettingTab extends PluginSettingTab {
           // Re-render so the filled fields show up (see the note on `display` above).
           // eslint-disable-next-line @typescript-eslint/no-deprecated
           this.display();
+        }),
+      );
+
+    new Setting(containerEl).setName("Several systems").setHeading();
+
+    new Setting(containerEl)
+      .setName("System identifier")
+      .setDesc("Only with several Johnny.Decimal systems: a letter and two digits (D01). Names like D01.21.22 are then understood. Empty = single system.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Empty = single system")
+          .setValue(this.plugin.settings.systemId)
+          .onChange(async (value) => {
+            const id = normalizeSystemId(value);
+            if (id === null) {
+              // eslint-disable-next-line obsidianmd/ui/sentence-case
+              new Notice("A system identifier is a capital letter and two digits, like D01.");
+              return;
+            }
+            this.plugin.settings.systemId = id;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Prefix new names with the system identifier")
+      .setDesc("New notes and folders are named D01.21.22 Title instead of 21.22 Title.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.prefixNamesWithSystem).onChange(async (value) => {
+          this.plugin.settings.prefixNamesWithSystem = value;
+          await this.plugin.saveSettings();
         }),
       );
 

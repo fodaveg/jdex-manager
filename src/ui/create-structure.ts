@@ -2,7 +2,7 @@ import { type App, Modal, Notice, normalizePath, Setting, SuggestModal, type TFi
 import { areaCode, type AreaEntry, type CategoryEntry, findId, type IdEntry, type JdIndex } from "../jd/index";
 import { jdexNoteName, nextFreeCategory, parseJdNumber } from "../jd/parse";
 import { managementCategoryName, nextFreeArea, nextFreeHeader, parseNewArea, standardZeroNames, validateNewCategory } from "../jd/structure";
-import type { JdexManagerSettings } from "../settings";
+import { type JdexManagerSettings, namePrefix } from "../settings";
 import { createJdexNote, ensureFolder } from "../vault/create";
 
 export class AreaSuggestModal extends SuggestModal<AreaEntry> {
@@ -135,7 +135,7 @@ export class CreateCategoryModal extends StructureModal {
   }
   protected async perform(): Promise<TFile | null> {
     const category = this.number;
-    const name = jdexNoteName(category, this.title);
+    const name = jdexNoteName(category, this.title, namePrefix(this.settings));
     const vars = { id: category, title: this.title.trim(), area: areaCode(this.area.number), areaTitle: this.area.label, category, categoryTitle: name };
     const note = await createJdexNote(this.app, this.settings, "categoria", name, vars);
     let folderPath: string | null = null;
@@ -152,7 +152,7 @@ export class CreateCategoryModal extends StructureModal {
       ["archive", zeros.archive],
     ] as const) {
       if (!this.toggles[key]) continue;
-      const zeroName = jdexNoteName(zero.id, zero.title);
+      const zeroName = jdexNoteName(zero.id, zero.title, namePrefix(this.settings));
       if (!findId(this.index, zero.id)) {
         await createJdexNote(this.app, this.settings, "id", zeroName, { ...vars, id: zero.id, title: zero.title });
       }
@@ -194,7 +194,7 @@ export class CreateAreaModal extends StructureModal {
     const r = parseNewArea(this.index, this.number);
     if ("error" in r) throw new Error(r.error);
     const code = areaCode(r.area);
-    const name = jdexNoteName(code, this.title);
+    const name = jdexNoteName(code, this.title, namePrefix(this.settings));
     const vars = { id: code, title: this.title.trim(), area: code, areaTitle: name, category: "", categoryTitle: "" };
     const note = await createJdexNote(this.app, this.settings, "area", name, vars);
     let folderPath: string | null = null;
@@ -204,7 +204,7 @@ export class CreateAreaModal extends StructureModal {
     }
     if (this.toggles.management) {
       const m = managementCategoryName(r.area);
-      const mName = jdexNoteName(m.number, m.title);
+      const mName = jdexNoteName(m.number, m.title, namePrefix(this.settings));
       await createJdexNote(this.app, this.settings, "categoria", mName, { ...vars, id: m.number, title: m.title, category: m.number, categoryTitle: mName });
       if (folderPath) await ensureFolder(this.app, `${folderPath}/${mName}`);
     }
@@ -255,7 +255,7 @@ export class CreateHeaderModal extends StructureModal {
     const n = parseJdNumber(this.number);
     const id = n && n.kind === "id" ? n.id : this.number;
     const title = `${this.emoji ? this.emoji + " " : ""}${this.title.trim()}`;
-    const name = jdexNoteName(id, `■ ${title}`);
+    const name = jdexNoteName(id, `■ ${title}`, namePrefix(this.settings));
     const area = this.index.areas.find((a) => a.number === this.category.areaNumber);
     const note = await createJdexNote(this.app, this.settings, "cabecera", name, {
       id,
@@ -305,7 +305,7 @@ export class CreateChildModal extends StructureModal {
   }
   protected async perform(): Promise<TFile | null> {
     const title = this.title.trim();
-    const name = jdexNoteName(this.number, title);
+    const name = jdexNoteName(this.number, title, namePrefix(this.settings));
     const category = this.index.categories.find((c) => c.number === this.parent.category);
     const area = category ? this.index.areas.find((a) => a.number === category.areaNumber) : undefined;
     const parentNote = this.parent.notePath ? this.parent.notePath.slice(this.parent.notePath.lastIndexOf("/") + 1, -3) : this.parent.label;
