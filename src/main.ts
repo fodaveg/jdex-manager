@@ -11,6 +11,7 @@ import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModa
 import { IdSuggestModal, openEntry } from "./ui/go-to-id";
 import { ProcessInboxModal } from "./ui/inbox";
 import { IdEditorSuggest } from "./ui/autocomplete";
+import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
 import { categoryOfPath, isDatable, locate, zeroOf } from "./jd/files";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
@@ -50,6 +51,10 @@ export default class JdexManagerPlugin extends Plugin {
     this.whereBar.addClass("mod-clickable");
     this.registerDomEvent(this.whereBar, "click", () => void this.toggleNoteAndFolder());
     this.registerEvent(this.app.workspace.on("file-open", () => this.refreshWhere()));
+
+    this.registerView(ID_PANEL_VIEW, (leaf) => new IdPanelView(leaf, { index: () => this.cachedIndex(), settings: () => this.settings }));
+    this.addRibbonIcon("hash", "Open ID panel", () => void this.openPanel());
+    this.addCommand({ id: "open-id-panel", name: "Open ID panel", callback: () => void this.openPanel() });
 
     this.registerEditorSuggest(
       new IdEditorSuggest(
@@ -331,6 +336,18 @@ export default class JdexManagerPlugin extends Plugin {
       if (!this.lastFindings) return;
     }
     new FixFindingsModal(this.app, this.lastFindings, () => this.audit(false)).open();
+  }
+
+  async openPanel(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(ID_PANEL_VIEW)[0];
+    if (existing) {
+      await this.app.workspace.revealLeaf(existing);
+      return;
+    }
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+    await leaf.setViewState({ type: ID_PANEL_VIEW, active: true });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   /** The index, rescanned at most every two seconds; enough for keystroke-driven lookups. */

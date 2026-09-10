@@ -17,3 +17,29 @@
   white-space: pre-wrap;
   font-size: var(--font-ui-small);
 }
+
+.jdex-panel {
+  padding: var(--size-4-2);
+}
+.jdex-panel-path {
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--size-4-2);
+}
+.jdex-panel-links {
+  display: flex;
+  gap: var(--size-4-3);
+  margin-bottom: var(--size-4-2);
+}
+.jdex-panel-link {
+  cursor: pointer;
+}
+.jdex-panel-muted {
+  color: var(--text-muted);
+}
+.jdex-panel-list {
+  padding-left: var(--size-4-4);
+  margin: 0 0 var(--size-4-2);
+}
+.jdex-panel-current {
+  font-weight: var(--font-semibold);
+}

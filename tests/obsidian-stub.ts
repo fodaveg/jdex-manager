@@ -25,3 +25,6 @@ export class EditorSuggest<T> {
     return [];
   }
 }
+export class ItemView {
+  constructor(_leaf: unknown) {}
+}
