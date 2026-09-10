@@ -1,9 +1,14 @@
-import { type App, Notice, Plugin, PluginSettingTab, Setting, TFile } from "obsidian";
+import { type App, Notice, Plugin, PluginSettingTab, Setting, type TAbstractFile, TFile, TFolder } from "obsidian";
 import { type JdexManagerSettings, type JdexNoteType, mergeSettings } from "./settings";
-import { countProblems, type Finding } from "./jd/audit";
+import { auditSystem, countProblems, type Finding } from "./jd/audit";
+import { relativeTo } from "./jd/detect";
+import { pairAction } from "./jd/pair";
+import { extractJdPrefix } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
 import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
-import { runAudit } from "./vault/audit";
+import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
+import { confirm } from "./ui/confirm";
+import { headersToMigrate, updateHeaders } from "./vault/headers";
 import { applyDetection } from "./vault/detect";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
@@ -45,6 +50,42 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Apply mechanical fixes from last audit",
       callback: () => void this.applyFixes(),
     });
+
+    this.addCommand({
+      id: "normalize-frontmatter-active",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      name: "Normalize JDex frontmatter of the active note",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || this.settings.jdexFolder === "") return false;
+        const rel = relativeTo(this.settings.jdexFolder, file.path);
+        if (rel === null || rel === "" || rel.includes("/")) return false;
+        if (!checking) void this.normalizeFrontmatter(file);
+        return true;
+      },
+    });
+
+    this.addCommand({
+      id: "normalize-frontmatter-all",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      name: "Normalize JDex frontmatter of every note",
+      callback: () => void this.normalizeFrontmatter(null),
+    });
+
+    this.addCommand({
+      id: "update-headers",
+      name: "Update header lists",
+      callback: () => void this.refreshHeaders(undefined, true),
+    });
+
+    this.addCommand({
+      id: "wrap-header-lists",
+      name: "Wrap existing header lists in markers",
+      callback: () => void this.migrateHeaders(),
+    });
+
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => void this.onRename(file, oldPath)));
+    this.registerEvent(this.app.vault.on("create", (file) => void this.onCreate(file)));
 
     this.addRibbonIcon("file-plus-2", "Create ID", () => void this.createIdFlow());
 
@@ -118,6 +159,107 @@ export default class JdexManagerPlugin extends Plugin {
       if (!this.lastFindings) return;
     }
     new FixFindingsModal(this.app, this.lastFindings, () => this.audit(false)).open();
+  }
+
+  /** Frontmatter fixes for one note or for the whole JDex, with the checklist modal as preview. */
+  async normalizeFrontmatter(only: TFile | null): Promise<void> {
+    if (this.settings.jdexFolder === "") {
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      new Notice("Set the JDex folder in the plugin settings first.");
+      return;
+    }
+    const index = scanVault(this.app, this.settings);
+    const notes = jdexNoteMetas(this.app, this.settings).filter((n) => !only || n.path === only.path);
+    const findings = auditSystem({ index, notes, filePaths: [] }).filter((f) => f.kind === "frontmatter-mismatch");
+    if (findings.length === 0) {
+      new Notice(only ? "Frontmatter already matches the name and position." : "Every JDex note already matches.");
+      return;
+    }
+    new FixFindingsModal(this.app, findings, async () => {
+      await this.refreshHeaders(undefined, false);
+    }).open();
+  }
+
+  /** Regenerates header lists; with `announce` it reports how many notes changed. */
+  async refreshHeaders(onlyCategory: string | undefined, announce: boolean): Promise<void> {
+    if (this.settings.jdexFolder === "") return;
+    const index = scanVault(this.app, this.settings);
+    const changed = await updateHeaders(this.app, index, onlyCategory);
+    if (announce) new Notice(`Header lists updated in ${changed} note(s).`);
+  }
+
+  async migrateHeaders(): Promise<void> {
+    if (this.settings.jdexFolder === "") return;
+    const index = scanVault(this.app, this.settings);
+    const todo = await headersToMigrate(this.app, index);
+    if (todo.length === 0) {
+      new Notice("Every header note already has markers, or has no list to wrap.");
+      return;
+    }
+    const ok = await confirm(
+      this.app,
+      "Wrap header lists in markers",
+      [
+        `${todo.length} header note(s) have a list of links without markers. The first list of each will be wrapped in <!-- jdex:hijos --> markers; nothing else changes.`,
+        ...todo.slice(0, 12).map((t) => t.file.basename),
+        ...(todo.length > 12 ? [`… and ${todo.length - 12} more`] : []),
+      ],
+      "Wrap",
+    );
+    if (!ok) return;
+    for (const t of todo) await this.app.vault.modify(t.file, t.next);
+    new Notice(`Markers added to ${todo.length} note(s).`);
+    await this.refreshHeaders(undefined, true);
+  }
+
+  private renaming = false;
+
+  /** Rename in pairs, the "never renumber" warning and the moved-category warning. */
+  async onRename(file: TAbstractFile, oldPath: string): Promise<void> {
+    if (this.renaming || this.settings.jdexFolder === "") return;
+    const index = scanVault(this.app, this.settings);
+    const action = pairAction({ oldPath, newPath: file.path, isFolder: file instanceof TFolder }, index, this.settings);
+    if (action.type === "renumbered") {
+      new Notice(`${action.oldId} → ${action.newId}: an ID is never renumbered. Create a new ID and archive the old one instead.`, 10000);
+      return;
+    }
+    if (action.type === "moved") {
+      new Notice(`${action.id} moved from ${action.from} to ${action.to}. An ID keeps its number; create a new ID in the destination and archive this one.`, 10000);
+      return;
+    }
+    if (action.type === "rename-partner") {
+      const isNote = action.partnerPath.endsWith(".md");
+      const ok =
+        this.settings.renamePairsWithoutAsking ||
+        (await confirm(
+          this.app,
+          isNote ? "Rename the JDex note too?" : "Rename the folder too?",
+          [`${action.partnerPath}`, `→ ${action.newPartnerPath}`],
+          "Rename",
+        ));
+      if (ok) {
+        this.renaming = true;
+        try {
+          await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath });
+        } catch (error) {
+          new Notice(error instanceof Error ? error.message : String(error));
+        } finally {
+          this.renaming = false;
+        }
+      }
+    }
+    if (this.settings.liveHeaders) {
+      const parsed = extractJdPrefix(file.name);
+      if (parsed?.number.kind === "id") await this.refreshHeaders(parsed.number.category, false);
+    }
+  }
+
+  async onCreate(file: TAbstractFile): Promise<void> {
+    if (!this.settings.liveHeaders || this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
+    const rel = relativeTo(this.settings.jdexFolder, file.path);
+    if (rel === null || rel === "" || rel.includes("/")) return;
+    const parsed = extractJdPrefix(file.basename);
+    if (parsed?.number.kind === "id") await this.refreshHeaders(parsed.number.category, false);
   }
 
   async createTemplates(): Promise<void> {
@@ -254,6 +396,29 @@ class JdexManagerSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.noteWithoutFolderIsFinding).onChange(async (value) => {
           this.plugin.settings.noteWithoutFolderIsFinding = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).setName("Coherence").setHeading();
+
+    new Setting(containerEl)
+      .setName("Rename pairs without asking")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("When a JDex note or an ID folder is renamed, rename its partner at once instead of showing a confirmation.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.renamePairsWithoutAsking).onChange(async (value) => {
+          this.plugin.settings.renamePairsWithoutAsking = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Live header lists")
+      .setDesc("Regenerate the children list between the jdex:hijos markers of header notes when an ID is created or renamed.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.liveHeaders).onChange(async (value) => {
+          this.plugin.settings.liveHeaders = value;
           await this.plugin.saveSettings();
         }),
       );

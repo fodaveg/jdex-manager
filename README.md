@@ -18,12 +18,14 @@ Early but usable. What works today:
 
 - **Audit** (command, status bar counter on desktop, optional run on startup): writes `Auditoría JD - YYYY-MM-DD.md` in the reports folder with eight sections: folders without a JDex note, note and folder with different names, frontmatter that does not match the name or position, duplicate IDs, management numbers (`.00`, `.02` to `.08`) holding content, headers with files inside, numbers outside their parent, and (for information) notes without a folder. Sub-folders inside an ID are never a finding. "Apply mechanical fixes from last audit" fixes frontmatter and renames folders after their note, with a checklist first.
 
+- **Rename in pairs**: renaming a JDex note offers to rename its ID folder, and the other way round (a setting skips the question). Changing the number is refused with a notice: an ID is never renumbered. Moving an ID folder to another category also gets a notice.
+- **Frontmatter from the name**: "Normalize JDex frontmatter" fills or corrects `jd`, `tipo`, `area` and `categoria` from the note's number and the system folders, for the active note or the whole JDex, with a checklist before writing.
+- **Live header lists**: the children of each `AC.X0 ■` note are regenerated between `<!-- jdex:hijos -->` and `<!-- /jdex:hijos -->` when an ID of that range is created or renamed, and on demand with "Update header lists". "Wrap existing header lists in markers" migrates the notes you already have, after a preview.
+
 Categories come from the folders under the system root (`20-29 …/21 …`) and from any `AC Title` notes in the JDex; IDs come from both the JDex notes and the ID folders.
 
 ## Roadmap
 
-- **Rename in pairs**: renaming a JDex note renames its folder, and the other way round.
-- **Live headers**: keep the list of children of each `AC.X0 ■` note up to date.
 - **Create category or area**, with the standard zeros on request.
 - **Inbox and archive**: send to `.01`, archive to `.09` with a date prefix, process the inboxes.
 - **Go to ID**: a picker that shows the note and the folder of every ID on one row.

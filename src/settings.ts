@@ -17,6 +17,10 @@ export interface JdexManagerSettings {
   auditOnStartup: boolean;
   /** Count a JDex note without a folder as a problem instead of information. */
   noteWithoutFolderIsFinding: boolean;
+  /** Rename the partner (note or folder) without asking when one side is renamed. */
+  renamePairsWithoutAsking: boolean;
+  /** Keep the children list of header notes up to date automatically. */
+  liveHeaders: boolean;
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -33,6 +37,8 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   createFolderByDefault: false,
   auditOnStartup: false,
   noteWithoutFolderIsFinding: false,
+  renamePairsWithoutAsking: false,
+  liveHeaders: true,
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */
