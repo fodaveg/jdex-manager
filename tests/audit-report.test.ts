@@ -30,7 +30,7 @@ describe("renderReport", () => {
     const clean = renderReport([], "2026-09-10");
     expect(clean).toContain("hallazgos: 0");
     expect(clean).toContain("Sin problemas.");
-    expect(clean.match(/Ninguno\./g)).toHaveLength(8);
+    expect(clean.match(/Ninguno\./g)).toHaveLength(9);
   });
 
   it("names the report file by date", () => {

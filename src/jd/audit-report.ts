@@ -13,6 +13,7 @@ export const KIND_TITLES: Record<FindingKind, string> = {
   "reserved-used-as-content": "Números de gestión (.00 a .08) con contenido",
   "header-with-files": "Cabeceras con ficheros dentro",
   "out-of-parent": "Números fuera de su padre",
+  "missing-description": "Notas sin descripción",
   "note-without-folder": "Notas sin carpeta (informativo)",
 };
 

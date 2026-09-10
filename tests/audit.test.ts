@@ -105,7 +105,7 @@ describe("auditSystem", () => {
     });
     const out = auditSystem({
       index: clean,
-      notes: [{ path: "JDex/11.11 Limpio.md", frontmatter: { jd: "11.11", tipo: "id", area: "10-19 Vida", categoria: "11 Salud" } }],
+      notes: [{ path: "JDex/11.11 Limpio.md", frontmatter: { jd: "11.11", tipo: "id", descripcion: "x", area: "10-19 Vida", categoria: "11 Salud" } }],
       filePaths: ["JDex/11.11 Limpio.md"],
     });
     expect(out).toEqual([]);

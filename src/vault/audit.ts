@@ -12,14 +12,20 @@ export interface AuditResult {
   reportPath: string | null;
 }
 
-/** Frontmatter of every note directly inside the JDex folder, read from the metadata cache. */
-export function jdexNoteMetas(app: App, settings: JdexManagerSettings): NoteMeta[] {
+/**
+ * Frontmatter of every note directly inside the JDex folder, read from the metadata cache.
+ * Notes without `descripcion` also carry their body so a description can be proposed.
+ */
+export async function jdexNoteMetas(app: App, settings: JdexManagerSettings): Promise<NoteMeta[]> {
   const out: NoteMeta[] = [];
   for (const file of app.vault.getMarkdownFiles()) {
     const rel = relativeTo(settings.jdexFolder, file.path);
     if (rel === null || rel === "" || rel.includes("/")) continue;
     const fm = app.metadataCache.getFileCache(file)?.frontmatter;
-    out.push({ path: file.path, frontmatter: fm ? { ...fm } : null });
+    const meta: NoteMeta = { path: file.path, frontmatter: fm ? { ...fm } : null };
+    const desc: unknown = fm?.descripcion;
+    if (typeof desc !== "string" || desc.trim() === "") meta.body = await app.vault.cachedRead(file);
+    out.push(meta);
   }
   return out;
 }
@@ -33,9 +39,12 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
     .map((f) => f.path);
   const findings = auditSystem({
     index,
-    notes: jdexNoteMetas(app, settings),
+    notes: await jdexNoteMetas(app, settings),
     filePaths,
-    options: { noteWithoutFolderIsFinding: settings.noteWithoutFolderIsFinding },
+    options: {
+      noteWithoutFolderIsFinding: settings.noteWithoutFolderIsFinding,
+      descriptionIsFinding: settings.descriptionIsFinding,
+    },
   });
 
   if (settings.reportsFolder === "") {

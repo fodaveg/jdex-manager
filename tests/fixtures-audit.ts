@@ -51,17 +51,18 @@ export const FILES = [
 const fm = (jd: string, tipo: string, extra: Record<string, string> = {}): Record<string, unknown> => ({
   jd,
   tipo,
+  descripcion: "algo",
   area: "10-19 Vida",
   categoria: "11 Salud",
   ...extra,
 });
 
 export const NOTES: NoteMeta[] = [
-  { path: `${JDEX}/00.00 JDex.md`, frontmatter: { jd: "00.00", tipo: "id", area: "00-09 Sistema", categoria: "00 Sistema" } },
-  { path: `${JDEX}/00.01 Inbox.md`, frontmatter: { jd: "00.01", tipo: "id", area: "00-09 Sistema", categoria: "00 Sistema" } },
-  { path: `${JDEX}/00.02 Mantenimiento.md`, frontmatter: { jd: "00.02", tipo: "id", area: "00-09 Sistema", categoria: "00 Sistema" } },
-  { path: `${JDEX}/00.03 Plantillas.md`, frontmatter: { jd: "00.03", tipo: "id", area: "00-09 Sistema", categoria: "00 Sistema" } },
-  { path: `${JDEX}/00.09 Archivo.md`, frontmatter: { jd: "00.09", tipo: "id", area: "00-09 Sistema", categoria: "00 Sistema" } },
+  { path: `${JDEX}/00.00 JDex.md`, frontmatter: { jd: "00.00", tipo: "id", descripcion: "x", area: "00-09 Sistema", categoria: "00 Sistema" } },
+  { path: `${JDEX}/00.01 Inbox.md`, frontmatter: { jd: "00.01", tipo: "id", descripcion: "x", area: "00-09 Sistema", categoria: "00 Sistema" } },
+  { path: `${JDEX}/00.02 Mantenimiento.md`, frontmatter: { jd: "00.02", tipo: "id", descripcion: "x", area: "00-09 Sistema", categoria: "00 Sistema" } },
+  { path: `${JDEX}/00.03 Plantillas.md`, frontmatter: { jd: "00.03", tipo: "id", descripcion: "x", area: "00-09 Sistema", categoria: "00 Sistema" } },
+  { path: `${JDEX}/00.09 Archivo.md`, frontmatter: { jd: "00.09", tipo: "id", descripcion: "x", area: "00-09 Sistema", categoria: "00 Sistema" } },
   { path: `${JDEX}/11.10 ■ Cabecera.md`, frontmatter: fm("11.10", "cabecera") },
   { path: `${JDEX}/11.11 Limpio.md`, frontmatter: fm("11.11", "id") },
   { path: `${JDEX}/11.13 Nota con un nombre.md`, frontmatter: fm("11.13", "id") },

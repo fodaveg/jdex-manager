@@ -7,6 +7,7 @@
  */
 
 import { areaCode, areaOfCategory, type IdEntry, type JdIndex } from "./index";
+import { firstSentence } from "./description";
 import { extractJdPrefix, isHeader, isReserved, parseJdNumber } from "./parse";
 
 export type FindingKind =
@@ -17,7 +18,8 @@ export type FindingKind =
   | "duplicate-id"
   | "reserved-used-as-content"
   | "header-with-files"
-  | "out-of-parent";
+  | "out-of-parent"
+  | "missing-description";
 
 export const FINDING_KINDS: FindingKind[] = [
   "folder-without-note",
@@ -27,6 +29,7 @@ export const FINDING_KINDS: FindingKind[] = [
   "reserved-used-as-content",
   "header-with-files",
   "out-of-parent",
+  "missing-description",
   "note-without-folder",
 ];
 
@@ -50,6 +53,8 @@ export interface Finding {
 export interface NoteMeta {
   path: string;
   frontmatter: Record<string, unknown> | null;
+  /** Note body, only needed to propose a description. */
+  body?: string;
 }
 
 export interface AuditInput {
@@ -61,6 +66,8 @@ export interface AuditInput {
   options?: {
     /** Treat a JDex note without a folder as a problem instead of information. Default false. */
     noteWithoutFolderIsFinding?: boolean;
+    /** Treat an empty `descripcion` as a problem. Default true. */
+    descriptionIsFinding?: boolean;
   };
 }
 
@@ -155,6 +162,23 @@ export function auditSystem(input: AuditInput): Finding[] {
         .map((k) => `${k} debería ser «${wrong[k]}» (es «${asString(fm[k]) ?? "vacío"}»)`)
         .join("; ")}.`,
       fix: { type: "frontmatter", path: note.path, set: wrong },
+    });
+  }
+
+  // 4b: empty descripcion. JDex.base and the Dataview indexes read it.
+  for (const note of notes) {
+    const parsed = extractJdPrefix(noteName(note.path));
+    if (!parsed) continue;
+    const current = asString(note.frontmatter?.descripcion) ?? "";
+    if (current !== "") continue;
+    const proposal = note.body === undefined ? null : firstSentence(note.body);
+    findings.push({
+      kind: "missing-description",
+      number: parsed.number.kind === "id" ? parsed.number.id : undefined,
+      paths: [note.path],
+      message: proposal ? `${noteName(note.path)}: sin descripción; propuesta «${proposal}».` : `${noteName(note.path)}: sin descripción y sin cuerpo del que sacarla.`,
+      informative: input.options?.descriptionIsFinding === false,
+      ...(proposal ? { fix: { type: "frontmatter", path: note.path, set: { descripcion: proposal } } } : {}),
     });
   }
 

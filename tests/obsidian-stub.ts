@@ -19,3 +19,9 @@ export class Notice {
   constructor(_message: string) {}
 }
 export class PluginSettingTab {}
+export class EditorSuggest<T> {
+  setInstructions(_i: unknown[]): void {}
+  getSuggestions(_c: unknown): T[] {
+    return [];
+  }
+}

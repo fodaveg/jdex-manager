@@ -10,6 +10,8 @@ import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
 import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
 import { IdSuggestModal, openEntry } from "./ui/go-to-id";
 import { ProcessInboxModal } from "./ui/inbox";
+import { IdEditorSuggest } from "./ui/autocomplete";
+import type { JdIndex } from "./jd/index";
 import { categoryOfPath, isDatable, locate, zeroOf } from "./jd/files";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
@@ -26,6 +28,7 @@ export default class JdexManagerPlugin extends Plugin {
   private statusBar: HTMLElement | null = null;
   private inboxBar: HTMLElement | null = null;
   private whereBar: HTMLElement | null = null;
+  private indexCache: { at: number; index: JdIndex } | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -44,6 +47,15 @@ export default class JdexManagerPlugin extends Plugin {
     this.whereBar.addClass("mod-clickable");
     this.registerDomEvent(this.whereBar, "click", () => void this.toggleNoteAndFolder());
     this.registerEvent(this.app.workspace.on("file-open", () => this.refreshWhere()));
+
+    this.registerEditorSuggest(
+      new IdEditorSuggest(
+        this.app,
+        () => this.cachedIndex(),
+        () => this.settings.autocompleteInsert,
+        () => this.settings.autocomplete && this.settings.jdexFolder !== "",
+      ),
+    );
 
     // Folders are only known once the vault has loaded; detect then, and only into empty fields.
     this.app.workspace.onLayoutReady(() => {
@@ -298,6 +310,15 @@ export default class JdexManagerPlugin extends Plugin {
     new FixFindingsModal(this.app, this.lastFindings, () => this.audit(false)).open();
   }
 
+  /** The index, rescanned at most every two seconds; enough for keystroke-driven lookups. */
+  cachedIndex(): JdIndex {
+    const now = Date.now();
+    if (this.indexCache && now - this.indexCache.at < 2000) return this.indexCache.index;
+    const index = scanVault(this.app, this.settings);
+    this.indexCache = { at: now, index };
+    return index;
+  }
+
   /** Frontmatter fixes for one note or for the whole JDex, with the checklist modal as preview. */
   async normalizeFrontmatter(only: TFile | null): Promise<void> {
     if (this.settings.jdexFolder === "") {
@@ -306,7 +327,7 @@ export default class JdexManagerPlugin extends Plugin {
       return;
     }
     const index = scanVault(this.app, this.settings);
-    const notes = jdexNoteMetas(this.app, this.settings).filter((n) => !only || n.path === only.path);
+    const notes = (await jdexNoteMetas(this.app, this.settings)).filter((n) => !only || n.path === only.path);
     const findings = auditSystem({ index, notes, filePaths: [] }).filter((f) => f.kind === "frontmatter-mismatch");
     if (findings.length === 0) {
       new Notice(only ? "Frontmatter already matches the name and position." : "Every JDex note already matches.");
@@ -721,6 +742,45 @@ class JdexManagerSettingTab extends PluginSettingTab {
           this.plugin.settings.noteWithoutFolderIsFinding = value;
           await this.plugin.saveSettings();
         }),
+      );
+
+    new Setting(containerEl)
+      .setName("Empty descriptions count as findings")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("The audit lists JDex notes whose descripcion is empty and proposes the first sentence of the body.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.descriptionIsFinding).onChange(async (value) => {
+          this.plugin.settings.descriptionIsFinding = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).setName("Editor").setHeading();
+
+    new Setting(containerEl)
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setName("Autocomplete IDs while typing")
+      .setDesc("Typing 21.2 offers the IDs that start with it.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.autocomplete).onChange(async (value) => {
+          this.plugin.settings.autocomplete = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Autocomplete inserts")
+      .setDesc("Enter inserts a link to the JDex note or the bare number; Shift+Enter always inserts the number.")
+      .addDropdown((d) =>
+        d
+          // eslint-disable-next-line obsidianmd/ui/sentence-case
+          .addOption("link", "Link to the JDex note")
+          .addOption("number", "Number only")
+          .setValue(this.plugin.settings.autocompleteInsert)
+          .onChange(async (value) => {
+            this.plugin.settings.autocompleteInsert = value === "number" ? "number" : "link";
+            await this.plugin.saveSettings();
+          }),
       );
 
     new Setting(containerEl).setName("Coherence").setHeading();

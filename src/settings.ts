@@ -29,6 +29,12 @@ export interface JdexManagerSettings {
   dateOnCreate: boolean;
   /** What to open after Create ID when the folder was created too. */
   afterCreateOpen: "note" | "folder";
+  /** Count an empty `descripcion` as a problem in the audit. */
+  descriptionIsFinding: boolean;
+  /** Offer IDs while typing `21.2` in the editor. */
+  autocomplete: boolean;
+  /** What the autocomplete inserts by default. */
+  autocompleteInsert: "link" | "number";
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -50,6 +56,9 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   dateFormat: "YYYY-MM-DD",
   dateOnCreate: false,
   afterCreateOpen: "note",
+  descriptionIsFinding: true,
+  autocomplete: true,
+  autocompleteInsert: "link",
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */
