@@ -10,7 +10,7 @@ An Obsidian plugin for vaults organised with [Johnny.Decimal](https://johnnydeci
 
 ## Status
 
-Feature-complete for the first release (0.1.0). What works today:
+What works today (0.2.0):
 
 - **Create ID** (command and ribbon icon): pick a category, get the next free number (zeros and headers skipped), type a title, optionally tick "also create the folder". The JDex note is created from the template and opened. Nothing is ever overwritten: a number already used by a note or a folder is rejected with the name that uses it.
 - **Settings with auto-detection**: JDex folder, system root, templates folder and reports folder. Empty fields are filled on startup from `00-09*/00*/00.00`, `00.02` and `00.03`; a button and a command run the detection again. A configured value is never replaced.
@@ -31,6 +31,15 @@ Feature-complete for the first release (0.1.0). What works today:
 - **Date file name**: prefixes the creation date to a file inside a content ID (`YYYY-MM-DD` or `YYYY-MM`). Optional automatic dating on creation. JDex notes and management folders are never touched.
 - **Go to ID**: a picker with note and folder on the same row; Enter opens the note, Cmd/Ctrl+Enter the folder.
 
+- **Autocomplete in the editor**: typing `21.2` (or `[[21.2`) lists the IDs that start with it; Enter inserts a link to the JDex note, Shift+Enter the bare number.
+- **ID panel** (side view): the ID the active file belongs to, its description, links to note and folder, the files in the folder with their date, its `+` children and the siblings under the same header.
+- **Copy ID / Copy JD path** of the active file; the file menu offers "Open JDex note" from any file inside an ID and "Open folder" from the note.
+- **Retire an ID**: the folder moves to the category archive with a date prefix; the note stays in the JDex marked `tipo: archivado` with when and where. Numbers are never reused.
+- **Subfolder pattern**: a default pattern and overrides per category (`21: 40 Audits y revisiones, 70 Adjuntos`), created with the ID folder; the audit lists IDs that lack it and can create the missing folders.
+- **Missing category and area notes**: one command creates them from the folders with the `categoria` and `area` templates; the audit can then require them.
+- **System index note**: the whole system as a nested list (areas, categories, headers, IDs with their `descripcion`, `+` children) between `<!-- jdex:indice -->` markers, regenerated on demand or when an ID is created.
+- **Empty descriptions**: the audit lists JDex notes without `descripcion` and proposes the first sentence of the body as a mechanical fix.
+- **Several systems**: an optional identifier (`D01`) so `D01.21.22` names are understood, and new names can carry it.
 - **Status bar**: audit findings, inbox count and the JD path of the active file (`21 Productos … › 21.22 JDex Manager`; click jumps between the JDex note and the folder). On mobile, where there is no status bar, "Show where the active file lives" and "Toggle between JDex note and folder" do the same.
 
 Categories come from the folders under the system root (`20-29 …/21 …`) and from any `AC Title` notes in the JDex; IDs come from both the JDex notes and the ID folders.

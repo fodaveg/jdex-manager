@@ -1,7 +1,7 @@
 {
   "id": "jdex-manager",
   "name": "JDex Manager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.7.2",
   "description": "Create and audit Johnny.Decimal IDs from your JDex, the index that is the system.",
   "author": "David Velasco",
