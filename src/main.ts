@@ -18,6 +18,8 @@ import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
 import { headersToMigrate, updateHeaders } from "./vault/headers";
 import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex } from "./vault/structure";
+import { retireId } from "./vault/retire";
+import { formatCategoryPatterns, parseCategoryPatterns } from "./jd/patterns";
 import { applyDetection } from "./vault/detect";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
@@ -171,6 +173,16 @@ export default class JdexManagerPlugin extends Plugin {
       }),
     );
 
+    this.addCommand({
+      id: "retire-id",
+      name: "Retire the active ID (archive its folder, keep the note)",
+      checkCallback: (checking) => {
+        const entry = this.activeIdEntry();
+        if (!entry) return false;
+        if (!checking) void this.retireFlow(entry);
+        return true;
+      },
+    });
     this.addCommand({
       id: "send-to-inbox",
       name: "Send active file to its inbox (.01)",
@@ -642,6 +654,27 @@ export default class JdexManagerPlugin extends Plugin {
     }).open();
   }
 
+  async retireFlow(parent: { id: string }): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    const entry = index.ids.find((e) => e.id === parent.id);
+    if (!entry) return;
+    const lines = [
+      `${entry.label} keeps its number forever: the JDex note stays, marked tipo: archivado, with a line saying when and where.`,
+      entry.folderPath ? `Its folder moves to ${entry.category}.09 with today's date as prefix.` : "It has no folder.",
+      "Nothing is deleted.",
+    ];
+    const ok = await confirm(this.app, `Retire ${entry.id}?`, lines, "Retire");
+    if (!ok) return;
+    try {
+      const done = await retireId(this.app, index, entry);
+      new Notice(done.join(" · "), 8000);
+      await this.refreshHeaders(entry.category, false);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async createChildFlow(parent: { id: string }): Promise<void> {
     if (!this.ready()) return;
     const index = scanVault(this.app, this.settings);
@@ -915,6 +948,30 @@ class JdexManagerSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.dateOnCreate).onChange(async (value) => {
           this.plugin.settings.dateOnCreate = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).setName("Subfolder pattern").setHeading();
+
+    new Setting(containerEl)
+      .setName("Default pattern")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("Folders created inside a new ID, one per line (for example 70 Adjuntos). Empty = none.")
+      .addTextArea((text) =>
+        text.setValue(this.plugin.settings.subfolderPattern).onChange(async (value) => {
+          this.plugin.settings.subfolderPattern = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Pattern per category")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("One line per category: 21: 40 Audits y revisiones, 70 Adjuntos. Overrides the default for that category.")
+      .addTextArea((text) =>
+        text.setValue(formatCategoryPatterns(this.plugin.settings.subfolderPatternsByCategory)).onChange(async (value) => {
+          this.plugin.settings.subfolderPatternsByCategory = parseCategoryPatterns(value);
           await this.plugin.saveSettings();
         }),
       );

@@ -8,6 +8,7 @@
 
 import { areaCode, areaOfCategory, type IdEntry, type JdIndex } from "./index";
 import { firstSentence } from "./description";
+import { missingPatternFolders } from "./patterns";
 import { extractJdPrefix, isHeader, isReserved, parseJdNumber } from "./parse";
 
 export type FindingKind =
@@ -20,7 +21,8 @@ export type FindingKind =
   | "header-with-files"
   | "out-of-parent"
   | "missing-description"
-  | "structure-without-note";
+  | "structure-without-note"
+  | "pattern-missing";
 
 export const FINDING_KINDS: FindingKind[] = [
   "folder-without-note",
@@ -32,12 +34,14 @@ export const FINDING_KINDS: FindingKind[] = [
   "out-of-parent",
   "missing-description",
   "structure-without-note",
+  "pattern-missing",
   "note-without-folder",
 ];
 
 export type Fix =
   | { type: "frontmatter"; path: string; set: Record<string, string> }
-  | { type: "rename"; from: string; to: string };
+  | { type: "rename"; from: string; to: string }
+  | { type: "folders"; paths: string[] };
 
 export interface Finding {
   kind: FindingKind;
@@ -65,6 +69,10 @@ export interface AuditInput {
   notes: NoteMeta[];
   /** Every file path in the vault (at least those under the system root). */
   filePaths: string[];
+  /** Every folder path in the vault; needed for the subfolder pattern check. */
+  folderPaths?: string[];
+  /** Subfolder pattern expected inside the IDs of a category; empty = no check. */
+  patternFor?: (category: string) => string[];
   options?: {
     /** Treat a JDex note without a folder as a problem instead of information. Default false. */
     noteWithoutFolderIsFinding?: boolean;
@@ -110,8 +118,11 @@ export function auditSystem(input: AuditInput): Finding[] {
   const { index, notes, filePaths } = input;
   const findings: Finding[] = [];
 
-  // 1 and 2: folder without note, note without folder (ID level).
+  const archived = new Set(notes.filter((n) => asString(n.frontmatter?.tipo) === "archivado").map((n) => n.path));
+
+  // 1 and 2: folder without note, note without folder (ID level). A retired ID keeps its note on purpose.
   for (const entry of index.ids) {
+    if (entry.notePath && archived.has(entry.notePath)) continue;
     if (entry.folderPath && !entry.notePath) {
       findings.push({
         kind: "folder-without-note",
@@ -153,6 +164,7 @@ export function auditSystem(input: AuditInput): Finding[] {
     if (!parsed) continue;
     const expected = expectedFrontmatter(index, parsed.number, noteName(note.path));
     const fm = note.frontmatter ?? {};
+    if (asString(fm.tipo) === "archivado") delete expected.tipo;
     const wrong: Record<string, string> = {};
     for (const [key, value] of Object.entries(expected)) {
       if (asString(fm[key]) !== value) wrong[key] = value;
@@ -259,6 +271,27 @@ export function auditSystem(input: AuditInput): Finding[] {
       message: `La categoría ${category.label} no tiene nota en el JDex.`,
       informative: !input.options?.structureNotesAreFindings,
     });
+  }
+
+  // 7c: subfolder pattern of the category missing inside an ID folder.
+  if (input.patternFor && input.folderPaths) {
+    for (const entry of index.ids) {
+      if (!entry.folderPath || entry.id.endsWith("+")) continue;
+      const n = parseJdNumber(entry.id);
+      if (!n || n.kind !== "id" || isReserved(n) || isHeaderEntry(entry)) continue;
+      const pattern = input.patternFor(entry.category);
+      if (pattern.length === 0) continue;
+      const missing = missingPatternFolders(entry.folderPath, pattern, input.folderPaths);
+      if (missing.length === 0) continue;
+      findings.push({
+        kind: "pattern-missing",
+        number: entry.id,
+        paths: [entry.folderPath],
+        message: `${entry.label} no tiene ${missing.map((m) => m.slice(entry.folderPath!.length + 1)).join(", ")}.`,
+        informative: true,
+        fix: { type: "folders", paths: missing },
+      });
+    }
   }
 
   // 8: numbers outside their parent.

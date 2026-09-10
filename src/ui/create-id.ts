@@ -4,6 +4,8 @@ import { isReserved, jdexNoteName, nextFreeId, parseJdNumber } from "../jd/parse
 import { renderTemplate, todayIso } from "../jd/template";
 import type { JdexManagerSettings } from "../settings";
 import { resolveTemplate } from "../vault/templates";
+import { patternFor } from "../jd/patterns";
+import { ensureFolder } from "../vault/create";
 
 /** Picks a category from the index, ordered by number. */
 export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
@@ -41,6 +43,7 @@ export interface CreateIdRequest {
   id: string;
   title: string;
   createFolder: boolean;
+  createPattern: boolean;
 }
 
 /** Why an ID typed by the user cannot be used, or null when it can. */
@@ -66,6 +69,7 @@ export class CreateIdModal extends Modal {
   private id: string;
   private title = "";
   private createFolder: boolean;
+  private createPattern: boolean;
   private errorEl: HTMLElement | null = null;
   private submitButton: HTMLButtonElement | null = null;
 
@@ -83,6 +87,7 @@ export class CreateIdModal extends Modal {
     this.onSubmit = onSubmit;
     this.id = nextFreeId(category.number, knownIds(index)) ?? "";
     this.createFolder = settings.createFolderByDefault;
+    this.createPattern = settings.createPatternByDefault;
   }
 
   onOpen(): void {
@@ -114,6 +119,14 @@ export class CreateIdModal extends Modal {
       .setName("Also create the folder")
       .setDesc("Creates the ID folder inside its category in the system root.")
       .addToggle((toggle) => toggle.setValue(this.createFolder).onChange((value) => (this.createFolder = value)));
+
+    const pattern = patternFor(this.settings, this.category.number);
+    if (pattern.length > 0) {
+      new Setting(contentEl)
+        .setName("Also create the subfolder pattern")
+        .setDesc(pattern.join(", "))
+        .addToggle((toggle) => toggle.setValue(this.createPattern).onChange((value) => (this.createPattern = value)));
+    }
 
     this.errorEl = contentEl.createDiv({ cls: "jdex-validation" });
 
@@ -153,8 +166,9 @@ export class CreateIdModal extends Modal {
     const parsed = parseJdNumber(this.id);
     if (!parsed || parsed.kind !== "id") return;
     this.settings.createFolderByDefault = this.createFolder;
+    this.settings.createPatternByDefault = this.createPattern;
     this.close();
-    await this.onSubmit({ id: parsed.id, title: this.title, createFolder: this.createFolder });
+    await this.onSubmit({ id: parsed.id, title: this.title, createFolder: this.createFolder, createPattern: this.createPattern });
   }
 }
 
@@ -198,6 +212,9 @@ export async function createId(
       if (present instanceof TFolder) new Notice(`Folder ${folderPath} already existed.`);
       else if (present) new Notice(`${folderPath} exists and is not a folder; left untouched.`);
       else await app.vault.createFolder(folderPath);
+      if (request.createPattern && !(present && !(present instanceof TFolder))) {
+        for (const sub of patternFor(settings, category.number)) await ensureFolder(app, `${folderPath}/${sub}`);
+      }
     }
   }
 

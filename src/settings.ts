@@ -41,6 +41,12 @@ export interface JdexManagerSettings {
   systemIndexNote: string;
   /** Regenerate the system index after creating an ID, category or area. */
   updateSystemIndexOnCreate: boolean;
+  /** Default subfolder pattern for new IDs, one folder name per line. Empty = none. */
+  subfolderPattern: string;
+  /** Pattern overrides per category number, one folder name per line each. */
+  subfolderPatternsByCategory: Record<string, string>;
+  /** Create the subfolder pattern by default when Create ID also creates the folder. */
+  createPatternByDefault: boolean;
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -68,11 +74,15 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   structureNotesAreFindings: false,
   systemIndexNote: "",
   updateSystemIndexOnCreate: false,
+  subfolderPattern: "",
+  subfolderPatternsByCategory: {},
+  createPatternByDefault: true,
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */
 export function mergeSettings(stored: Partial<JdexManagerSettings> | null | undefined): JdexManagerSettings {
   const base = { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
   base.templateNames = { ...DEFAULT_SETTINGS.templateNames, ...(stored?.templateNames ?? {}) };
+  base.subfolderPatternsByCategory = { ...(stored?.subfolderPatternsByCategory ?? {}) };
   return base;
 }

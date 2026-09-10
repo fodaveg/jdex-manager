@@ -4,6 +4,7 @@ import { applyFix } from "../vault/audit";
 
 function describeFix(fix: Fix): string {
   if (fix.type === "rename") return `${fix.from} → ${fix.to}`;
+  if (fix.type === "folders") return `create ${fix.paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(", ")}`;
   return Object.entries(fix.set)
     .map(([k, v]) => `${k}: "${v}"`)
     .join(", ");

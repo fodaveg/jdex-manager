@@ -4,7 +4,9 @@ import { renderReport, reportFileName } from "../jd/audit-report";
 import { relativeTo } from "../jd/detect";
 import { todayIso } from "../jd/template";
 import type { JdexManagerSettings } from "../settings";
-import { scanVault } from "./scan";
+import { patternFor } from "../jd/patterns";
+import { allFolderPaths, scanVault } from "./scan";
+import { ensureFolder } from "./create";
 
 export interface AuditResult {
   findings: Finding[];
@@ -41,6 +43,8 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
     index,
     notes: await jdexNoteMetas(app, settings),
     filePaths,
+    folderPaths: allFolderPaths(app),
+    patternFor: (category) => patternFor(settings, category),
     options: {
       noteWithoutFolderIsFinding: settings.noteWithoutFolderIsFinding,
       descriptionIsFinding: settings.descriptionIsFinding,
@@ -74,6 +78,10 @@ export async function applyFix(app: App, fix: Fix): Promise<void> {
     await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       for (const [key, value] of Object.entries(fix.set)) fm[key] = value;
     });
+    return;
+  }
+  if (fix.type === "folders") {
+    for (const p of fix.paths) await ensureFolder(app, p);
     return;
   }
   const target = app.vault.getAbstractFileByPath(fix.from);
