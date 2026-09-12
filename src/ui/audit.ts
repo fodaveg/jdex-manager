@@ -2,12 +2,9 @@ import { type App, Modal, Notice, Setting } from "obsidian";
 import type { Finding, Fix } from "../jd/audit";
 import { applyFix } from "../vault/audit";
 
-function describeFix(fix: Fix): string {
+function describeFix(fix: Exclude<Fix, { type: "frontmatter" }>): string {
   if (fix.type === "rename") return `${fix.from} → ${fix.to}`;
-  if (fix.type === "folders") return `create ${fix.paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(", ")}`;
-  return Object.entries(fix.set)
-    .map(([k, v]) => `${k}: "${v}"`)
-    .join(", ");
+  return `create ${fix.paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(", ")}`;
 }
 
 /** Lists the findings that carry a mechanical fix and applies the ticked ones. */
@@ -40,8 +37,8 @@ export class FixFindingsModal extends Modal {
     this.findings.forEach((finding, i) => {
       const fix = finding.fix!;
       new Setting(contentEl)
-        .setName(finding.paths[0])
-        .setDesc(describeFix(fix))
+        .setName(finding.message)
+        .setDesc(fix.type === "frontmatter" ? fix.path : describeFix(fix))
         .addToggle((toggle) =>
           toggle.setValue(true).onChange((value) => {
             if (value) this.selected.add(i);
