@@ -843,7 +843,8 @@ class JdexManagerSettingTab extends PluginSettingTab {
     for (const type of Object.keys(labels) as JdexNoteType[]) {
       new Setting(containerEl)
         .setName(labels[type])
-        .setDesc("Note name inside the templates folder. The built-in template is used when the note is missing.")
+        // eslint-disable-next-line obsidianmd/ui/sentence-case
+        .setDesc("Note name inside the templates folder. A note named with a category or area suffix (JDex - id - 21, JDex - id - 20-29) wins for that scope; the built-in template is used when none exists.")
         .addText((text) =>
           text.setValue(this.plugin.settings.templateNames[type]).onChange(async (value) => {
             this.plugin.settings.templateNames[type] = value.trim();
@@ -956,7 +957,6 @@ class JdexManagerSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Clickable numbers in reading view")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
       .setDesc("A bare 21.22 in reading view links to its JDex note. The file is not modified.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.readingLinks).onChange(async (value) => {

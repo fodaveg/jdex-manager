@@ -14,7 +14,7 @@ export async function createJdexNote(
 ): Promise<TFile> {
   const path = normalizePath(`${settings.jdexFolder}/${name}.md`);
   if (app.vault.getAbstractFileByPath(path)) throw new Error(`${path} already exists.`);
-  const template = await resolveTemplate(app, settings, type);
+  const template = await resolveTemplate(app, settings, type, { category: vars.category || undefined, area: vars.area || undefined });
   const content = renderTemplate(template, { date: todayIso(), ...vars }) + extra;
   return app.vault.create(path, content);
 }

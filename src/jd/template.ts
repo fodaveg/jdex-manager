@@ -31,6 +31,26 @@ export function renderTemplate(text: string, vars: Partial<TemplateVars>): strin
   });
 }
 
+/** Where a note is being created, so a template can be picked per category or area. */
+export interface TemplateScope {
+  /** `21`. */
+  category?: string;
+  /** `20-29`. */
+  area?: string;
+}
+
+/**
+ * Note names to try, most specific first: `JDex - id - 21`, then `JDex - id - 20-29`, then `JDex - id`.
+ * The caller reads the first one that exists and falls back to the built-in template.
+ */
+export function templateNameCandidates(base: string, scope: TemplateScope = {}): string[] {
+  const out: string[] = [];
+  if (scope.category) out.push(`${base} - ${scope.category}`);
+  if (scope.area) out.push(`${base} - ${scope.area}`);
+  out.push(base);
+  return out;
+}
+
 /** Today as `YYYY-MM-DD` in local time. */
 export function todayIso(now = new Date()): string {
   const y = now.getFullYear();

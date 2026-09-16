@@ -1,5 +1,5 @@
 import { type App, normalizePath, TFile } from "obsidian";
-import { BUILTIN_TEMPLATES, TEMPLATE_TYPES } from "../jd/template";
+import { BUILTIN_TEMPLATES, TEMPLATE_TYPES, templateNameCandidates, type TemplateScope } from "../jd/template";
 import type { JdexManagerSettings, JdexNoteType } from "../settings";
 
 /** Vault path of the user's template note for `type`, or null when no templates folder is set. */
@@ -8,12 +8,16 @@ export function templatePath(settings: JdexManagerSettings, type: JdexNoteType):
   return normalizePath(`${settings.templatesFolder}/${settings.templateNames[type]}.md`);
 }
 
-/** The template text for `type`: the user's note in the templates folder if it exists, else the built-in. */
-export async function resolveTemplate(app: App, settings: JdexManagerSettings, type: JdexNoteType): Promise<string> {
-  const path = templatePath(settings, type);
-  if (path) {
-    const file = app.vault.getAbstractFileByPath(path);
-    if (file instanceof TFile) return app.vault.read(file);
+/**
+ * The template text for `type`: the user's note in the templates folder if it exists, else the built-in.
+ * With a scope, a note per category (`JDex - id - 21`) or per area (`JDex - id - 20-29`) wins over the general one.
+ */
+export async function resolveTemplate(app: App, settings: JdexManagerSettings, type: JdexNoteType, scope: TemplateScope = {}): Promise<string> {
+  if (settings.templatesFolder !== "") {
+    for (const name of templateNameCandidates(settings.templateNames[type], scope)) {
+      const file = app.vault.getAbstractFileByPath(normalizePath(`${settings.templatesFolder}/${name}.md`));
+      if (file instanceof TFile) return app.vault.read(file);
+    }
   }
   return BUILTIN_TEMPLATES[type];
 }

@@ -190,7 +190,7 @@ export async function createId(
   if (app.vault.getAbstractFileByPath(notePath)) throw new Error(`${notePath} already exists.`);
 
   const area = index.areas.find((a) => a.number === areaOfCategory(category.number));
-  const template = await resolveTemplate(app, settings, "id");
+  const template = await resolveTemplate(app, settings, "id", { category: category.number, area: areaCode(category.areaNumber) });
   const content = renderTemplate(template, {
     id: request.id,
     title: request.title.trim(),
