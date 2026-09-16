@@ -1,4 +1,8 @@
-import { type App, Notice, Plugin, PluginSettingTab, Setting, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { type App, Notice, normalizePath, Plugin, PluginSettingTab, Setting, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { healthFileName, renderHealthReport } from "./jd/health";
+import { todayIso } from "./jd/template";
+import { ensureFolder } from "./vault/create";
+import { openGlobalSearch, pathQuery } from "./vault/search";
 import { type JdexManagerSettings, type JdexNoteType, mergeSettings } from "./settings";
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
@@ -155,6 +159,14 @@ export default class JdexManagerPlugin extends Plugin {
         if (this.settings.jdexFolder === "") return;
         const index = scanVault(this.app, this.settings);
         const loc = locate(index, this.settings, file.path);
+        if (file instanceof TFile && !loc?.atNote) {
+          menu.addItem((item) =>
+            item
+              .setTitle("Move to an ID…")
+              .setIcon("folder-input")
+              .onClick(() => void this.moveToIdFlow(file)),
+          );
+        }
         if (!loc) return;
         if (loc.atNote && loc.entry.folderPath) {
           menu.addItem((item) =>
@@ -264,6 +276,33 @@ export default class JdexManagerPlugin extends Plugin {
         }).open();
       },
     });
+
+    this.addCommand({
+      id: "move-to-id",
+      name: "Move active file to an ID",
+      checkCallback: (checking) => this.fileCommand(checking, (file) => this.moveToIdFlow(file)),
+    });
+    this.addCommand({
+      id: "search-in-id",
+      name: "Search inside the active ID",
+      checkCallback: (checking) => {
+        const entry = this.activeIdEntry();
+        if (!entry?.folderPath) return false;
+        if (!checking) this.searchIn(entry.folderPath, entry.label);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "search-in-category",
+      name: "Search inside the active category",
+      checkCallback: (checking) => {
+        const folder = this.activeCategoryFolder();
+        if (!folder) return false;
+        if (!checking) this.searchIn(folder.path, folder.label);
+        return true;
+      },
+    });
+    this.addCommand({ id: "health-report", name: "System health report", callback: () => void this.healthReport() });
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => void this.onRename(file, oldPath)));
     this.registerEvent(this.app.vault.on("delete", () => this.refreshInboxCount()));
@@ -492,6 +531,94 @@ export default class JdexManagerPlugin extends Plugin {
       );
       new Notice(`Moved to ${to}.`);
       this.refreshInboxCount();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Picks an ID and moves the file into its folder, creating the folder first when the ID has none. */
+  async moveToIdFlow(file: TFile): Promise<void> {
+    if (!this.ready()) return;
+    const index = scanVault(this.app, this.settings);
+    const entry = await new Promise<IdEntry | null>((resolve) => {
+      const modal = new IdSuggestModal(this.app, index, (e) => resolve(e), `Move ${file.name} to…`);
+      modal.setInstructions([{ command: "↵", purpose: "move here" }]);
+      modal.onClose = () => resolve(null);
+      modal.open();
+    });
+    if (!entry) return;
+    let folder = entry.folderPath;
+    if (!folder) {
+      const category = index.categories.find((c) => c.number === entry.category);
+      if (!category?.path) {
+        new Notice(`${entry.label} has no folder and category ${entry.category} has no folder in the system root to create it in.`, 8000);
+        return;
+      }
+      const wanted = normalizePath(`${category.path}/${entry.label}`);
+      const ok = await confirm(this.app, `Create the folder of ${entry.id}?`, [`${entry.label} has no folder yet.`, `It will be created at ${wanted}.`], "Create and move");
+      if (!ok) return;
+      try {
+        await ensureFolder(this.app, wanted);
+      } catch (error) {
+        new Notice(error instanceof Error ? error.message : String(error));
+        return;
+      }
+      folder = wanted;
+    }
+    try {
+      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined;
+      const to = await moveInto(this.app, file, folder, date);
+      new Notice(`Moved to ${to}.`);
+      this.refreshInboxCount();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Folder and label of the category the active file lives in, from the system folders. */
+  private activeCategoryFolder(): { path: string; label: string } | null {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || this.settings.jdexFolder === "") return null;
+    const number = categoryOfPath(this.settings.systemRoot, file.path);
+    if (number === null) return null;
+    const category = this.cachedIndex().categories.find((c) => c.number === number);
+    return category?.path ? { path: category.path, label: category.label } : null;
+  }
+
+  /** Opens the global search restricted to `folder`; copies the query when the core search plugin is not reachable. */
+  private searchIn(folder: string, label: string): void {
+    const query = pathQuery(folder);
+    if (openGlobalSearch(this.app, query)) return;
+    void navigator.clipboard.writeText(query).then(
+      () => new Notice(`Search is not available; the query for ${label} was copied to the clipboard.`, 8000),
+      () => new Notice(`Search is not available. Query for ${label}: ${query}`, 10000),
+    );
+  }
+
+  /** Writes `Salud JD - YYYY-MM-DD.md` in the reports folder and opens it. */
+  async healthReport(): Promise<void> {
+    if (!this.ready()) return;
+    if (this.settings.reportsFolder === "") {
+      new Notice("Set the reports folder first (00.02 by convention).");
+      return;
+    }
+    const index = scanVault(this.app, this.settings);
+    const filePaths = this.app.vault.getFiles().map((f) => f.path);
+    const date = todayIso();
+    const content = renderHealthReport(index, filePaths, date, { maxFiles: this.settings.healthMaxFiles, nearlyFull: 70 });
+    const path = normalizePath(`${this.settings.reportsFolder}/${healthFileName(date)}`);
+    try {
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      let file: TFile;
+      if (existing instanceof TFile) {
+        await this.app.vault.modify(existing, content);
+        file = existing;
+      } else if (existing) throw new Error(`${path} exists and is not a note.`);
+      else {
+        await ensureFolder(this.app, this.settings.reportsFolder);
+        file = await this.app.vault.create(path, content);
+      }
+      await this.app.workspace.getLeaf(false).openFile(file);
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));
     }
@@ -871,6 +998,19 @@ class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Health report: files per ID")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("IDs holding more files than this are listed in the health report as candidates for a + child or subfolders.")
+      .addText((text) =>
+        text.setValue(String(this.plugin.settings.healthMaxFiles)).onChange(async (value) => {
+          const n = Number.parseInt(value, 10);
+          if (!Number.isFinite(n) || n < 1) return;
+          this.plugin.settings.healthMaxFiles = n;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
       .setName("Notes without a folder count as findings")
       // eslint-disable-next-line obsidianmd/ui/sentence-case
       .setDesc("Off by default: a JDex note without a system folder is listed for information only.")
@@ -1012,6 +1152,17 @@ class JdexManagerSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.dateOnCreate).onChange(async (value) => {
           this.plugin.settings.dateOnCreate = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Date files when moving them to an ID")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("Off by default. Applies to \"Move active file to an ID\" when the target is a content ID.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.dateOnMove).onChange(async (value) => {
+          this.plugin.settings.dateOnMove = value;
           await this.plugin.saveSettings();
         }),
       );

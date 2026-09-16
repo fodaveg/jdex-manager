@@ -30,6 +30,9 @@ What works today (0.2.0):
 - **Process inboxes**: walks every `AC.01` and `00.01` file by file with a preview: move to an ID, archive, skip, open or delete. The status bar shows how many files are waiting.
 - **Date file name**: prefixes the creation date to a file inside a content ID (`YYYY-MM-DD` or `YYYY-MM`). Optional automatic dating on creation. JDex notes and management folders are never touched.
 - **Go to ID**: a picker with note and folder on the same row; Enter opens the note, Cmd/Ctrl+Enter the folder.
+- **Move active file to an ID**: the same picker, from the command palette or the file menu, moves the file into the folder of the chosen ID (offering to create the folder when the ID has none). A setting dates the name on the way.
+- **Search inside the active ID / category**: opens Obsidian's search with `path:"…/21.22 JDex Manager/"` already typed; when the core search plugin is not reachable the query goes to the clipboard.
+- **System health report**: `Salud JD - YYYY-MM-DD.md` in the reports folder with IDs used per category and the next free number, categories over 70 IDs, IDs whose folder is empty and IDs with more than N files (N is a setting, 50 by default). The audit measures errors; this measures how full the system is.
 
 - **Autocomplete in the editor**: typing `21.2` (or `[[21.2`) lists the IDs that start with it; Enter inserts a link to the JDex note, Shift+Enter the bare number.
 - **Clickable numbers in reading view**: a bare `21.22` (or `D01.21.22`) in the text of any note links to its JDex note, with the usual hover preview. Only numbers that exist are linked, links, code and properties are left alone, and the file is never modified. Reading view only; a setting turns it off.

@@ -27,6 +27,10 @@ export interface JdexManagerSettings {
   dateFormat: DateFormat;
   /** Date new files inside an ID folder as they are created. */
   dateOnCreate: boolean;
+  /** Date the file name when "Move active file to an ID" moves it into a content ID. */
+  dateOnMove: boolean;
+  /** IDs with more files than this are listed in the health report as candidates for `+` or subfolders. */
+  healthMaxFiles: number;
   /** What to open after Create ID when the folder was created too. */
   afterCreateOpen: "note" | "folder";
   /** Count an empty `descripcion` as a problem in the audit. */
@@ -73,6 +77,8 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   liveHeaders: true,
   dateFormat: "YYYY-MM-DD",
   dateOnCreate: false,
+  dateOnMove: false,
+  healthMaxFiles: 50,
   afterCreateOpen: "note",
   descriptionIsFinding: true,
   autocomplete: true,
