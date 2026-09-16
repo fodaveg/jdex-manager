@@ -44,6 +44,7 @@ What works today (0.2.0):
 - **System index note**: the whole system as a nested list (areas, categories, headers, IDs with their `descripcion`, `+` children) between `<!-- jdex:indice -->` markers, regenerated on demand or when an ID is created.
 - **Empty descriptions**: the audit lists JDex notes without `descripcion` and proposes the first sentence of the body as a mechanical fix.
 - **Several systems**: an optional identifier (`D01`) so `D01.21.22` names are understood, and new names can carry it.
+- **Undo last JDex operation**: the last 20 operations (create ID, retire, move, send to inbox, archive, audit and frontmatter fixes) are journaled in `data.json`; the command shows what undoing will do and does it in reverse. Nothing is deleted outright: notes and folders the plugin created go to the trash, and a move is moved back.
 - **Status bar**: audit findings, inbox count and the JD path of the active file (`21 Productos … › 21.22 JDex Manager`; click jumps between the JDex note and the folder). On mobile, where there is no status bar, "Show where the active file lives" and "Toggle between JDex note and folder" do the same.
 
 Categories come from the folders under the system root (`20-29 …/21 …`) and from any `AC Title` notes in the JDex; IDs come from both the JDex notes and the ID folders.

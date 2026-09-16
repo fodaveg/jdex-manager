@@ -7,6 +7,8 @@ import type { JdexManagerSettings } from "../settings";
 import { patternFor } from "../jd/patterns";
 import { allFolderPaths, scanVault } from "./scan";
 import { ensureFolder } from "./create";
+import type { Effect } from "../jd/journal";
+import { previousFrontmatter } from "./journal";
 
 export interface AuditResult {
   findings: Finding[];
@@ -70,22 +72,28 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
   return { findings, reportPath };
 }
 
-/** Applies one mechanical fix. Frontmatter edits go through Obsidian so the rest of the note is kept. */
-export async function applyFix(app: App, fix: Fix): Promise<void> {
+/**
+ * Applies one mechanical fix. Frontmatter edits go through Obsidian so the rest of the note is kept.
+ * What it did is appended to `effects`, when given, so the operation can be undone.
+ */
+export async function applyFix(app: App, fix: Fix, effects?: Effect[]): Promise<void> {
   if (fix.type === "frontmatter") {
     const file = app.vault.getAbstractFileByPath(fix.path);
     if (!(file instanceof TFile)) throw new Error(`${fix.path} is not a note.`);
+    const previous = previousFrontmatter(app, file, Object.keys(fix.set));
     await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       for (const [key, value] of Object.entries(fix.set)) fm[key] = value;
     });
+    effects?.push({ kind: "frontmatter", path: fix.path, previous });
     return;
   }
   if (fix.type === "folders") {
-    for (const p of fix.paths) await ensureFolder(app, p);
+    for (const p of fix.paths) if (await ensureFolder(app, p)) effects?.push({ kind: "created-folder", path: normalizePath(p) });
     return;
   }
   const target = app.vault.getAbstractFileByPath(fix.from);
   if (!target) throw new Error(`${fix.from} no longer exists.`);
   if (app.vault.getAbstractFileByPath(fix.to)) throw new Error(`${fix.to} already exists.`);
   await app.fileManager.renameFile(target, fix.to);
+  effects?.push({ kind: "moved", from: fix.from, to: fix.to });
 }

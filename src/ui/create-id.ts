@@ -6,6 +6,7 @@ import { type JdexManagerSettings, namePrefix } from "../settings";
 import { resolveTemplate } from "../vault/templates";
 import { patternFor } from "../jd/patterns";
 import { ensureFolder } from "../vault/create";
+import type { Effect } from "../jd/journal";
 
 /** Picks a category from the index, ordered by number. */
 export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
@@ -182,6 +183,7 @@ export async function createId(
   index: JdIndex,
   category: CategoryEntry,
   request: CreateIdRequest,
+  effects: Effect[] = [],
 ): Promise<TFile> {
   const name = jdexNoteName(request.id, request.title, namePrefix(settings));
   const notePath = normalizePath(`${settings.jdexFolder}/${name}.md`);
@@ -202,6 +204,7 @@ export async function createId(
   });
 
   const note = await app.vault.create(notePath, content);
+  effects.push({ kind: "created-note", path: notePath, content });
 
   if (request.createFolder) {
     if (!category.path) {
@@ -211,9 +214,15 @@ export async function createId(
       const present = app.vault.getAbstractFileByPath(folderPath);
       if (present instanceof TFolder) new Notice(`Folder ${folderPath} already existed.`);
       else if (present) new Notice(`${folderPath} exists and is not a folder; left untouched.`);
-      else await app.vault.createFolder(folderPath);
+      else {
+        await app.vault.createFolder(folderPath);
+        effects.push({ kind: "created-folder", path: folderPath });
+      }
       if (request.createPattern && !(present && !(present instanceof TFolder))) {
-        for (const sub of patternFor(settings, category.number)) await ensureFolder(app, `${folderPath}/${sub}`);
+        for (const sub of patternFor(settings, category.number)) {
+          const subPath = normalizePath(`${folderPath}/${sub}`);
+          if (await ensureFolder(app, subPath)) effects.push({ kind: "created-folder", path: subPath });
+        }
       }
     }
   }

@@ -1,5 +1,6 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 import type { Finding, Fix } from "../jd/audit";
+import type { Effect } from "../jd/journal";
 import { applyFix } from "../vault/audit";
 
 function describeFix(fix: Exclude<Fix, { type: "frontmatter" }>): string {
@@ -12,6 +13,8 @@ export class FixFindingsModal extends Modal {
   private readonly findings: Finding[];
   private readonly onDone: () => Promise<void>;
   private readonly selected = new Set<number>();
+  /** What the applied fixes did, for the undo journal; the caller reads it in `onDone`. */
+  readonly effects: Effect[] = [];
 
   constructor(app: App, findings: Finding[], onDone: () => Promise<void>) {
     super(app);
@@ -60,7 +63,7 @@ export class FixFindingsModal extends Modal {
     let failed = 0;
     for (const i of [...this.selected].sort((a, b) => a - b)) {
       try {
-        await applyFix(this.app, this.findings[i].fix!);
+        await applyFix(this.app, this.findings[i].fix!, this.effects);
         ok += 1;
       } catch (error) {
         failed += 1;
