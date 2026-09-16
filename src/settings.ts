@@ -35,6 +35,8 @@ export interface JdexManagerSettings {
   autocomplete: boolean;
   /** What the autocomplete inserts by default. */
   autocompleteInsert: "link" | "number";
+  /** Render a bare `21.22` in reading view as a link to its JDex note. */
+  readingLinks: boolean;
   /** Count a category or area folder without a JDex note as a problem. */
   structureNotesAreFindings: boolean;
   /** Note that holds the system index between markers. Empty = the note of 00.00. */
@@ -75,6 +77,7 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   descriptionIsFinding: true,
   autocomplete: true,
   autocompleteInsert: "link",
+  readingLinks: true,
   structureNotesAreFindings: false,
   systemIndexNote: "",
   updateSystemIndexOnCreate: false,

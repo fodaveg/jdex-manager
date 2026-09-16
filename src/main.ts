@@ -22,6 +22,7 @@ import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex }
 import { retireId } from "./vault/retire";
 import { formatCategoryPatterns, parseCategoryPatterns } from "./jd/patterns";
 import { applyDetection } from "./vault/detect";
+import { registerReadingLinks } from "./vault/reading-links";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
 
@@ -64,6 +65,10 @@ export default class JdexManagerPlugin extends Plugin {
         () => this.settings.autocomplete && this.settings.jdexFolder !== "",
       ),
     );
+    registerReadingLinks(this, {
+      index: () => this.cachedIndex(),
+      enabled: () => this.settings.readingLinks && this.settings.jdexFolder !== "",
+    });
 
     // Folders are only known once the vault has loaded; detect then, and only into empty fields.
     this.app.workspace.onLayoutReady(() => {
@@ -947,6 +952,17 @@ class JdexManagerSettingTab extends PluginSettingTab {
             this.plugin.settings.autocompleteInsert = value === "number" ? "number" : "link";
             await this.plugin.saveSettings();
           }),
+      );
+
+    new Setting(containerEl)
+      .setName("Clickable numbers in reading view")
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      .setDesc("A bare 21.22 in reading view links to its JDex note. The file is not modified.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.readingLinks).onChange(async (value) => {
+          this.plugin.settings.readingLinks = value;
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl).setName("Coherence").setHeading();

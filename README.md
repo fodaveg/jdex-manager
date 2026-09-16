@@ -32,6 +32,7 @@ What works today (0.2.0):
 - **Go to ID**: a picker with note and folder on the same row; Enter opens the note, Cmd/Ctrl+Enter the folder.
 
 - **Autocomplete in the editor**: typing `21.2` (or `[[21.2`) lists the IDs that start with it; Enter inserts a link to the JDex note, Shift+Enter the bare number.
+- **Clickable numbers in reading view**: a bare `21.22` (or `D01.21.22`) in the text of any note links to its JDex note, with the usual hover preview. Only numbers that exist are linked, links, code and properties are left alone, and the file is never modified. Reading view only; a setting turns it off.
 - **ID panel** (side view): the ID the active file belongs to, its description, links to note and folder, the files in the folder with their date, its `+` children and the siblings under the same header.
 - **Copy ID / Copy JD path** of the active file; the file menu offers "Open JDex note" from any file inside an ID and "Open folder" from the note.
 - **Retire an ID**: the folder moves to the category archive with a date prefix; the note stays in the JDex marked `tipo: archivado` with when and where. Numbers are never reused.
