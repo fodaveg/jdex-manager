@@ -140,9 +140,14 @@ describe("src/jd/public.ts", () => {
       "nextFreeArea", // structure
       "renderSystemIndex", // system-index
       "renderTemplate", // template
+      "mergeSettings", // settings
+      "namePrefix", // settings
     ];
     const exported = pub as Record<string, unknown>;
     for (const name of names) expect(typeof exported[name], name).toBe("function");
+    expect(typeof pub.DEFAULT_SETTINGS).toBe("object");
+    expect(pub.DEFAULT_SETTINGS.jdexFolder).toBe("");
+    expect(pub.DEFAULT_SETTINGS.templateNames.id).toBe("JDex - id");
   });
 
   it("has no export name defined by two modules", () => {

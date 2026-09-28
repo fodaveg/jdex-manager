@@ -21,6 +21,7 @@ export * from "./parse";
 export * from "./patterns";
 export * from "./reading-links";
 export * from "./retire";
+export * from "./settings";
 export * from "./structure";
 export * from "./system-index";
 export * from "./template";
