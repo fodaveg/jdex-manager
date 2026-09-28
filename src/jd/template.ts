@@ -3,7 +3,8 @@
  * No Obsidian imports. The defaults copy the note shape of a real JDex vault.
  */
 
-import type { JdexNoteType } from "../settings";
+/** The four kinds of JDex note a template can target. */
+export type JdexNoteType = "id" | "cabecera" | "categoria" | "area";
 
 export interface TemplateVars {
   /** `21.22` for an ID, `21` for a category, `20-29` for an area. */

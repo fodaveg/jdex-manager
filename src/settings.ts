@@ -1,6 +1,7 @@
 import type { DateFormat } from "./jd/files";
+import type { JdexNoteType } from "./jd/template";
 
-export type JdexNoteType = "id" | "cabecera" | "categoria" | "area";
+export type { JdexNoteType };
 
 export interface JdexManagerSettings {
   /** Vault path of the folder that holds one note per ID. Empty = not configured. */
