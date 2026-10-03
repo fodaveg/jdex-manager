@@ -1328,5 +1328,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offIsoDates();
     offSettingsPanel();
     pathHandle?.remove();
+    auditHandle.remove();
+    inboxHandle.remove();
   };
 }
