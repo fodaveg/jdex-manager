@@ -55,13 +55,18 @@ Categories come from the folders under the system root (`20-29 …/21 …`) and 
 
 **Manual**: download `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/jdex-manager/` and enable the plugin.
 
+**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list or by URL (`fodaveg/jdex-manager`).
+
 ## Develop
 
 ```
 npm install
-npm run dev     # esbuild in watch mode
-npm run check   # lint, build and tests
+npm run dev          # esbuild in watch mode (Obsidian)
+npm run build:hebra  # hebra-main.mjs, hebra-styles.css and hebra.json (Hebra plugin)
+npm run check        # lint, both builds and tests
 ```
+
+The Hebra plugin lives in `src/hebra/` (entry `main.ts`, written against `hebra-plugin-api`, never against Obsidian or Hebra internals) and shares only the pure engine in `src/jd/` with the Obsidian plugin. `scripts/build-hebra.mjs` bundles it into one ES module, generates `hebra.json` (never by hand) and fails if the bundle imports anything it should not or inlines CodeMirror; `esbuild.config.mjs` fails if `main.js` bundles anything from `src/hebra/`.
 
 ## Credit and licence
 
