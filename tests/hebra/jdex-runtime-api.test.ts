@@ -205,18 +205,34 @@ describe('ajustes (storage.settings)', () => {
     );
   });
 
-  it('cancelar el selector (null) no cambia nada', async () => {
+  async function pickWith(result: string | null) {
     const { vault } = buildFixture();
     const { api, fake } = await createJdexTestApi({
       vault,
       settings: { systemRoot: 'Sistema' }
     });
+    (api.ui as { pickFolder: () => Promise<string | null> }).pickFolder = async () => result;
     await activateJdex(api);
     const el = document.createElement('div');
     fake.recorded.settingsPanels[0](el);
     const before = await api.storage.settings.load();
     click([...el.querySelectorAll('button')].find((b) => b.textContent === 'Elegir carpeta…'));
-    await Promise.resolve();
+    // Margen para que el selector resuelva y el panel actúe (o no) antes de mirar.
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    const field = el.querySelector('input[type="text"]') as HTMLInputElement;
+    return { api, before, field };
+  }
+
+  it('cancelar el selector (null) conserva el valor previo y no guarda', async () => {
+    const { api, before, field } = await pickWith(null);
+    expect(field.value).toBe('Sistema');
+    expect(await api.storage.settings.load()).toEqual(before);
+    expect(before).toMatchObject({ systemRoot: 'Sistema' });
+  });
+
+  it('un id que Hebra no conoce no cambia nada', async () => {
+    const { api, before, field } = await pickWith('f-no-existe');
+    expect(field.value).toBe('Sistema');
     expect(await api.storage.settings.load()).toEqual(before);
   });
 });

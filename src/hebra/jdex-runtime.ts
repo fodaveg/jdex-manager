@@ -1278,11 +1278,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         void rebuild().catch((error: unknown) => report(error, 'rebuild-ajustes'));
       },
       pickFolder: async () => {
-        // Hebra devuelve el ID de la carpeta elegida (`null` si se cancela) aunque el JSDoc
-        // de `PluginUi.pickFolder` hable de «ruta»: se resuelve a la ruta completa, y si
-        // alguna versión de Hebra devolviera ya una ruta se acepta tal cual.
+        // La API 1.1 devuelve el ID de la carpeta elegida, o `null` al cancelar y al elegir
+        // «Raíz»: en ambos casos el panel no toca el campo. Un id que no está entre las
+        // carpetas conocidas tampoco cambia nada.
         const picked = await host.pickFolder();
-        if (picked === null) return '';
+        if (picked === null) return null;
         const rootFolderId = api.vault.rootFolderId();
         const paths =
           walk?.folderPaths ??
@@ -1290,9 +1290,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             (await api.vault.foldersList()).filter((folder) => folder.id !== rootFolderId),
             rootFolderId
           );
-        const byId = paths.get(picked);
-        if (byId !== undefined) return byId;
-        return [...paths.values()].includes(picked) ? picked : '';
+        return paths.get(picked) ?? null;
       }
     })
   );

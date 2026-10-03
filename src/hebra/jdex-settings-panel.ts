@@ -12,8 +12,9 @@ export interface JdexSettingsPanelOptions {
   get(): JdexManagerSettings;
   /** Persiste y dispara la reconstrucción del índice. */
   save(next: JdexManagerSettings): void;
-  /** `host.pickFolder()` traducido a ruta completa («» para la raíz o si se cancela). */
-  pickFolder(): Promise<string>;
+  /** `host.pickFolder()` traducido a ruta completa. `null` = no tocar el campo: la API
+   *  devuelve `null` al cancelar y también al elegir «Raíz» (para la raíz se vacía el campo). */
+  pickFolder(): Promise<string | null>;
 }
 
 interface FieldSpec {
@@ -54,6 +55,7 @@ function folderField(
   pick.textContent = 'Elegir carpeta…';
   pick.addEventListener('click', () => {
     void options.pickFolder().then((path) => {
+      if (path === null) return;
       input.value = path;
       commit();
     });

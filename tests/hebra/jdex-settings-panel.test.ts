@@ -54,6 +54,20 @@ describe('mountJdexSettingsPanel', () => {
     );
   });
 
+  it('cancelar «Elegir carpeta…» (null) conserva el valor previo y no guarda', async () => {
+    const el = document.createElement('div');
+    const settings = { ...DEFAULT_SETTINGS, systemRoot: 'Sistema/Previo' };
+    const save = vi.fn();
+    mountJdexSettingsPanel(el, { get: () => settings, save, pickFolder: vi.fn(async () => null) });
+    const button = [...el.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Elegir carpeta')
+    ) as HTMLButtonElement;
+    button.click();
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect((el.querySelector('input[type="text"]') as HTMLInputElement).value).toBe('Sistema/Previo');
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('no guarda si el valor no cambió', () => {
     const el = document.createElement('div');
     const settings = { ...DEFAULT_SETTINGS, systemRoot: 'Ya configurado' };
