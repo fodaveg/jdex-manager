@@ -305,9 +305,11 @@ export type JdexNotesUpdate =
 /**
  * Pone al día el recorrido y las entradas de la carpeta JDex tras un cambio en estas
  * notas, SIN volver a recorrer la biblioteca: una `noteSummary` (sin cuerpo) y, solo para
- * una nota de la carpeta JDex, su `noteRead`: el resumen de la API no trae el SHA-256 del
- * cuerpo (el almacén de Hebra sí lo daba), así que la lectura se hace SIEMPRE para esas
- * notas y la entrada solo se sustituye (y solo cuenta como cambio) si el SHA cambió.
+ * una nota de la carpeta JDex, su `noteRead`. Con la API 1.1 el resumen trae `bodySha256`:
+ * si coincide con el SHA de la entrada ya indexada no se lee nada. Con un host 1.0.0 el
+ * campo no llega (se comprueba en tiempo de ejecución, no por tipo), así que entonces, o si
+ * el SHA difiere o no hay entrada conocida, se lee; la entrada solo se sustituye (y solo
+ * cuenta como cambio) si el SHA cambió.
  *
  * Qué indexa JDex de cada nota, y por tanto qué se mira:
  *  - pertenencia: viva (ni papelera ni archivo) y en una carpeta bajo `systemRoot`;
@@ -371,6 +373,9 @@ export async function applyJdexNoteChanges(
     // La carpeta JDex es la única de la que se lee algo más que el título.
     if (next !== null && next.folderId === jdexFolderId) {
       const known = entries.get(id);
+      // Host 1.0.0: el resumen no trae `bodySha256`; el tipo (1.1) lo da por presente.
+      const summarySha = (summary as { bodySha256?: unknown }).bodySha256;
+      if (known && typeof summarySha === 'string' && summarySha === known.sha) continue;
       const row = await library.noteRead(id);
       if (!row) {
         if (entries.delete(id)) changed = true; // purgada entre medias: no cuenta.

@@ -732,17 +732,53 @@ describe('applyJdexNoteChanges: igual a una reconstrucción completa (vault en m
     });
   });
 
-  it('una nota JDex que no cambió se relee (el resumen de la API no trae el SHA) pero NO cuenta como cambio', async () => {
-    // Cambio de la API respecto al almacén de Hebra: `PluginNoteSummary` no lleva
-    // `bodySha256`, así que no se puede decidir sin leer. En Hebra esta prueba exigía
-    // `noteRead: 0`; ahora exige la lectura Y que, al ver el mismo SHA, el resultado sea
-    // `unchanged` (nada de reconstrucciones ni repintados de más).
+  it('una nota JDex que no cambió (mismo bodySha256 en el resumen) no se lee', async () => {
+    // API 1.1: el resumen trae `bodySha256`, así que si coincide con el SHA indexado no hace
+    // falta `noteRead` (la aserción original de Hebra).
     const { port, counted, calls } = openStore();
     const { ids } = await buildSystem(port);
     const state = await fullState(port);
     calls.noteRead = 0;
     const update = await applyJdexNoteChanges(counted, markdown, state, [ids.jdexHebra], SETTINGS);
     expect(update).toEqual({ kind: 'unchanged' });
+    expect(calls.noteRead).toBe(0);
+  });
+
+  it('una nota JDex con otro bodySha256 se lee y su entrada se actualiza', async () => {
+    const store = openStore();
+    const { port, calls } = store;
+    const { ids } = await buildSystem(port);
+    const state = await fullState(port);
+    port.saveElsewhere(ids.jdexHebra, jdexBody('21.11', '21.11 Hebra', ['area: otra']));
+    calls.noteRead = 0;
+    const step = await applyAndCompare(store, state, [ids.jdexHebra]);
+    expect(step.update.kind).toBe('updated');
+    expect(step.used.noteRead).toBe(1);
+    expect(step.state.entries.get(ids.jdexHebra)?.sha).not.toBe(state.entries.get(ids.jdexHebra)?.sha);
+  });
+
+  it('host 1.0.0 (el resumen no trae bodySha256): se lee la nota y, sin cambio, es unchanged', async () => {
+    const { port, counted, calls } = openStore();
+    const { ids } = await buildSystem(port);
+    const state = await fullState(port);
+    port.omitSummaryBodySha = true;
+    expect('bodySha256' in (await port.noteSummary([ids.jdexHebra]))[0]).toBe(false);
+    calls.noteRead = 0;
+    const update = await applyJdexNoteChanges(counted, markdown, state, [ids.jdexHebra], SETTINGS);
+    expect(update).toEqual({ kind: 'unchanged' });
     expect(calls.noteRead).toBe(1);
+  });
+
+  it('host 1.0.0: con el cuerpo cambiado se lee y se actualiza igual que un recorrido completo', async () => {
+    const store = openStore();
+    const { port, calls } = store;
+    const { ids } = await buildSystem(port);
+    const state = await fullState(port);
+    port.omitSummaryBodySha = true;
+    port.saveElsewhere(ids.jdexHebra, jdexBody('21.11', '21.11 Hebra', ['area: otra']));
+    calls.noteRead = 0;
+    const step = await applyAndCompare(store, state, [ids.jdexHebra]);
+    expect(step.update.kind).toBe('updated');
+    expect(step.used.noteRead).toBe(1);
   });
 });
