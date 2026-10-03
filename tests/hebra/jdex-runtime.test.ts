@@ -170,7 +170,8 @@ function fakeLibraryPort(
     async noteSummary(ids: readonly string[]): Promise<PluginNoteSummary[]> {
       probe.calls.noteSummary += 1;
       if (probe.failNoteSummary) throw new Error('almacén caído (noteSummary)');
-      return ids.flatMap((id) => {
+      // Doble de un host 1.0.0: el resumen no trae `bodySha256` ni `revision`.
+      return ids.flatMap((id): PluginNoteSummary[] => {
         const row = find(id);
         return row
           ? [
@@ -185,7 +186,7 @@ function fakeLibraryPort(
                 folderId: row.folderId,
                 trashedAt: row.trashedAt,
                 archivedAt: row.archivedAt
-              }
+              } as unknown as PluginNoteSummary
             ]
           : [];
       });

@@ -55,11 +55,14 @@ describe.runIf(existsSync(BUNDLE))('hebra-main.mjs (hay que construirlo: npm run
     const { createHash } = await import('node:crypto');
     const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')) as {
       version: string;
+      apiVersion: string;
       files: Record<string, string>;
       shared: Record<string, string>;
     };
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
     expect(manifest.version).toBe(pkg.version);
+    // Subirlo dejaría el plugin sin cargar en las apps con host 1.0.0: la 1.1 es opcional.
+    expect(manifest.apiVersion).toBe('^1.0.0');
     for (const [name, hash] of Object.entries(manifest.files)) {
       const digest = createHash('sha256').update(readFileSync(join(ROOT, name))).digest('hex');
       expect(hash).toBe(`sha256:${digest}`);

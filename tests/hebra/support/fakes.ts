@@ -109,6 +109,8 @@ export class FakeJdexVault implements PluginVault {
   readonly #folders = new Map<string, PluginFolder>();
   #noteSeq = 0;
   #folderSeq = 0;
+  /** Simula un host 1.0.0: `noteSummary` no trae `bodySha256` ni `revision`. */
+  omitSummaryBodySha = false;
   /** Cada `notesRewriteBatch` recibido, para comprobar `cause` y las revisiones. */
   readonly rewriteCalls: {
     entries: PluginNoteRewrite[];
@@ -254,22 +256,24 @@ export class FakeJdexVault implements PluginVault {
   async noteSummary(ids: readonly string[]): Promise<PluginNoteSummary[]> {
     return ids.flatMap((id) => {
       const note = this.#notes.get(id);
-      return note
-        ? [
-            {
-              id: note.id,
-              title: note.title,
-              excerpt: '',
-              createdAt: note.createdAt,
-              updatedAt: note.updatedAt,
-              favorite: note.favorite,
-              locked: note.locked,
-              folderId: note.folderId,
-              trashedAt: note.trashedAt,
-              archivedAt: note.archivedAt
-            }
-          ]
-        : [];
+      if (!note) return [];
+      const summary = {
+        id: note.id,
+        title: note.title,
+        excerpt: '',
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+        favorite: note.favorite,
+        locked: note.locked,
+        folderId: note.folderId,
+        trashedAt: note.trashedAt,
+        archivedAt: note.archivedAt,
+        revision: this.omitSummaryBodySha ? null : { ...note.revision },
+        bodySha256: note.revision.bodySha256
+      };
+      // Con un host 1.0.0 el campo no llega en absoluto (no es un `undefined` explícito).
+      if (this.omitSummaryBodySha) delete (summary as { bodySha256?: string }).bodySha256;
+      return [summary];
     });
   }
 
