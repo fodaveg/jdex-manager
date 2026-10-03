@@ -9,7 +9,7 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "build:hebra": "node scripts/build-hebra.mjs",
     "lint": "eslint .",
-    "test": "vitest run --maxWorkers=1",
+    "test": "vitest run --maxWorkers=1 --minWorkers=1",
     "check": "npm run lint && npm run build && npm run build:hebra && npm run test"
   },
   "devDependencies": {
