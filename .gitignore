@@ -5,6 +5,6 @@ data.json
 *.log
 .vscode/
 .idea/
-hebra-main.mjs
-hebra-styles.css
-hebra.json
+/hebra-main.mjs
+/hebra-styles.css
+/hebra.json

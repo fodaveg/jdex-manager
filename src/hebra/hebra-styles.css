@@ -1,0 +1,391 @@
+/* Estilos del diálogo de auditoría (`jdex-audit-view.ts`) y del panel de Ajustes
+   (`jdex-settings-panel.ts`): DOM llano, sin componente Svelte. Se inyectan y se
+   retiran con el módulo (`install-styles.ts`), NUNCA en `app.css`: JDex se carga con
+   `import()` perezoso y `app.css` viaja entero en el primer pintado
+   (`initial-bundle-budget.test.ts`). */
+.hebra-jdex-audit-summary {
+  margin: 0 0 var(--space-3);
+  font-weight: 600;
+}
+
+.hebra-jdex-audit-section {
+  margin: 0 0 var(--space-4);
+}
+
+.hebra-jdex-audit-section h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--type-ui-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hebra-jdex-audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hebra-jdex-audit-finding {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--soft-line);
+  border-radius: var(--radius-sm);
+}
+
+.hebra-jdex-audit-finding p {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-audit-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.hebra-jdex-audit-link {
+  color: var(--accent-text);
+  font-size: var(--type-ui-xs);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.hebra-jdex-settings-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+.hebra-jdex-settings-row label {
+  font-size: var(--type-ui-sm);
+  font-weight: 600;
+}
+
+.hebra-jdex-settings-row input[type='text'] {
+  min-height: var(--hit-pointer);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.hebra-jdex-settings-row button {
+  min-height: var(--hit-pointer);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-settings-row small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: var(--type-ui-xs);
+}
+
+.hebra-jdex-settings-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-ui-xs);
+}
+
+.hebra-jdex-audit-apply {
+  align-self: flex-start;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-3);
+  min-height: var(--hit-pointer);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent-text);
+  font-size: var(--type-ui-xs);
+}
+
+/* Diálogos de crear ID/categoría/área/cabecera/hijo, normalizar y envolver cabeceras
+   (lote 2, 28 sep 2026): campos y botón primario compartidos, mismo criterio visual
+   que `LibraryTitleDialog.svelte` (`--accent`/`--on-accent` para la acción principal). */
+.hebra-jdex-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+}
+
+.hebra-jdex-field label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--type-ui-sm);
+  font-weight: 600;
+}
+
+.hebra-jdex-field input[type='text'],
+.hebra-jdex-field select {
+  min-height: var(--hit-pointer);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.hebra-jdex-field small {
+  color: var(--muted);
+  font-size: var(--type-ui-xs);
+  font-weight: 400;
+}
+
+.hebra-jdex-field-toggle label {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hebra-jdex-dialog-hint {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-dialog-error {
+  margin: 0 0 var(--space-2);
+  min-height: 1.2em;
+  color: var(--danger-text);
+  font-size: var(--type-ui-xs);
+}
+
+.hebra-jdex-dialog-primary {
+  min-height: var(--hit-pointer);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.hebra-jdex-dialog-primary:disabled {
+  opacity: 0.5;
+}
+
+.hebra-jdex-normalize-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.hebra-jdex-normalize-row {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--soft-line);
+  border-radius: var(--radius-sm);
+}
+
+.hebra-jdex-normalize-row label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-wrap-preview {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: var(--type-ui-xs);
+  white-space: pre-wrap;
+}
+
+/* Aviso de «avisar antes de renumerar o cambiar de categoría» (lote 3, tarea 1). */
+.hebra-jdex-warning-message {
+  margin: 0 0 var(--space-4);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-warning-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.hebra-jdex-dialog-secondary {
+  min-height: var(--hit-pointer);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* «JDex: ir a un ID» (lote 3, tarea 2): buscador + lista + panel de acciones. */
+.hebra-jdex-goto-search {
+  width: 100%;
+  min-height: var(--hit-pointer);
+  margin: 0 0 var(--space-3);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-goto-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.hebra-jdex-goto-row {
+  padding: 0;
+}
+
+.hebra-jdex-goto-row button {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-goto-row button:hover,
+.hebra-jdex-goto-row button:focus-visible {
+  background: var(--state-hover);
+}
+
+.hebra-jdex-goto-empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-goto-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hebra-jdex-goto-heading {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+}
+
+.hebra-jdex-goto-back {
+  align-self: flex-start;
+  color: var(--muted);
+  font-size: var(--type-ui-xs);
+}
+
+.hebra-jdex-goto-action {
+  width: 100%;
+  text-align: left;
+}
+
+.hebra-jdex-goto-action:disabled {
+  opacity: 0.5;
+}
+
+/* Buscador compartido de IDs (`jdex-id-picker.ts`, lote 4): mismo contenedor que la
+   lista de «ir a un ID» de arriba, con un `<div>` propio para poder ocultarlo entero
+   (mover a un ID desde «Procesar inbox» comparte estilos con la lista). */
+.hebra-jdex-id-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sección del ID en el panel de contexto (lote 4, tarea 2): pestaña de columna del
+   inspector, más estrecha que un diálogo — filas apiladas, sin la rejilla de dos
+   columnas de los ajustes. */
+.hebra-jdex-section-heading {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+}
+
+.hebra-jdex-section-description {
+  margin: 0 0 var(--space-4);
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-section-block {
+  margin: 0 0 var(--space-4);
+}
+
+.hebra-jdex-section-block h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--type-ui-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hebra-jdex-section-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hebra-jdex-section-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--soft-line);
+}
+
+.hebra-jdex-section-row small {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--type-ui-xs);
+}
+
+.hebra-jdex-section-link {
+  min-height: var(--hit-pointer);
+  padding: 0;
+  color: var(--ink);
+  text-align: left;
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-section-link:hover,
+.hebra-jdex-section-link:focus-visible {
+  color: var(--accent-text);
+}
+
+.hebra-jdex-section-add {
+  margin: 0 0 var(--space-2);
+}
+
+/* Números JD clicables en el editor (lote 4, tarea 2, `jdex-editor-extension.ts`):
+   igual criterio visual que un wikilink resuelto (`.cm-hebra-wikilink`, `app.css`),
+   sin duplicar sus reglas aquí porque este fichero se inyecta aparte del bundle del
+   editor. */
+.cm-hebra-jdex-number {
+  border-radius: var(--radius-doc-sm);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.cm-hebra-jdex-number:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
