@@ -1,8 +1,11 @@
 name: Release
 
-# Owns the tag path: runs the gate, checks that the tag is exactly the manifest
-# version, publishes the three loose assets BRAT downloads by name (never a zip)
-# and reads the release back from GitHub to prove the upload happened.
+# Owns the tag path: runs the gate (which also builds the Hebra plugin and its
+# generated hebra.json), checks that the tag is exactly the manifest version AND the
+# version in hebra.json, publishes the six loose assets (the three BRAT downloads by
+# name, never a zip, plus the three Hebra downloads) and reads the release back from
+# GitHub to prove the upload happened and that the published Hebra files match the
+# sha256 in the published hebra.json.
 #
 # `contents: write` lives here only. ci.yml runs on every branch and pull
 # request and stays read-only.
@@ -41,8 +44,10 @@ jobs:
           set -euo pipefail
           MANIFEST=$(node -p "require('./manifest.json').version")
           PKG=$(node -p "require('./package.json').version")
+          HEBRA=$(node -p "require('./hebra.json').version")
           test "$TAG" = "$MANIFEST" || { echo "tag $TAG != manifest.json $MANIFEST"; exit 1; }
           test "$TAG" = "$PKG" || { echo "tag $TAG != package.json $PKG"; exit 1; }
+          test "$TAG" = "$HEBRA" || { echo "tag $TAG != hebra.json $HEBRA"; exit 1; }
           node -e "const v=require('./versions.json'); const m=require('./manifest.json'); if (v[m.version]!==m.minAppVersion) { console.error('versions.json lacks', m.version, '->', m.minAppVersion); process.exit(1); }"
 
       - name: Publish
@@ -50,7 +55,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" main.js manifest.json styles.css \
+          gh release create "$TAG" \
+            main.js manifest.json styles.css \
+            hebra.json hebra-main.mjs hebra-styles.css \
             --title "$TAG" \
             --notes "JDex Manager $TAG"
 
@@ -60,4 +67,26 @@ jobs:
         run: |
           set -euo pipefail
           gh release view "$TAG" --json tagName,isDraft,assets > published.json
-          node -e "const r=require('./published.json'); const names=r.assets.map(a=>a.name).sort(); const want=['main.js','manifest.json','styles.css']; if (r.isDraft || JSON.stringify(names)!==JSON.stringify(want)) { console.error('unexpected release', r); process.exit(1); } console.log('ok', r.tagName, names.join(' '));"
+          node -e "const r=require('./published.json'); const names=r.assets.map(a=>a.name).sort(); const want=['hebra-main.mjs','hebra-styles.css','hebra.json','main.js','manifest.json','styles.css']; if (r.isDraft || JSON.stringify(names)!==JSON.stringify(want)) { console.error('unexpected release', r); process.exit(1); } console.log('ok', r.tagName, names.join(' '));"
+          # Read the three Hebra files back and check what was PUBLISHED, not what was built:
+          # the sha256 of each file must be the one the published hebra.json declares.
+          gh release download "$TAG" --dir published-assets \
+            --pattern hebra.json --pattern hebra-main.mjs --pattern hebra-styles.css
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const manifest = JSON.parse(fs.readFileSync('published-assets/hebra.json', 'utf8'));
+            const names = ['hebra-main.mjs', 'hebra-styles.css'];
+            if (manifest.version !== process.env.TAG || JSON.stringify(Object.keys(manifest.files).sort()) !== JSON.stringify(names)) {
+              console.error('unexpected published hebra.json', manifest);
+              process.exit(1);
+            }
+            for (const name of names) {
+              const got = 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync('published-assets/' + name)).digest('hex');
+              if (manifest.files[name] !== got) {
+                console.error('sha256 mismatch for', name, 'published', got, 'declared', manifest.files[name]);
+                process.exit(1);
+              }
+            }
+            console.log('ok hebra.json', manifest.version, names.join(' '));
+          "
