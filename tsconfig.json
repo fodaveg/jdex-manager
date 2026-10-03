@@ -3,7 +3,7 @@
     "baseUrl": ".",
     "target": "ES2018",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "lib": ["DOM", "ES2018"],
     "strict": true,
     "noImplicitAny": true,
