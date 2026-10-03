@@ -37,10 +37,25 @@ const context = await esbuild.context({
   minify: prod,
   treeShaking: true,
   outfile: "main.js",
+  metafile: true,
 });
 
+// The Hebra plugin (src/hebra, built by scripts/build-hebra.mjs into hebra-main.mjs) must
+// never leak into the Obsidian bundle: it would drag the Hebra-only adapter, the `yaml`
+// parser and the Hebra plugin API types into main.js.
+function assertNoHebraCode(metafile) {
+  const leaked = Object.values(metafile.outputs)
+    .flatMap((output) => Object.keys(output.inputs))
+    .filter((input) => /^src\/hebra\/|hebra-plugin-api|^node_modules\/yaml\//.test(input));
+  if (leaked.length > 0) {
+    console.error(`main.js bundles Hebra-only code: ${leaked.slice(0, 5).join(", ")}`);
+    process.exit(1);
+  }
+}
+
 if (prod) {
-  await context.rebuild();
+  const result = await context.rebuild();
+  assertNoHebraCode(result.metafile);
   process.exit(0);
 } else {
   await context.watch();
