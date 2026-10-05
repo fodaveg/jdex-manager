@@ -160,7 +160,7 @@ describe('ajustes (storage.settings)', () => {
     const { vault } = buildFixture();
     const { api } = await createJdexTestApi({ vault });
     await activateJdex(api);
-    expect(await api.storage.settings.load()).toEqual({
+    expect(await api.storage.settings.load()).toMatchObject({
       jdexFolder: '00-09 Sistema/00 Sistema/00.00 JDex',
       systemRoot: '',
       templatesFolder: '',

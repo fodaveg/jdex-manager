@@ -6,7 +6,7 @@
  * en cada reconstrucción del índice (`jdex-runtime.ts`, `fillEmpty`): solo rellena lo que
  * está vacío, así que un campo escrito aquí a mano nunca se pisa sola.
  */
-import type { JdexManagerSettings } from './engine';
+import { formatCategoryPatterns, parseCategoryPatterns, type JdexManagerSettings } from './engine';
 
 export interface JdexSettingsPanelOptions {
   get(): JdexManagerSettings;
@@ -89,6 +89,31 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     });
     systemIdRow.append(systemIdLabel, systemIdInput);
     container.append(systemIdRow);
+
+    for (const [labelText, value, save] of [
+      ['Patrón de subcarpetas', options.get().subfolderPattern, (value: string) => options.save({ ...options.get(), subfolderPattern: value })],
+      ['Patrones por categoría', formatCategoryPatterns(options.get().subfolderPatternsByCategory), (value: string) => options.save({ ...options.get(), subfolderPatternsByCategory: parseCategoryPatterns(value) })],
+      ['Nota del índice del sistema', options.get().systemIndexNote, (value: string) => options.save({ ...options.get(), systemIndexNote: value })]
+    ] as const) {
+      const row = document.createElement('label');
+      row.className = 'hebra-jdex-settings-row';
+      row.append(document.createTextNode(labelText));
+      const input = document.createElement('textarea');
+      input.value = value;
+      input.addEventListener('change', () => save(input.value));
+      row.append(input);
+      container.append(row);
+    }
+    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders']] as const) {
+      const row = document.createElement('label');
+      row.className = 'hebra-jdex-settings-row';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = options.get()[key];
+      input.addEventListener('change', () => options.save({ ...options.get(), [key]: input.checked }));
+      row.append(input, document.createTextNode(labelText));
+      container.append(row);
+    }
 
     const auto = document.createElement('p');
     auto.className = 'hebra-jdex-settings-hint';

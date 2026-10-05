@@ -27,7 +27,7 @@ describe('loadJdexSettings / persistJdexSettings', () => {
     expect(await loadJdexSettings(storage)).toEqual(settings);
   });
 
-  it('lo que se guarda es lo de siempre: solo las cinco claves de texto de la primera versión', async () => {
+  it('conserva las claves de la primera versión y persiste patrones y cabeceras', async () => {
     // Mismos datos que escribía el módulo compilado (`normalizeStored`): el plugin lee los
     // ajustes ya guardados sin migrar nada.
     const storage = memoryStorage();
@@ -37,14 +37,18 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       systemRoot: 'R',
       templatesFolder: 'T',
       reportsFolder: 'I',
-      systemId: 'S'
+      systemId: 'S',
+      systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
+      createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50
     });
     expect(await storage.load()).toEqual({
       jdexFolder: 'J',
       systemRoot: 'R',
       templatesFolder: 'T',
       reportsFolder: 'I',
-      systemId: 'S'
+      systemId: 'S',
+      systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
+      createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50
     });
   });
 

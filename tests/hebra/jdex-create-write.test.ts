@@ -88,6 +88,23 @@ function baseSettings(overrides: Partial<JdexManagerSettings> = {}): JdexManager
 }
 
 describe('createJdexId', () => {
+  it('crea el patrón propio de la categoría, incluyendo rutas anidadas, cuando se selecciona', async () => {
+    const { walk, index } = buildWalkAndIndex();
+    const library = new FakeJdexVault();
+    library.seedFolder({ id: 'f-jdex', parentId: null, name: '00.00 JDex', createdAt: 0, updatedAt: 0 });
+    library.seedFolder({ id: 'f-cat21', parentId: 'f-area20', name: '21 Productos de software', createdAt: 0, updatedAt: 0 });
+    const category = index.categories.find((entry) => entry.number === '21')!;
+    await createJdexId(library, markdown, walk, baseSettings({ subfolderPattern: 'Predeterminado', subfolderPatternsByCategory: { '21': '40 Audits\n70 Adjuntos/Imágenes' } }), index, {
+      category, id: '21.23', title: 'Con patrón', createFolder: true, createPattern: true,
+    });
+    const folders = await library.foldersList();
+    const root = folders.find((folder) => folder.name === '21.23 Con patrón')!;
+    expect(folders.some((folder) => folder.parentId === root.id && folder.name === '40 Audits')).toBe(true);
+    const attachments = folders.find((folder) => folder.parentId === root.id && folder.name === '70 Adjuntos')!;
+    expect(folders.some((folder) => folder.parentId === attachments.id && folder.name === 'Imágenes')).toBe(true);
+    expect(folders.some((folder) => folder.name === 'Predeterminado')).toBe(false);
+  });
+
   it('rechaza un ID ocupado por CARPETA (21.22, sin nota) sin escribir nada', async () => {
     const { walk, index } = buildWalkAndIndex();
     const library = new FakeJdexVault();

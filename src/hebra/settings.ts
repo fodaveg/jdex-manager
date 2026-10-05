@@ -11,9 +11,8 @@ import { DEFAULT_SETTINGS, detectFolders, fillEmpty, type JdexManagerSettings } 
 /** Lo único que este fichero pide a `api.storage.settings`. */
 export type JdexSettingsStorage = Pick<PluginSettingsStorage, 'load' | 'save'>;
 
-/** Solo los campos de la primera versión (carpeta JDex, raíz, plantillas, informes, id
- *  de sistema): el resto del motor (fechado, patrones, autocompletado…) se queda en su
- *  valor por defecto hasta que un lote posterior le dé ajustes propios. */
+/** Valida los campos que Hebra permite configurar y conserva los valores por defecto
+ *  del motor para los demás. El diario se persiste aparte en la misma clave. */
 function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
   if (typeof raw !== 'object' || raw === null) return {};
   const source = raw as Record<string, unknown>;
@@ -23,11 +22,16 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
     'systemRoot',
     'templatesFolder',
     'reportsFolder',
-    'systemId'
+    'systemId', 'systemIndexNote', 'subfolderPattern'
   ];
   for (const key of strings) {
     const value = source[key];
     if (typeof value === 'string') (out as Record<string, unknown>)[key] = value;
+  }
+  for (const key of ['createPatternByDefault', 'liveHeaders'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  if (typeof source.healthMaxFiles === 'number' && Number.isFinite(source.healthMaxFiles) && source.healthMaxFiles >= 0) out.healthMaxFiles = source.healthMaxFiles;
+  if (typeof source.subfolderPatternsByCategory === 'object' && source.subfolderPatternsByCategory !== null && !Array.isArray(source.subfolderPatternsByCategory)) {
+    out.subfolderPatternsByCategory = Object.fromEntries(Object.entries(source.subfolderPatternsByCategory).filter(([, value]) => typeof value === 'string'));
   }
   return out;
 }
@@ -48,7 +52,20 @@ export async function persistJdexSettings(
   storage: JdexSettingsStorage,
   settings: JdexManagerSettings
 ): Promise<void> {
-  await storage.save(normalizeStored(settings));
+  await updateJdexStoredSettings(storage, normalizeStored(settings));
+}
+
+const storageTails = new WeakMap<JdexSettingsStorage, Promise<void>>();
+
+/** Serializes settings and journal merges, reading the latest stored value before each save. */
+export function updateJdexStoredSettings(storage: JdexSettingsStorage, patch: object): Promise<void> {
+  const next = (storageTails.get(storage) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+    const raw = await storage.load<unknown>();
+    const current = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {};
+    await storage.save({ ...current, ...patch });
+  });
+  storageTails.set(storage, next);
+  return next;
 }
 
 /**

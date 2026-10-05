@@ -56,6 +56,8 @@ export interface CreateIdDialogOptions {
   index: JdIndex;
   categories: readonly CategoryEntry[];
   createFolderDefault: boolean;
+  createPatternDefault?: boolean;
+  patternFor?(category: string): string[];
   onSubmit(request: CreateIdRequest): Promise<void>;
 }
 
@@ -66,6 +68,7 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
   let id = category ? (nextFreeId(category.number, knownIds(options.index, category?.system)) ?? '') : '';
   let title = '';
   let createFolder = options.createFolderDefault;
+  let createPattern = options.createPatternDefault ?? false;
 
   const categoryField = selectField(
     'Categoría',
@@ -94,10 +97,16 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
     createFolder,
     (value) => (createFolder = value)
   );
+  const { row: patternRow } = toggleField(
+    'Crear también el patrón de subcarpetas',
+    'Se aplica el patrón de la categoría o, si no tiene uno, el predeterminado.',
+    createPattern,
+    (value) => (createPattern = value)
+  );
   const error = errorBanner();
   const submit = primaryButton('Crear', () => void trySubmit());
 
-  el.append(categoryField.row, idField.row, titleField.row, folderRow, error, submit);
+  el.append(categoryField.row, idField.row, titleField.row, folderRow, patternRow, error, submit);
   focusFirst(el);
   submitOnEnter(
     el,
@@ -116,6 +125,7 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
     const err = currentError();
     error.textContent = err ?? '';
     submit.disabled = err !== null;
+    patternRow.hidden = !category || (options.patternFor?.(category.number).length ?? 0) === 0;
   }
 
   async function trySubmit(): Promise<void> {
@@ -138,7 +148,7 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
         return;
       }
     }
-    await options.onSubmit({ category, id, title, createFolder });
+    await options.onSubmit({ category, id, title, createFolder, createPattern });
   }
 
   refresh();

@@ -16,19 +16,19 @@ export type Effect =
 
 export type OperationKind = "create-id" | "create-structure" | "retire" | "move" | "fix";
 
-export interface Operation {
+export interface Operation<E = Effect> {
   kind: OperationKind;
   /** `Create 21.23 Prueba`, `Retire 21.22`, `Move x.md to 21.22` … */
   label: string;
   /** ISO date-time. */
   at: string;
-  effects: Effect[];
+  effects: E[];
 }
 
 export const JOURNAL_MAX = 20;
 
 /** Appends `op` and keeps the last `max` operations. Empty operations are not recorded. */
-export function pushOperation(journal: Operation[], op: Operation, max = JOURNAL_MAX): Operation[] {
+export function pushOperation<E>(journal: Operation<E>[], op: Operation<E>, max = JOURNAL_MAX): Operation<E>[] {
   if (op.effects.length === 0) return journal;
   const next = [...journal, op];
   return next.length > max ? next.slice(next.length - max) : next;

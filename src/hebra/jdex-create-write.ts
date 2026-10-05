@@ -18,6 +18,7 @@ import {
   managementCategoryName,
   namePrefix,
   parseJdNumber,
+  patternFor,
   renderTemplate,
   standardZeroNames,
   templateNameCandidates,
@@ -54,6 +55,8 @@ type CreateSettings = Pick<
   | 'templateNames'
   | 'systemId'
   | 'prefixNamesWithSystem'
+  | 'subfolderPattern'
+  | 'subfolderPatternsByCategory'
 >;
 
 /**
@@ -161,6 +164,7 @@ export interface CreateIdRequest {
   readonly id: string;
   readonly title: string;
   readonly createFolder: boolean;
+  readonly createPattern?: boolean;
 }
 
 export async function createJdexId(
@@ -210,7 +214,14 @@ export async function createJdexId(
       if (categoryFolderId === null) {
         folderNotice = `Nota creada. No se encontró la carpeta de ${request.category.number}: la carpeta del ID no se creó.`;
       } else {
-        await ensureJdexFolder(library, categoryFolderId, name);
+        const idFolderId = await ensureJdexFolder(library, categoryFolderId, name);
+        for (const pattern of request.createPattern ? patternFor(settings, request.category.number) : []) {
+          let parentId = idFolderId;
+          for (const segment of pattern.split('/')) {
+            if (segment === '' || segment === '.' || segment === '..') throw new Error(`Patrón de subcarpetas no válido: ${pattern}.`);
+            parentId = await ensureJdexFolder(library, parentId, segment);
+          }
+        }
         folderPath = `${request.category.path}/${name}`;
       }
     }

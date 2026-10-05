@@ -47,7 +47,8 @@ import type {
   PluginNoteTitleRenamedEvent,
   PluginNotesChange,
   PluginStatusBarItemHandle,
-  PluginUnregister
+  PluginUnregister,
+  PluginVault
 } from 'hebra-plugin-api';
 import {
   auditSystem,
@@ -59,6 +60,9 @@ import {
   headerEntries,
   locate,
   todayIso,
+  pairAction,
+  extractJdPrefix,
+  patternFor,
   type Finding,
   type IdEntry,
   type JdIndex,
@@ -74,6 +78,7 @@ import {
   jdexFolderPaths,
   jdexNotePath,
   jdexResolveFolderId,
+  readJdexCreationIndex,
   walkJdexLibrary,
   type JdexAuditEntry,
   type JdexInboxSummary,
@@ -119,6 +124,9 @@ import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
 import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
 import { jdexEditorExtension } from './jdex-editor-extension';
+import { createJdexJournal } from './jdex-journal';
+import { mountJdexJournalView } from './jdex-journal-view';
+import { createJdexHealthReport } from './jdex-health';
 
 export const JDEX_AUDIT_VIEW_ID = 'jdex:auditoria';
 export const JDEX_ID_SECTION_VIEW_ID = 'jdex:seccion-del-id';
@@ -140,6 +148,8 @@ export const JDEX_COMMAND_REFRESH_INDEX = 'jdex-actualizar-indice';
 export const JDEX_COMMAND_WRAP_HEADERS = 'jdex-envolver-cabeceras';
 export const JDEX_COMMAND_GOTO_ID = 'jdex-ir-a-un-id';
 export const JDEX_COMMAND_PROCESS_INBOX = 'jdex-procesar-inbox';
+export const JDEX_COMMAND_UNDO = 'jdex-deshacer-ultima-operacion';
+export const JDEX_COMMAND_HEALTH = 'jdex-informe-de-salud';
 
 /** Reconstruir el índice tras un `library-changed` no en CADA aviso (una biblioteca que
  *  sincroniza muchas notas seguidas dispararía varias reconstrucciones completas). */
@@ -156,6 +166,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const host = api.ui;
   await new Promise<void>((resolve) => host.onReady(resolve));
   let settings = await loadJdexSettings(api.storage.settings);
+  const journal = await createJdexJournal(api.vault, api.storage.settings);
 
   let walk: JdexLibraryWalk | null = null;
   let index: JdIndex | null = null;
@@ -281,6 +292,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       descriptionIsFinding: settings.descriptionIsFinding,
       structureNotesAreFindings: settings.structureNotesAreFindings
     });
+    auditInput.patternFor = (category) => patternFor(settings, category);
     findings = auditSystem(auditInput);
     inboxSummary = buildJdexInboxSummary(index, walk);
     refreshCounterItems();
@@ -320,7 +332,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         report(error, 'guardar-ajustes')
       );
     }
-    const nextWalk = await walkJdexLibrary(api.vault, folders, settings.systemRoot, rootFolderId);
+    const nextWalk = await walkJdexLibrary(api.vault, folders, settings.systemRoot, rootFolderId, paths);
     // Con el módulo apagado mientras leía, nada de escribir estado ni de pintar.
     if (disposed) return;
     if (gen !== generation) return latestRebuild;
@@ -328,7 +340,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       api.vault,
       api.markdown,
       nextWalk,
-      settings.jdexFolder
+      settings.jdexFolder,
+      auditEntries
     );
     if (disposed) return;
     // Superada por otra más nueva mientras leía: lo suyo es anterior, no pisa nada.
@@ -343,19 +356,38 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   // frontmatter, cabeceras e índice al día -----------------------------------
 
   function noteIdByPath(path: string): string | null {
-    return walk?.systemNotes.find((note) => note.path === path)?.id ?? null;
+    return walk?.noteIdByPath?.get(path) ?? walk?.systemNotes.find((note) => note.path === path)?.id ?? null;
   }
 
-  /** Tras CUALQUIER escritura de este lote: recalcula el índice (pendiente del
-   *  lote 1, punto 4). Con `syncHeaders`, además relee cabeceras e índice del
-   *  sistema (tarea 3, «tras crear o renombrar un ID desde Hebra») y recalcula otra
-   *  vez, para que los hallazgos reflejen ese segundo escrito. */
-  async function afterJdexWrite(syncHeaders: boolean): Promise<void> {
-    await rebuild();
-    if (syncHeaders && walk && index) {
-      await refreshJdexHeadersAndIndex(api.vault, walk, index, settings.systemIndexNote);
-      await rebuild();
+  function sameFolderPaths(left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>): boolean {
+    return left.size === right.size && [...left].every(([id, path]) => right.get(id) === path);
+  }
+
+  /** A folder notice emitted by our own write needs no second walk after that write's
+   *  rebuild. A different snapshot remains queued for the next batch. */
+  function settleFolderChanges(): void {
+    if (walk && pendingFolderPaths && sameFolderPaths(walk.folderPaths, pendingFolderPaths)) {
+      pendingFolderPaths = null;
+      pendingFull = false;
     }
+  }
+
+  /** Una escritura propia recorre la biblioteca una vez; las cabeceras modificadas
+   *  después se incorporan por ids, sin otra reconstrucción completa. */
+  async function afterJdexWrite(syncHeaders: boolean, vault: PluginVault = api.vault): Promise<void> {
+    await rebuild();
+    settleFolderChanges();
+    if (syncHeaders && walk && index) {
+      const result = await refreshJdexHeadersAndIndex(vault, walk, index, settings.systemIndexNote);
+      if (result.written.length > 0) await refreshNotes(result.written);
+    }
+  }
+
+  /** Manual JDex and folder changes refresh managed blocks; unchanged bodies do not write. */
+  async function syncLiveHeaders(): Promise<void> {
+    if (disposed || !settings.liveHeaders || !walk || !index) return;
+    const result = await journal.run('fix', 'Actualizar cabeceras e índice vivos', (vault) => refreshJdexHeadersAndIndex(vault, walk!, index!, settings.systemIndexNote));
+    if (result.written.length > 0) await refreshNotes(result.written);
   }
 
   function reportCreateOutcome(outcome: JdexCreateOutcome): void {
@@ -375,25 +407,28 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountCreateIdDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            await rebuild();
-            if (!index) throw new Error('No se pudo actualizar el índice.');
-            return selectCreationSystem(index, namePrefix(settings));
+            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
           },
           categories: currentIndex.categories,
           createFolderDefault: settings.createFolderByDefault,
+          createPatternDefault: settings.createPatternByDefault,
+          patternFor: (category) => patternFor(settings, category),
           onSubmit: async (request) => {
             try {
-              const outcome = await createJdexId(
-                api.vault,
-                api.markdown,
-                walk!,
-                settings,
-                index!,
-                request
-              );
+              const outcome = await journal.run('create-id', 'Crear ID', async (vault) => {
+                const created = await createJdexId(
+                  vault,
+                  api.markdown,
+                  walk!,
+                  settings,
+                  index!,
+                  request
+                );
+                await afterJdexWrite(true, vault);
+                return created;
+              });
               handle?.close();
               reportCreateOutcome(outcome);
-              await afterJdexWrite(true);
               api.workspace.openNote(outcome.note.id);
             } catch (error) {
               host.notice(error instanceof Error ? error.message : String(error));
@@ -421,17 +456,20 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           createFolderDefault: settings.createFolderByDefault,
           onSubmit: async (request) => {
             try {
-              const outcome = await createJdexCategory(
-                api.vault,
-                api.markdown,
-                currentWalk,
-                settings,
-                currentIndex,
-                request
-              );
+              const outcome = await journal.run('create-structure', 'Crear categoría', async (vault) => {
+                const created = await createJdexCategory(
+                  vault,
+                  api.markdown,
+                  currentWalk,
+                  settings,
+                  currentIndex,
+                  request
+                );
+                await afterJdexWrite(true, vault);
+                return created;
+              });
               handle?.close();
               reportCreateOutcome(outcome);
-              await afterJdexWrite(true);
               api.workspace.openNote(outcome.note.id);
             } catch (error) {
               host.notice(error instanceof Error ? error.message : String(error));
@@ -454,16 +492,19 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           createFolderDefault: settings.createFolderByDefault,
           onSubmit: async (request) => {
             try {
-              const outcome = await createJdexArea(
-                api.vault,
-                api.markdown,
-                currentWalk,
-                settings,
-                request
-              );
+              const outcome = await journal.run('create-structure', 'Crear área', async (vault) => {
+                const created = await createJdexArea(
+                  vault,
+                  api.markdown,
+                  currentWalk,
+                  settings,
+                  request
+                );
+                await afterJdexWrite(true, vault);
+                return created;
+              });
               handle?.close();
               reportCreateOutcome(outcome);
-              await afterJdexWrite(true);
               api.workspace.openNote(outcome.note.id);
             } catch (error) {
               host.notice(error instanceof Error ? error.message : String(error));
@@ -487,24 +528,25 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountCreateHeaderDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            await rebuild();
-            if (!index) throw new Error('No se pudo actualizar el índice.');
-            return selectCreationSystem(index, namePrefix(settings));
+            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
           },
           categories: currentIndex.categories,
           onSubmit: async (request) => {
             try {
-              const outcome = await createJdexHeader(
-                api.vault,
-                api.markdown,
-                walk!,
-                settings,
-                index!,
-                request
-              );
+              const outcome = await journal.run('create-id', 'Crear cabecera', async (vault) => {
+                const created = await createJdexHeader(
+                  vault,
+                  api.markdown,
+                  walk!,
+                  settings,
+                  index!,
+                  request
+                );
+                await afterJdexWrite(true, vault);
+                return created;
+              });
               handle?.close();
               reportCreateOutcome(outcome);
-              await afterJdexWrite(true);
               api.workspace.openNote(outcome.note.id);
             } catch (error) {
               host.notice(error instanceof Error ? error.message : String(error));
@@ -529,25 +571,26 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountCreateChildDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            await rebuild();
-            if (!index) throw new Error('No se pudo actualizar el índice.');
-            return index;
+            return readJdexCreationIndex(api.vault, settings);
           },
           parent,
           createFolderDefault: settings.createFolderByDefault,
           onSubmit: async (request) => {
             try {
-              const outcome = await createJdexChild(
-                api.vault,
-                api.markdown,
-                walk!,
-                settings,
-                index!,
-                request
-              );
+              const outcome = await journal.run('create-id', 'Crear hijo de ID', async (vault) => {
+                const created = await createJdexChild(
+                  vault,
+                  api.markdown,
+                  walk!,
+                  settings,
+                  index!,
+                  request
+                );
+                await afterJdexWrite(true, vault);
+                return created;
+              });
               handle?.close();
               reportCreateOutcome(outcome);
-              await afterJdexWrite(true);
               api.workspace.openNote(outcome.note.id);
             } catch (error) {
               host.notice(error instanceof Error ? error.message : String(error));
@@ -566,7 +609,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountJdexNormalizeView(el, {
           findings: subset,
           onApply: async (chosenPaths) => {
-            const result = await applyJdexFrontmatterFixes(api.vault, api.markdown, subset, noteIdByPath, chosenPaths);
+            const result = await journal.run('fix', 'Normalizar frontmatter JDex', (vault) => applyJdexFrontmatterFixes(vault, api.markdown, subset, noteIdByPath, chosenPaths));
             for (const warning of result.warnings) host.notice(warning);
             handle?.close();
             await rebuild();
@@ -592,7 +635,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   async function refreshHeadersCommand(): Promise<void> {
     if (!walk || !index) return;
-    const result = await refreshJdexHeaders(api.vault, walk, index);
+    const result = await journal.run('fix', 'Actualizar cabeceras', (vault) => refreshJdexHeaders(vault, walk!, index!));
     host.notice(
       result.written.length > 0
         ? `${result.written.length} cabecera(s) actualizada(s).`
@@ -603,12 +646,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   async function refreshIndexCommand(): Promise<void> {
     if (!walk || !index) return;
-    const result = await refreshJdexSystemIndex(
-      api.vault,
-      walk,
-      index,
-      settings.systemIndexNote
-    );
+    const result = await journal.run('fix', 'Actualizar índice', (vault) => refreshJdexSystemIndex(vault, walk!, index!, settings.systemIndexNote));
     host.notice(
       result.written.length > 0
         ? 'Índice del sistema actualizado.'
@@ -641,9 +679,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountJdexWrapHeadersView(el, {
           candidates,
           onApply: async (chosenIds) => {
-            await applyJdexWrap(api.vault, candidates, [...chosenIds]);
+            await journal.run('fix', 'Envolver cabeceras', async (vault) => {
+              await applyJdexWrap(vault, candidates, [...chosenIds]);
+              await afterJdexWrite(true, vault);
+            });
             handle?.close();
-            await afterJdexWrite(true);
           }
         }),
       { title: 'JDex: envolver las listas de cabeceras en marcadores' }
@@ -692,9 +732,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   /** `api.workspace.onNoteTitleRenamed`: Hebra llama esto DESPUÉS de
    *  guardar el título (nunca antes: el guardado sigue síncrono, `renameTitle`/
-   *  `commitTitle`/`flush` intactos). Solo avisa si `jdex-rename-guard` detecta
-   *  `renumbered` o `moved`; el propio aviso es el botón de deshacer
-   *  (`host.notice(text, onClick)`, `onClick` = `event.undo()`). */
+   *  `commitTitle`/`flush` intactos). Los cambios de número ofrecen deshacer el
+   *  título; los cambios de nombre con pareja ofrecen renombrar su carpeta. */
   function onNoteTitleRenamed(event: PluginNoteTitleRenamedEvent): void {
     if (!walk || !index) return;
     const warning = jdexRenameWarning(
@@ -703,8 +742,33 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       index,
       settings
     );
-    if (!warning) return;
-    host.notice(jdexRenameNoticeMessage(warning), () => event.undo());
+    if (warning) host.notice(jdexRenameNoticeMessage(warning), () => event.undo());
+    const folderPath = walk.folderPaths.get(event.folderId);
+    if (folderPath !== settings.jdexFolder) return;
+    const oldPath = `${folderPath}/${event.oldTitle}.md`;
+    const newPath = `${folderPath}/${event.newTitle}.md`;
+    const beforeIndex = { ...index, ids: index.ids.map((entry) => entry.notePath === newPath
+      ? { ...entry, notePath: oldPath, title: extractJdPrefix(event.oldTitle)?.title ?? entry.title } : entry) };
+    const action = pairAction({ oldPath, newPath, isFolder: false }, beforeIndex, settings);
+    if (action.type !== 'rename-partner') return;
+    const folderId = jdexResolveFolderId(walk, action.partnerPath);
+    if (!folderId) return;
+    const parentSeparator = action.partnerPath.lastIndexOf('/');
+    const parentPath = parentSeparator === -1 ? '' : action.partnerPath.slice(0, parentSeparator);
+    const expectedParentId = jdexResolveFolderId(walk, parentPath);
+    const oldName = action.partnerPath.slice(action.partnerPath.lastIndexOf('/') + 1);
+    const newName = action.newPartnerPath.slice(action.newPartnerPath.lastIndexOf('/') + 1);
+    host.notice(`El título cambió. Renombrar carpeta «${oldName}» a «${newName}».`, () => {
+      void journal.run('move', `Renombrar carpeta ${oldName}`, async (vault) => {
+        const note = await vault.noteRead(event.noteId);
+        const folders = await vault.foldersList();
+        const folder = folders.find((entry) => entry.id === folderId);
+        if (!note || note.title !== event.newTitle || !folder || folder.name !== oldName || (folder.parentId ?? vault.rootFolderId()) !== expectedParentId) throw new Error('La nota o la carpeta cambió desde el aviso; vuelve a auditar.');
+        if (folders.some((entry) => entry.id !== folderId && entry.parentId === folder.parentId && entry.name === newName)) throw new Error(`Ya existe una carpeta «${newName}».`);
+        await vault.folderRename(folderId, newName);
+        await afterJdexWrite(true, vault);
+      }).catch((error: unknown) => host.notice(error instanceof Error ? error.message : String(error)));
+    });
   }
 
   // ---- Lote 3, tarea 2: ir a un ID, mover la nota a un ID, buscar dentro de un
@@ -754,7 +818,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       return;
     }
     try {
-      await api.vault.noteMove(note.id, folderId);
+      await journal.run('move', `Mover nota a ${entry.label}`, (vault) => vault.noteMove(note.id, folderId));
       host.notice(`Movida a ${entry.label}.`);
       await rebuild();
     } catch (error) {
@@ -794,20 +858,23 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     currentIndex: JdIndex
   ): Promise<void> {
     try {
-      const outcome = await retireJdexId(
-        api.vault,
-        api.markdown,
-        currentWalk,
-        currentIndex,
-        entry,
-        todayIso()
-      );
+      const outcome = await journal.run('retire', `Retirar ${entry.label}`, async (vault) => {
+        const retired = await retireJdexId(
+          vault,
+          api.markdown,
+          currentWalk,
+          currentIndex,
+          entry,
+          todayIso()
+        );
+        await afterJdexWrite(true, vault);
+        return retired;
+      });
       host.notice(
         outcome.moved
           ? `${entry.label} retirado: movido a su archivo.`
           : `${entry.label} retirado (la carpeta se queda donde estaba).`
       );
-      await afterJdexWrite(true);
     } catch (error) {
       host.notice(error instanceof Error ? error.message : String(error));
     }
@@ -888,16 +955,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           folderLabel: (note) => labelByFolderId.get(note.folderId) ?? 'Bandeja de entrada',
           onMove: async (note, entry) => {
             if (!entry.folderPath) throw new Error(`${entry.label} no tiene carpeta.`);
-            await moveJdexInboxNote(
-              api.vault,
-              note,
-              currentWalk,
-              entry.folderPath
-            );
+            await journal.run('move', `Mover inbox a ${entry.label}`, (vault) => moveJdexInboxNote(vault, note, currentWalk, entry.folderPath!));
             await rebuild();
           },
           onArchive: async (note) => {
-            await archiveJdexInboxNote(api.vault, api.markdown, note);
+            await journal.run('fix', 'Archivar nota de inbox', (vault) => archiveJdexInboxNote(vault, api.markdown, note));
             await rebuild();
           },
           onOpen: (note) => api.workspace.openNote(note.id)
@@ -912,6 +974,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
    *  notas cuyo aviso llegó (el mismo temporizador de siempre). */
   let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingFull = false;
+  let pendingFolderPaths: ReadonlyMap<string, string> | null = null;
   /** `true` tras apagar el módulo: ningún reintento ni lote vuelve a armarse. */
   let disposed = false;
   /** Fallos seguidos de la reconstrucción (a 0 SOLO cuando una termina bien; un aviso
@@ -960,7 +1023,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     pendingFull = false;
     pendingIds.clear();
     if (full) {
-      await rebuild().catch((error: unknown) => {
+      await rebuild().then(async () => { settleFolderChanges(); await syncLiveHeaders(); }).catch((error: unknown) => {
         report(error, 'rebuild');
         // Sin esto un fallo dejaría `walk` viejo (o `null`) hasta el próximo aviso de
         // carpetas.
@@ -970,7 +1033,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     }
     if (ids.length === 0) return;
     notesTail = notesTail
-      .then(() => refreshNotes(ids))
+      .then(async () => { await refreshNotes(ids); await syncLiveHeaders(); })
       .catch((error: unknown) => {
         report(error, 'actualizar-notas');
         // Los ids ya salieron de `pendingIds`: sin una reconstrucción completa una
@@ -1069,7 +1132,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   // Los oyentes se registran ANTES de la reconstrucción inicial: lo que llegue mientras
   // recorre (la primera ronda de sync) queda pendiente y se aplica al terminar.
-  const offFolders = api.workspace.onFoldersChange(() => scheduleRebuild());
+  const offFolders = api.workspace.onFoldersChange((folders) => {
+    const paths = jdexFolderPaths(folders.filter((folder) => folder.id !== api.vault.rootFolderId()), api.vault.rootFolderId());
+    pendingFolderPaths = paths;
+    scheduleRebuild();
+  });
   const offNotes = api.workspace.onNotesChange(onNotesChanged);
 
   await rebuild().catch((error: unknown) => report(error, 'rebuild-inicial'));
@@ -1166,6 +1233,41 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     name: 'JDex: procesar inbox',
     run: () => openProcessInboxDialog()
   });
+  const offCommandUndo = host.registerCommand({
+    id: JDEX_COMMAND_UNDO,
+    name: 'JDex: deshacer la última operación',
+    run: () => {
+      const entries = journal.entries();
+      const operation = entries[entries.length - 1];
+      let handle: PluginModalHandle | undefined;
+      handle = host.openModal((el) => mountJdexJournalView(el, {
+        entries,
+        onUndo: async () => {
+          try {
+            const latest = journal.entries();
+            if (latest[latest.length - 1] !== operation) throw new Error('El diario cambió desde que se abrió; vuelve a abrirlo antes de deshacer.');
+            const result = await journal.undoLast();
+            for (const warning of result.warnings) host.notice(warning);
+            if (result.undone > 0) host.notice(`${result.undone} paso(s) deshecho(s).`);
+            handle?.close();
+            await rebuild();
+          } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+        }
+      }), { title: 'Diario JDex' });
+    }
+  });
+  const offCommandHealth = host.registerCommand({
+    id: JDEX_COMMAND_HEALTH,
+    name: 'JDex: informe de salud del sistema',
+    run: async () => {
+      try {
+        await rebuild();
+        if (!walk || !index) return;
+        const note = await journal.run('fix', 'Crear informe de salud', (vault) => createJdexHealthReport(vault, walk!, index!, settings, todayIso()));
+        api.workspace.openNote(note.id);
+      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+    }
+  });
 
   let unmountAuditView: (() => void) | undefined;
   let auditViewEl: HTMLElement | null = null;
@@ -1185,7 +1287,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       applyFrontmatterFix: (finding) => {
         void (async () => {
           try {
-            const result = await applyJdexFrontmatterFixes(api.vault, api.markdown, [finding], noteIdByPath);
+            const result = await journal.run('fix', 'Aplicar arreglo de auditoría', (vault) => applyJdexFrontmatterFixes(vault, api.markdown, [finding], noteIdByPath));
             for (const warning of result.warnings) host.notice(warning);
             await rebuild();
             if (auditViewEl) {
@@ -1336,6 +1438,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandWrapHeaders();
     offCommandGotoId();
     offCommandProcessInbox();
+    offCommandUndo();
+    offCommandHealth();
     offAuditView();
     offIdSectionActiveNote();
     offIdSectionView();

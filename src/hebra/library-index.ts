@@ -67,6 +67,7 @@ export interface JdexLibraryPort {
     scope?: PluginNotesScope
   ): Promise<PluginNotesPage>;
   noteRead(id: string): Promise<PluginNote | null>;
+  noteSummary(ids: readonly string[]): ReturnType<PluginVault['noteSummary']>;
 }
 
 /**
@@ -108,10 +109,11 @@ export function jdexFolderPaths(
 /** El id de la carpeta viva cuya ruta completa es exactamente `path` (o la raíz para
  *  `''`), o `null` sin ninguna. */
 export function jdexResolveFolderId(
-  walk: Pick<JdexLibraryWalk, 'folderPaths' | 'rootFolderId'>,
+  walk: Pick<JdexLibraryWalk, 'folderPaths' | 'rootFolderId'> & { folderIdByPath?: ReadonlyMap<string, string> },
   path: string
 ): string | null {
   if (path === '') return walk.rootFolderId;
+  if (walk.folderIdByPath) return walk.folderIdByPath.get(path) ?? null;
   for (const [id, candidate] of walk.folderPaths) {
     if (candidate === path) return id;
   }
@@ -156,6 +158,10 @@ export interface JdexLibraryWalk {
   readonly rootFolderId: string;
   /** Ruta de cada carpeta VIVA, id → ruta. */
   readonly folderPaths: ReadonlyMap<string, string>;
+  /** Ruta → id; se calcula junto a `folderPaths` una vez por recorrido. */
+  readonly folderIdByPath?: ReadonlyMap<string, string>;
+  /** Ruta de nota → id, calculada con el recorrido y renovada en cambios por ids. */
+  readonly noteIdByPath?: ReadonlyMap<string, string>;
   /** Rutas de las carpetas bajo `systemRoot` (para `IndexInput.folderPaths`). */
   readonly systemFolderPaths: readonly string[];
   /** Notas directas de cada carpeta bajo `systemRoot`, raíz de la biblioteca incluida. */
@@ -186,12 +192,14 @@ export async function walkJdexLibrary(
   library: JdexLibraryPort,
   allFolders: readonly PluginFolder[],
   systemRoot: string,
-  rootFolderId: string
+  rootFolderId: string,
+  knownFolderPaths?: ReadonlyMap<string, string>
 ): Promise<JdexLibraryWalk> {
   // La raíz de la biblioteca no es una carpeta más (Hebra no la lista; el host falso de
   // la API sí): se recorre aparte, así que nunca entra dos veces.
   const folders = allFolders.filter((folder) => folder.id !== rootFolderId);
-  const folderPaths = jdexFolderPaths(folders, rootFolderId);
+  const folderPaths = knownFolderPaths ?? jdexFolderPaths(folders, rootFolderId);
+  const folderIdByPath = new Map([...folderPaths].map(([id, path]) => [path, id]));
   const underRoot = folders.filter(
     (folder) => relativeTo(systemRoot, folderPaths.get(folder.id) ?? '') !== null
   );
@@ -204,7 +212,9 @@ export async function walkJdexLibrary(
   for (const folder of underRoot) {
     systemNotes.push(...(await directNotesOf(library, folder.id, folderPaths.get(folder.id)!)));
   }
-  return { rootFolderId, folderPaths, systemFolderPaths, systemNotes: sortJdexNotes(systemNotes) };
+  const sortedNotes = sortJdexNotes(systemNotes);
+  const noteIdByPath = indexNotePaths(sortedNotes);
+  return { rootFolderId, folderPaths, folderIdByPath, noteIdByPath, systemFolderPaths, systemNotes: sortedNotes };
 }
 
 /** Orden CANÓNICO de las notas del sistema (ruta, después id): el recorrido completo y la
@@ -222,6 +232,13 @@ export function sortJdexNotes(notes: readonly JdexNoteRef[]): JdexNoteRef[] {
         ? -1
         : 1
   );
+}
+
+/** Keep the first id on duplicate paths, matching the earlier ordered lookup. */
+function indexNotePaths(notes: readonly JdexNoteRef[]): Map<string, string> {
+  const byPath = new Map<string, string>();
+  for (const note of notes) if (!byPath.has(note.path)) byPath.set(note.path, note.id);
+  return byPath;
 }
 
 /** `IndexInput` del motor a partir de un recorrido ya hecho: `buildIndex` filtra por su
@@ -246,7 +263,7 @@ export function buildJdexIndexInput(
  * cargar los cuerpos de las que SÍ tienen descripción sería trabajo de sobra.
  */
 export async function buildJdexAuditNotes(
-  library: Pick<JdexLibraryPort, 'noteRead'>,
+  library: Pick<JdexLibraryPort, 'noteRead' | 'noteSummary'>,
   markdown: JdexFrontmatterMarkdown,
   walk: JdexLibraryWalk,
   jdexFolder: string
@@ -286,21 +303,34 @@ function jdexFolderIdOf(walk: JdexLibraryWalk, jdexFolder: string): string | nul
   return jdexFolder === '' ? null : jdexResolveFolderId(walk, jdexFolder);
 }
 
-/** Lee (`noteRead`, con cuerpo) cada nota directa de la carpeta JDex. */
+/** Consulta SHA en lotes de 200 y relee solo notas nuevas o con cuerpo distinto.
+ * Un resumen ausente equivale a una nota purgada durante el recorrido. */
 export async function loadJdexAuditEntries(
-  library: Pick<JdexLibraryPort, 'noteRead'>,
+  library: Pick<JdexLibraryPort, 'noteRead' | 'noteSummary'>,
   markdown: JdexFrontmatterMarkdown,
   walk: JdexLibraryWalk,
-  jdexFolder: string
+  jdexFolder: string,
+  previous: ReadonlyMap<string, JdexAuditEntry> = new Map()
 ): Promise<Map<string, JdexAuditEntry>> {
   const entries = new Map<string, JdexAuditEntry>();
   const jdexFolderId = jdexFolderIdOf(walk, jdexFolder);
   if (jdexFolderId === null) return entries;
-  for (const ref of walk.systemNotes) {
-    if (ref.folderId !== jdexFolderId) continue;
-    const row = await library.noteRead(ref.id);
-    if (!row) continue; // purgada entre medias: no cuenta.
-    entries.set(ref.id, jdexAuditEntryOf(row, markdown));
+  const refs = walk.systemNotes.filter((ref) => ref.folderId === jdexFolderId);
+  for (let start = 0; start < refs.length; start += NOTE_SUMMARY_MAX_IDS) {
+    const batch = refs.slice(start, start + NOTE_SUMMARY_MAX_IDS);
+    const summaries = new Map((await library.noteSummary(batch.map((ref) => ref.id))).map((item) => [item.id, item]));
+    for (const ref of batch) {
+      const summary = summaries.get(ref.id);
+      if (!summary || summary.trashedAt !== null || summary.archivedAt !== null) continue;
+      const known = previous.get(ref.id);
+      const sha = (summary as { bodySha256?: unknown }).bodySha256;
+      if (known && typeof sha === 'string' && sha === known.sha) {
+        entries.set(ref.id, known);
+        continue;
+      }
+      const row = await library.noteRead(ref.id);
+      if (row) entries.set(ref.id, jdexAuditEntryOf(row, markdown));
+    }
   }
   return entries;
 }
@@ -423,9 +453,10 @@ export async function applyJdexNoteChanges(
     }
   }
   if (!changed) return { kind: 'unchanged' };
+  const systemNotes = sortJdexNotes([...notes.values()]);
   return {
     kind: 'updated',
-    state: { walk: { ...walk, systemNotes: sortJdexNotes([...notes.values()]) }, entries }
+    state: { walk: { ...walk, systemNotes, noteIdByPath: indexNotePaths(systemNotes) }, entries }
   };
 }
 

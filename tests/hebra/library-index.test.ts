@@ -1,6 +1,6 @@
 import { createFakePluginApi } from 'hebra-plugin-api/testing';
-import type { PluginFolder, PluginNote, PluginNotesPage, PluginNotesScope } from 'hebra-plugin-api';
-import { describe, expect, it } from 'vitest';
+import type { PluginFolder, PluginNote, PluginNoteSummary, PluginNotesPage, PluginNotesScope } from 'hebra-plugin-api';
+import { describe, expect, it, vi } from 'vitest';
 import { auditSystem, buildIndex, countProblems, locate } from '../../src/hebra/engine';
 import {
   applyJdexNoteChanges,
@@ -43,6 +43,7 @@ function noteRow(id: string, folderId: string, title: string, body = ''): Plugin
 }
 
 function fakeLibrary(notesByFolder: Map<string, PluginNote[]>): JdexLibraryPort {
+  const noteById = (id: string) => [...notesByFolder.values()].flat().find((note) => note.id === id);
   return {
     async notesPage(cursor, limit, scope?: PluginNotesScope): Promise<PluginNotesPage> {
       if (!scope || scope.kind !== 'folder') throw new Error('se esperaba un ámbito de carpeta');
@@ -64,11 +65,13 @@ function fakeLibrary(notesByFolder: Map<string, PluginNote[]>): JdexLibraryPort 
       };
     },
     async noteRead(id) {
-      for (const notes of notesByFolder.values()) {
-        const found = notes.find((n) => n.id === id);
-        if (found) return found;
-      }
-      return null;
+      return noteById(id) ?? null;
+    },
+    async noteSummary(ids): Promise<PluginNoteSummary[]> {
+      return ids.flatMap((id) => {
+        const note = noteById(id);
+        return note ? [{ ...note, excerpt: '', bodySha256: note.revision.bodySha256 }] : [];
+      });
     }
   };
 }
@@ -269,6 +272,54 @@ describe('buildJdexAuditNotes + buildJdexAuditInput + auditSystem', () => {
     );
     expect(folderWithoutNote).toBeDefined();
     expect(countProblems(findings)).toBeGreaterThan(0);
+  });
+});
+
+describe('loadJdexAuditEntries', () => {
+  it('consulta resúmenes en lotes de 200 y relee solo el cuerpo cambiado', async () => {
+    const vault = new FakeJdexVault();
+    const jdex = fakeFolder('f-jdex', ROOT_FOLDER_ID, '00.00 JDex');
+    vault.seedFolder(jdex);
+    for (let number = 0; number < 405; number += 1) {
+      vault.seedNote(fakeNote(`note-${number}`, jdex.id, `# 21.11 Nota ${number}\n`));
+    }
+    const walk = await walkJdexLibrary(vault, [jdex], '', ROOT_FOLDER_ID);
+    const noteRead = vi.spyOn(vault, 'noteRead');
+    const noteSummary = vi.spyOn(vault, 'noteSummary');
+
+    const first = await loadJdexAuditEntries(vault, markdown, walk, '00.00 JDex');
+    expect(first.size).toBe(405);
+    expect(noteRead).toHaveBeenCalledTimes(405);
+    expect(noteSummary.mock.calls.map(([ids]) => ids.length)).toEqual([200, 200, 5]);
+
+    noteRead.mockClear();
+    noteSummary.mockClear();
+    const unchanged = await loadJdexAuditEntries(vault, markdown, walk, '00.00 JDex', first);
+    expect(unchanged).toEqual(first);
+    expect(noteRead).not.toHaveBeenCalled();
+    expect(noteSummary.mock.calls.map(([ids]) => ids.length)).toEqual([200, 200, 5]);
+
+    vault.saveElsewhere('note-123', '# 21.11 Nota 123\n\nTexto nuevo.');
+    noteRead.mockClear();
+    const updated = await loadJdexAuditEntries(vault, markdown, walk, '00.00 JDex', unchanged);
+    expect(noteRead).toHaveBeenCalledTimes(1);
+    expect(noteRead).toHaveBeenCalledWith('note-123');
+    expect(updated.get('note-123')?.sha).not.toBe(first.get('note-123')?.sha);
+  });
+
+  it('con un host sin bodySha256 en los resúmenes comprueba el cuerpo', async () => {
+    const vault = new FakeJdexVault();
+    const jdex = fakeFolder('f-jdex', ROOT_FOLDER_ID, '00.00 JDex');
+    vault.seedFolder(jdex);
+    vault.seedNote(fakeNote('note-1', jdex.id, '# 21.11 Hebra\n'));
+    const walk = await walkJdexLibrary(vault, [jdex], '', ROOT_FOLDER_ID);
+    const previous = await loadJdexAuditEntries(vault, markdown, walk, '00.00 JDex');
+    vault.omitSummaryBodySha = true;
+    const noteRead = vi.spyOn(vault, 'noteRead');
+
+    const next = await loadJdexAuditEntries(vault, markdown, walk, '00.00 JDex', previous);
+    expect(noteRead).toHaveBeenCalledTimes(1);
+    expect(next).toEqual(previous);
   });
 });
 

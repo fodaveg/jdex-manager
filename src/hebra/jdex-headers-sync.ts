@@ -1,6 +1,6 @@
 /**
  * Cabeceras vivas y el índice del sistema, al día solos (tarea 3 del lote, 28 sep
- * 2026): tras crear (o, en un lote posterior, renombrar) un ID desde Hebra, releer las
+ * 2026): tras crear un ID o recibir cambios manuales del sistema desde Hebra, releer las
  * notas cabecera del sistema y reescribir su lista de hijos entre `<!-- jdex:hijos -->`
  * y `<!-- /jdex:hijos -->` (`childrenOf`, `renderChildren`, `replaceChildrenBlock`), y
  * la nota del `00.00` (o `systemIndexNote`, si está configurada) entre
@@ -22,12 +22,11 @@ import type { JdexLibraryWalk } from './library-index';
 
 function noteIdOf(walk: JdexLibraryWalk, path: string | undefined): string | null {
   if (!path) return null;
-  return walk.systemNotes.find((note) => note.path === path)?.id ?? null;
+  return walk.noteIdByPath?.get(path) ?? walk.systemNotes.find((note) => note.path === path)?.id ?? null;
 }
 
-/** Reescribe el bloque de hijos de TODAS las cabeceras del índice que tengan nota. Las
- *  que no tienen marcadores salen en `skipped` sin tocarse (`rewriteJdexNotes` con
- *  `nextBody` devolviendo `null`). */
+/** Reescribe el bloque de hijos de las cabeceras con nota y marcadores.
+ *  Los cuerpos sin marcadores o ya actualizados no se escriben. */
 export async function refreshJdexHeaders(
   library: JdexRewriteLibrary,
   walk: JdexLibraryWalk,
@@ -65,14 +64,15 @@ export async function refreshJdexSystemIndex(
 }
 
 /** Las dos reescrituras de esta tarea, en una llamada: lo que ejecuta `jdex-runtime.ts`
- *  después de cada creación propia (nunca tras un `rebuild` genérico por cambios
- *  ajenos: el contrato solo pide «tras crear o renombrar un ID desde Hebra»). */
+ *  después de una creación propia o de un cambio manual en la JDex. Los bloques ya
+ *  actualizados no se escriben, así que los avisos del propio refresco terminan sin bucle. */
 export async function refreshJdexHeadersAndIndex(
   library: JdexRewriteLibrary,
   walk: JdexLibraryWalk,
   index: JdIndex,
   systemIndexNote: string
-): Promise<void> {
-  await refreshJdexHeaders(library, walk, index);
-  await refreshJdexSystemIndex(library, walk, index, systemIndexNote);
+): Promise<{ written: string[]; skipped: string[] }> {
+  const headers = await refreshJdexHeaders(library, walk, index);
+  const system = await refreshJdexSystemIndex(library, walk, index, systemIndexNote);
+  return { written: [...headers.written, ...system.written], skipped: [...headers.skipped, ...system.skipped] };
 }

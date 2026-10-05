@@ -384,7 +384,7 @@ describe('activate', () => {
     expect(undo).toHaveBeenCalledOnce();
   });
 
-  it('lote 5: un título sin cambio de ID no dispara el aviso', async () => {
+  it('un título sin cambio de ID ofrece renombrar la carpeta sin aviso de renumeración', async () => {
     const fixture = buildFixture();
     const { context, fireNoteTitleRenamed } = await setup(fixture);
     const runtime = jdexRuntimeExport(context);
@@ -398,7 +398,8 @@ describe('activate', () => {
       undo: vi.fn()
     });
 
-    expect(document.querySelector('.hebra-module-notice')).toBeNull();
+    expect(document.querySelector('.hebra-module-notice')?.textContent).toContain('Renombrar carpeta');
+    expect(document.querySelector('.hebra-module-notice')?.textContent).not.toContain('pasaría');
   });
 
   it('un cambio de carpetas reconstruye el índice (con debounce)', async () => {

@@ -90,7 +90,9 @@ export {
   // reading-links.ts — números JD sueltos en un texto (lote 4, tarea 2: «los números
   // JD son clicables… y autocompletado»). El motor solo ENCUENTRA; el host pinta el
   // enlace y ofrece las sugerencias (`jdex-editor-extension.ts`).
-  findJdNumbers
+  findJdNumbers,
+  pushOperation, JOURNAL_MAX, patternFor, parseCategoryPatterns, formatCategoryPatterns,
+  healthFileName, renderHealthReport
 } from '../jd/public';
 
 export type {
@@ -120,5 +122,7 @@ export type {
   RenameEvent,
   PairAction,
   RetirePlan,
-  NumberMatch
+  NumberMatch,
+  Operation,
+  OperationKind
 } from '../jd/public';

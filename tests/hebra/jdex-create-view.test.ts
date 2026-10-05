@@ -42,6 +42,23 @@ function textInputs(el: HTMLElement): HTMLInputElement[] {
 }
 
 describe('mountCreateIdDialog', () => {
+  it('propone el patrón por defecto y permite desmarcarlo antes de crear', async () => {
+    const index = fixtureIndex();
+    const el = document.createElement('div');
+    const onSubmit = vi.fn(async () => {});
+    mountCreateIdDialog(el, { index, categories: index.categories, createFolderDefault: true, createPatternDefault: true, patternFor: () => ['70 Adjuntos'], onSubmit });
+    const title = textInputs(el)[1];
+    title.value = 'Con patrón';
+    title.dispatchEvent(new Event('input'));
+    const toggles = [...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(toggles[1].checked).toBe(true);
+    toggles[1].checked = false;
+    toggles[1].dispatchEvent(new Event('change'));
+    el.querySelector<HTMLButtonElement>('.hebra-jdex-dialog-primary')!.click();
+    await Promise.resolve();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ createPattern: false }));
+  });
+
   it('propone el siguiente libre saltando ceros y cabeceras (.21, no .12)', () => {
     const index = fixtureIndex();
     const el = document.createElement('div');
