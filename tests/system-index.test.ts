@@ -44,11 +44,13 @@ describe("markers", () => {
 });
 
 describe("audit: structure without note", () => {
-  it("lists area and category folders without a JDex note, informative by default", () => {
-    const f = auditSystem({ index, notes: [], filePaths: [] }).filter((x) => x.kind === "structure-without-note");
-    expect(f.map((x) => x.number)).toEqual(["00-09", "10-19", "00", "11", "21", "22"]);
-    expect(f.every((x) => x.informative)).toBe(true);
-    const strict = auditSystem({ index, notes: [], filePaths: [], options: { structureNotesAreFindings: true } }).filter((x) => x.kind === "structure-without-note");
-    expect(strict.every((x) => !x.informative)).toBe(true);
+  it("omits structure findings by default and requires explicit opt-in", () => {
+    const defaults = auditSystem({ index, jdexFolder: JDEX, notes: [], filePaths: [] }).filter((finding) => finding.kind === "structure-without-note");
+    expect(defaults).toEqual([]);
+    const disabled = auditSystem({ index, jdexFolder: JDEX, notes: [], filePaths: [], options: { structureNotesAreFindings: false } }).filter((finding) => finding.kind === "structure-without-note");
+    expect(disabled).toEqual([]);
+    const enabled = auditSystem({ index, jdexFolder: JDEX, notes: [], filePaths: [], options: { structureNotesAreFindings: true } }).filter((finding) => finding.kind === "structure-without-note");
+    expect(enabled.map((finding) => finding.number)).toEqual(["00-09", "10-19", "00", "11", "21", "22"]);
+    expect(enabled.every((finding) => !finding.informative && finding.fix?.type === "create-note")).toBe(true);
   });
 });

@@ -245,7 +245,9 @@ describe('buildJdexAuditNotes + buildJdexAuditInput + auditSystem', () => {
     const input = buildJdexIndexInput(walk, { systemRoot: '', jdexFolder: jdexFolderPath });
     const index = buildIndex(input);
 
+    const noteRead = vi.spyOn(library, 'noteRead');
     const notes = await buildJdexAuditNotes(library, markdown, walk, jdexFolderPath);
+    expect(noteRead.mock.calls.map(([id]) => id).sort()).toEqual(['n-header', 'n-hebra']);
     // Solo las 2 notas DIRECTAS de la carpeta JDex, nunca la de dentro de Hebra.
     expect(notes.map((n) => n.path).sort()).toEqual(
       [
@@ -253,10 +255,10 @@ describe('buildJdexAuditNotes + buildJdexAuditInput + auditSystem', () => {
         jdexFolderPath + '/21.11 Hebra.md'
       ].sort()
     );
-    // La de Hebra ya tiene descripción: no lleva `body`.
+    // Conserva el cuerpo ya leído para comprobar copias idénticas, sin otra lectura.
     const hebraNote = notes.find((n) => n.path.endsWith('21.11 Hebra.md'));
     expect(hebraNote?.frontmatter?.jd).toBe(21.11); // YAML real: número, no texto.
-    expect(hebraNote?.body).toBeUndefined();
+    expect(hebraNote?.body).toBe(notesByFolder.get(ids.jdexId.id)!.find((note) => note.id === 'n-hebra')!.body);
     // La cabecera no tiene `descripcion`: sí lleva `body` (para proponerla).
     const headerNote = notes.find((n) => n.path.endsWith('Herramientas internas.md'));
     expect(headerNote?.body).toBeDefined();
@@ -280,8 +282,9 @@ describe('loadJdexAuditEntries', () => {
     const vault = new FakeJdexVault();
     const jdex = fakeFolder('f-jdex', ROOT_FOLDER_ID, '00.00 JDex');
     vault.seedFolder(jdex);
+    const describedBody = '---\ndescripcion: Ya descrita\n---\n# 21.11 Nota 0\n';
     for (let number = 0; number < 405; number += 1) {
-      vault.seedNote(fakeNote(`note-${number}`, jdex.id, `# 21.11 Nota ${number}\n`));
+      vault.seedNote(fakeNote(`note-${number}`, jdex.id, number === 0 ? describedBody : `# 21.11 Nota ${number}\n`));
     }
     const walk = await walkJdexLibrary(vault, [jdex], '', ROOT_FOLDER_ID);
     const noteRead = vi.spyOn(vault, 'noteRead');
@@ -289,6 +292,7 @@ describe('loadJdexAuditEntries', () => {
 
     const first = await loadJdexAuditEntries(vault, markdown, walk, '00.00 JDex');
     expect(first.size).toBe(405);
+    expect(first.get('note-0')?.body).toBe(describedBody);
     expect(noteRead).toHaveBeenCalledTimes(405);
     expect(noteSummary.mock.calls.map(([ids]) => ids.length)).toEqual([200, 200, 5]);
 
@@ -296,6 +300,7 @@ describe('loadJdexAuditEntries', () => {
     noteSummary.mockClear();
     const unchanged = await loadJdexAuditEntries(vault, markdown, walk, '00.00 JDex', first);
     expect(unchanged).toEqual(first);
+    expect(unchanged.get('note-0')).toBe(first.get('note-0'));
     expect(noteRead).not.toHaveBeenCalled();
     expect(noteSummary.mock.calls.map(([ids]) => ids.length)).toEqual([200, 200, 5]);
 

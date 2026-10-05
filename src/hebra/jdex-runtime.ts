@@ -78,6 +78,7 @@ import {
   buildJdexInboxSummary,
   jdexFolderPaths,
   jdexNotePath,
+  jdexNoteFileStem,
   jdexResolveFolderId,
   readJdexCreationIndex,
   walkJdexLibrary,
@@ -779,8 +780,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     if (warning) host.notice(jdexRenameNoticeMessage(warning), () => event.undo());
     const folderPath = walk.folderPaths.get(event.folderId);
     if (folderPath !== settings.jdexFolder) return;
-    const oldPath = `${folderPath}/${event.oldTitle}.md`;
-    const newPath = `${folderPath}/${event.newTitle}.md`;
+    const oldPath = `${folderPath}/${jdexNoteFileStem(event.oldTitle)}.md`;
+    const newPath = `${folderPath}/${jdexNoteFileStem(event.newTitle)}.md`;
     const beforeIndex = { ...index, ids: index.ids.map((entry) => entry.notePath === newPath
       ? { ...entry, notePath: oldPath, title: extractJdPrefix(event.oldTitle)?.title ?? entry.title } : entry) };
     const action = pairAction({ oldPath, newPath, isFolder: false }, beforeIndex, settings);

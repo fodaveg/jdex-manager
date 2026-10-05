@@ -687,7 +687,7 @@ export default class JdexManagerPlugin extends Plugin {
     if (!entry) return;
     let folder = entry.folderPath;
     if (!folder) {
-      const category = index.categories.find((c) => c.number === entry.category);
+      const category = selectCreationSystem(index, entry.system).categories.find((c) => c.number === entry.category);
       if (!category?.path) {
         new Notice(`${entry.label} has no folder and category ${entry.category} has no folder in the system root to create it in.`, 8000);
         return;
@@ -721,7 +721,7 @@ export default class JdexManagerPlugin extends Plugin {
     if (!file || this.settings.jdexFolder === "") return null;
     const number = categoryOfPath(this.settings.systemRoot, file.path);
     if (number === null) return null;
-    const category = this.cachedIndex().categories.find((c) => c.number === number);
+    const category = this.cachedIndex().categories.find((c) => systemKey(c.number, c.system) === number);
     return category?.path ? { path: category.path, label: category.label } : null;
   }
 
@@ -861,11 +861,10 @@ export default class JdexManagerPlugin extends Plugin {
     if (!parsed || parsed.number.kind !== "id" || parsed.number.extension) return null;
     const id = parsed.number.id;
     const index = this.cachedIndex();
-    const entry = index.ids.find((e) => e.id === id);
-    if (!entry) return null;
-    const isNote = file instanceof TFile && entry.notePath === file.path;
-    const isFolder = file instanceof TFolder && entry.folderPath === file.path;
-    return isNote || isFolder ? entry : null;
+    return index.ids.find((entry) => entry.id === id && sameSystem(entry, parsed.number) && (
+      (file instanceof TFile && entry.notePath === file.path) ||
+      (file instanceof TFolder && entry.folderPath === file.path)
+    )) ?? null;
   }
 
   activeIdEntry(): IdEntry | null {

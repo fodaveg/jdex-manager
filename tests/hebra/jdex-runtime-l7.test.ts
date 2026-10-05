@@ -3,19 +3,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import { activateJdex, JDEX_AUDIT_VIEW_ID, JDEX_COMMAND_CREATE_ID, JDEX_COMMAND_HEALTH, JDEX_COMMAND_NORMALIZE_ALL, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
+import { jdexNoteFileStem } from '../../src/hebra/library-index';
 
 const JDEX = '00-09 Sistema/00 Sistema/00.00 JDex';
 const REPORTS = '00-09 Sistema/00 Sistema/00.02 Informes';
 
-async function setup() {
+async function setup(oldTitle = '21.11 Antes') {
   const vault = new FakeJdexVault();
   for (const folder of [
     fakeFolder('sys', null, '00-09 Sistema'), fakeFolder('sys-cat', 'sys', '00 Sistema'),
     fakeFolder('jdex', 'sys-cat', '00.00 JDex'), fakeFolder('reports', 'sys-cat', '00.02 Informes'),
     fakeFolder('area', null, '20-29 Productos'), fakeFolder('cat', 'area', '21 Software'),
-    fakeFolder('id', 'cat', '21.11 Antes'),
+    fakeFolder('id', 'cat', jdexNoteFileStem(oldTitle)),
   ]) vault.seedFolder(folder);
-  vault.seedNote(fakeNote('n-id', 'jdex', '# 21.11 Antes #claude\n\nDescripción.\n'));
+  vault.seedNote(fakeNote('n-id', 'jdex', `# ${oldTitle} #claude\n\nDescripción.\n`));
   vault.seedNote(fakeNote('n-header', 'jdex', '# 21.10 ■ Cabecera\n\n<!-- jdex:hijos -->\n<!-- /jdex:hijos -->\n'));
   vault.seedNote(fakeNote('n-index', 'jdex', '# 00.00 JDex del sistema\n\n<!-- jdex:indice -->\n<!-- /jdex:indice -->\n'));
   const { api, fake, workspace } = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX, reportsFolder: REPORTS, subfolderPattern: '70 Adjuntos' } });
@@ -71,6 +72,19 @@ describe('L7 runtime Hebra', () => {
     undo.click();
     await vi.waitFor(async () => expect((await vault.foldersList()).find((folder) => folder.id === 'id')?.name).toBe('21.11 Antes'));
     expect((await vault.noteRead('n-id'))?.title).toBe('21.11 Después #claude');
+    await cleanup();
+  });
+
+  it('canonicaliza ambos títulos con separadores al proponer el renombrado de carpeta', async () => {
+    const { vault, workspace, cleanup } = await setup('21.11 Antes/con barra');
+    vault.saveElsewhere('n-id', '# 21.11 Después/otra barra #claude\n');
+    workspace.emitTitleRenamed({ noteId: 'n-id', folderId: 'jdex', oldTitle: '21.11 Antes/con barra #claude', newTitle: '21.11 Después/otra barra #claude', undo: vi.fn() });
+    const rename = document.querySelector<HTMLButtonElement>('.hebra-module-notice button')!;
+    expect(rename.textContent).toContain('Renombrar carpeta');
+    expect(rename.textContent).toContain('21.11 Después–otra barra');
+    rename.click();
+    await vi.waitFor(async () => expect((await vault.foldersList()).find((folder) => folder.id === 'id')?.name).toBe('21.11 Después–otra barra'));
+    expect((await vault.noteRead('n-id'))?.title).toBe('21.11 Después/otra barra #claude');
     await cleanup();
   });
 
