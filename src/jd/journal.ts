@@ -5,6 +5,8 @@
  */
 
 export type Effect =
+  /** A managed block update, guarded against later body edits at undo time. */
+  | { kind: "note-rewrite"; path: string; before: string; after: string }
   /** A note the plugin wrote, with the content it wrote (to tell "untouched" from "edited" at undo time). */
   | { kind: "created-note"; path: string; content: string }
   | { kind: "created-folder"; path: string }
@@ -39,6 +41,9 @@ export function describeUndo(op: Operation): string[] {
   const lines: string[] = [];
   for (const e of [...op.effects].reverse()) {
     switch (e.kind) {
+      case "note-rewrite":
+        lines.push(`Restore the managed blocks in ${e.path}.`);
+        break;
       case "created-note":
         lines.push(`Move ${e.path} to the trash.`);
         break;

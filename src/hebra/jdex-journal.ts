@@ -23,7 +23,16 @@ export interface JdexJournal {
 export type JdexJournalVault = PluginVault & {
   folderTrashEmpty?(id: string, expected: { name: string; parentId: string | null }): Promise<boolean>;
   noteRestore?(id: string, expected: { trashedAt: number; revision: PluginNoteRevision }): Promise<boolean>;
+  noteRestoreIfUnchanged?(id: string, expected: { trashedAt: number; revision: PluginNoteRevision }): Promise<PluginNote | null>;
+  noteTrashIfUnchanged?(id: string, expected: { revision: PluginNoteRevision; folderId: string }): Promise<PluginNote | null>;
+  noteMoveIfUnchanged?(id: string, folderId: string, expected: { revision: PluginNoteRevision; folderId: string }): Promise<PluginNote | null>;
+  folderRenameIfUnchanged?(id: string, name: string, expected: { name: string; parentId: string | null }): Promise<Awaited<ReturnType<PluginVault['folderRename']>> | null>;
+  folderMoveIfUnchanged?(id: string, parentId: string | null, expected: { name: string; parentId: string | null }): Promise<Awaited<ReturnType<PluginVault['folderMove']>> | null>;
 };
+
+type CommittedRewrite = { id: string; body: string; revision: PluginNoteRevision };
+type BatchWithCommits = Awaited<ReturnType<PluginVault['notesRewriteBatch']>> & { committed?: CommittedRewrite[] };
+type UndoResult = { warning: string | null; restored?: PluginNote };
 
 function sameRevision(a: PluginNoteRevision, b: PluginNoteRevision): boolean {
   return a.localSeq === b.localSeq && a.bodySha256 === b.bodySha256;
@@ -52,7 +61,7 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
         await persist();
       };
       const append = (effect: JdexJournalEffect) => appendMany([effect]);
-      const overrides: Partial<PluginVault> = {
+      const overrides: Partial<JdexJournalVault> = {
         noteCreate: async (input) => {
           const note = await vault.noteCreate(input);
           await append({ kind: 'note-create', id: note.id, body: note.body ?? input.body, folderId: note.folderId, revision: { ...note.revision } });
@@ -60,15 +69,18 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
         },
         notesRewriteBatch: async (requests, options) => {
           const before = new Map(await Promise.all(requests.map(async (entry) => [entry.id, await vault.noteRead(entry.id)] as const)));
-          const result = await vault.notesRewriteBatch(requests, options);
+          const result: BatchWithCommits = await vault.notesRewriteBatch(requests, options);
+          const committed = new Map(result.committed?.map((entry) => [entry.id, entry]));
           const effects: JdexJournalEffect[] = [];
           for (const id of result.written) {
             const prior = before.get(id);
             const request = requests.find((entry) => entry.id === id);
-            if (prior?.body !== null && prior && request && sameRevision(prior.revision, request.expected) && prior.body !== request.body) {
-              const written = await vault.noteRead(id);
-              effects.push({ kind: 'note-rewrite', id, before: prior.body, after: request.body,
-                revision: written?.body === request.body ? { ...written.revision } : undefined });
+            const written = committed.get(id);
+            if (prior?.body !== null && prior && request && sameRevision(prior.revision, request.expected) && prior.body !== (written?.body ?? request.body)) {
+              // The host reports the exact committed body/revision. An older host still
+              // records the write, but undo refuses the effect without its revision.
+              effects.push({ kind: 'note-rewrite', id, before: prior.body, after: written?.body ?? request.body,
+                revision: written ? { ...written.revision } : undefined });
             }
           }
           await appendMany(effects);
@@ -89,10 +101,25 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
           if (prior && prior.folderId !== result.folderId) await append({ kind: 'note-move', id, from: prior.folderId, to: result.folderId, body: result.body, revision: { ...result.revision } });
           return result;
         },
+        noteMoveIfUnchanged: async (id, folderId, expected) => {
+          if (!vault.noteMoveIfUnchanged) throw new Error('Hebra no ofrece movimiento atómico de notas.');
+          const prior = await vault.noteRead(id);
+          const result = await vault.noteMoveIfUnchanged(id, folderId, expected);
+          if (result && prior && prior.folderId !== result.folderId && sameRevision(prior.revision, expected.revision) && prior.folderId === expected.folderId) {
+            await append({ kind: 'note-move', id, from: prior.folderId, to: result.folderId, body: result.body, revision: { ...result.revision } });
+          }
+          return result;
+        },
         noteTrash: async (id) => {
           const prior = await vault.noteRead(id);
           const result = await vault.noteTrash(id);
           if (prior?.trashedAt === null && result.trashedAt !== null) await append({ kind: 'note-trash', id, trashedAt: result.trashedAt, revision: { ...result.revision } });
+          return result;
+        },
+        noteTrashIfUnchanged: async (id, expected) => {
+          if (!vault.noteTrashIfUnchanged) throw new Error('Hebra no ofrece papelera atómica de notas.');
+          const result = await vault.noteTrashIfUnchanged(id, expected);
+          if (result?.trashedAt !== null && result?.trashedAt !== undefined) await append({ kind: 'note-trash', id, trashedAt: result.trashedAt, revision: { ...result.revision } });
           return result;
         },
         folderCreate: async (parentId, name) => {
@@ -128,14 +155,16 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
       const warnings: string[] = [];
       for (let i = operation.effects.length - 1; i >= 0; i -= 1) {
         const effect = operation.effects[i];
-        const warning = await undoEffect(vault, effect);
+        const { warning, restored } = await undoEffect(vault, effect);
         if (warning) { warnings.push(warning); break; }
-        if (effect.kind === 'note-rewrite' || effect.kind === 'note-move' || effect.kind === 'note-trash') {
-          const restored = await vault.noteRead(effect.id);
-          for (let previous = i - 1; previous >= 0; previous -= 1) {
-            const prior = operation.effects[previous];
-            if (prior.id !== effect.id) continue;
-            if (restored && matchesWrittenNote(restored, prior)) prior.revision = { ...restored.revision };
+        if (restored) {
+          // Rebase only the nearest earlier write to this note, including earlier
+          // operations. The revision comes from our own atomic inverse, never a read.
+          const earlier = [operation.effects.slice(0, i), ...entries.slice(0, -1).reverse().map((entry) => [...entry.effects])];
+          for (const effects of earlier) {
+            const prior = [...effects].reverse().find((candidate) => candidate.id === effect.id);
+            if (!prior) continue;
+            if (matchesWrittenNote(restored, prior)) prior.revision = { ...restored.revision };
             break;
           }
         }
@@ -160,38 +189,47 @@ function matchesWrittenNote(note: PluginNote, effect: JdexJournalEffect): effect
 }
 
 /** Checks live state before each inverse; body restoration additionally uses the host CAS. */
-async function undoEffect(vault: JdexJournalVault, effect: JdexJournalEffect): Promise<string | null> {
+async function undoEffect(vault: JdexJournalVault, effect: JdexJournalEffect): Promise<UndoResult> {
   const changed = `${effect.id}: no se deshizo porque desapareció, está bloqueado o cambió después de la operación.`;
   if (effect.kind === 'note-rewrite' || effect.kind === 'note-create' || effect.kind === 'note-move') {
     const note = await vault.noteRead(effect.id);
-    if (!note || note.body === null || note.trashedAt !== null || (effect.revision && !sameRevision(note.revision, effect.revision))) return changed;
+    if (!effect.revision) return { warning: `${effect.id}: Hebra no devolvió la revisión exacta; se conserva el diario.` };
+    if (!note || note.body === null || note.trashedAt !== null || !sameRevision(note.revision, effect.revision)) return { warning: changed };
     if (effect.kind === 'note-rewrite') {
-      if (note.body !== effect.after) return changed;
-      const result = await vault.notesRewriteBatch([{ id: note.id, body: effect.before, expected: note.revision }], { cause: 'Antes de deshacer una operación JDex' });
-      return result.written.includes(note.id) ? null : `${effect.id}: no se deshizo porque cambió durante la escritura.`;
+      if (note.body !== effect.after) return { warning: changed };
+      const result: BatchWithCommits = await vault.notesRewriteBatch([{ id: note.id, body: effect.before, expected: effect.revision, strictRevision: true }], { cause: 'Antes de deshacer una operación JDex' });
+      if (!result.written.includes(note.id)) return { warning: `${effect.id}: no se deshizo porque cambió durante la escritura.` };
+      const committed = result.committed?.find((entry) => entry.id === note.id);
+      return { warning: null, restored: committed ? { ...note, body: committed.body, revision: committed.revision } : undefined };
     }
     if (effect.kind === 'note-create') {
-      if (note.body !== effect.body || note.folderId !== effect.folderId) return changed;
-      await vault.noteTrash(note.id);
-      return null;
+      if (note.body !== effect.body || note.folderId !== effect.folderId) return { warning: changed };
+      if (!vault.noteTrashIfUnchanged) return { warning: 'Hebra no ofrece papelera atómica de notas. Se conserva el diario.' };
+      return { warning: await vault.noteTrashIfUnchanged(note.id, { revision: effect.revision, folderId: effect.folderId }) ? null : changed };
     }
-    if (note.folderId !== effect.to || note.body !== effect.body) return changed;
-    await vault.noteMove(note.id, effect.from);
-    return null;
+    if (note.folderId !== effect.to || note.body !== effect.body) return { warning: changed };
+    if (!vault.noteMoveIfUnchanged) return { warning: 'Hebra no ofrece movimiento atómico de notas. Se conserva el diario.' };
+    const restored = await vault.noteMoveIfUnchanged(note.id, effect.from, { revision: effect.revision, folderId: effect.to });
+    return { warning: restored ? null : changed, restored: restored ?? undefined };
   }
   if (effect.kind === 'note-trash') {
-    if (!vault.noteRestore) return 'Hebra no ofrece restaurar notas desde la API del plugin. Se conserva el diario.';
-    return await vault.noteRestore(effect.id, { trashedAt: effect.trashedAt, revision: effect.revision }) ? null : changed;
+    if (!vault.noteRestoreIfUnchanged) return { warning: 'Hebra no ofrece restauración atómica con revisión. Se conserva el diario.' };
+    const restored = await vault.noteRestoreIfUnchanged(effect.id, { trashedAt: effect.trashedAt, revision: effect.revision });
+    return { warning: restored ? null : changed, restored: restored ?? undefined };
   }
   const folder = (await vault.foldersList()).find((entry) => entry.id === effect.id);
-  if (!folder) return changed;
+  if (!folder) return { warning: changed };
   if (effect.kind === 'folder-change') {
-    if (folder.name !== effect.afterName || folder.parentId !== effect.afterParentId) return changed;
-    if (effect.beforeName !== effect.afterName) await vault.folderRename(folder.id, effect.beforeName);
-    else await vault.folderMove(folder.id, effect.beforeParentId);
-    return null;
+    if (folder.name !== effect.afterName || folder.parentId !== effect.afterParentId) return { warning: changed };
+    const expected = { name: effect.afterName, parentId: effect.afterParentId };
+    if (effect.beforeName !== effect.afterName) {
+      if (!vault.folderRenameIfUnchanged) return { warning: 'Hebra no ofrece renombrado atómico de carpetas. Se conserva el diario.' };
+      return { warning: await vault.folderRenameIfUnchanged(folder.id, effect.beforeName, expected) ? null : changed };
+    }
+    if (!vault.folderMoveIfUnchanged) return { warning: 'Hebra no ofrece movimiento atómico de carpetas. Se conserva el diario.' };
+    return { warning: await vault.folderMoveIfUnchanged(folder.id, effect.beforeParentId, expected) ? null : changed };
   }
-  if (folder.name !== effect.name || folder.parentId !== effect.parentId) return changed;
-  if (!vault.folderTrashEmpty) return 'Hebra no ofrece retirar una carpeta vacía desde la API del plugin. Se conserva el diario.';
-  return await vault.folderTrashEmpty(effect.id, { name: effect.name, parentId: effect.parentId }) ? null : `${effect.id}: la carpeta cambió o ya no está vacía; se conserva.`;
+  if (folder.name !== effect.name || folder.parentId !== effect.parentId) return { warning: changed };
+  if (!vault.folderTrashEmpty) return { warning: 'Hebra no ofrece retirar una carpeta vacía desde la API del plugin. Se conserva el diario.' };
+  return { warning: await vault.folderTrashEmpty(effect.id, { name: effect.name, parentId: effect.parentId }) ? null : `${effect.id}: la carpeta cambió o ya no está vacía; se conserva.` };
 }

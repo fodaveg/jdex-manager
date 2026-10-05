@@ -85,6 +85,41 @@ describe('Hebra journal', () => {
     expect((await vault.noteRead(original.id))?.body).toBe('# Antes\n');
   });
 
+  it('rebasa la operación anterior después de deshacer otra operación propia', async () => {
+    const { vault, journal } = await setup();
+    await journal.run('fix', 'Primera', async (tracked) => {
+      const before = (await tracked.noteRead('n1'))!;
+      await tracked.notesRewriteBatch([{ id: 'n1', body: '# Intermedio\n', expected: before.revision }]);
+    });
+    await journal.run('fix', 'Segunda', async (tracked) => {
+      const middle = (await tracked.noteRead('n1'))!;
+      await tracked.notesRewriteBatch([{ id: 'n1', body: '# Final\n', expected: middle.revision }]);
+    });
+    expect(await journal.undoLast()).toEqual({ undone: 1, warnings: [] });
+    expect(await journal.undoLast()).toEqual({ undone: 1, warnings: [] });
+    expect((await vault.noteRead('n1'))?.body).toBe('# Antes\n');
+  });
+
+  it('registra el commit del lote sin releer, aunque una lectura posterior fallaría', async () => {
+    const { vault, journal } = await setup();
+    const original = vault.noteRead.bind(vault);
+    let committed = false;
+    vi.spyOn(vault, 'notesRewriteBatch').mockImplementation(async (requests, options) => {
+      const result = await FakeJdexVault.prototype.notesRewriteBatch.call(vault, requests, options);
+      committed = true;
+      return result;
+    });
+    vi.spyOn(vault, 'noteRead').mockImplementation(async (id) => {
+      if (committed) throw new Error('lectura posterior rota');
+      return original(id);
+    });
+    await journal.run('fix', 'Commit confirmado', async (tracked) => {
+      const note = (await tracked.noteRead('n1'))!;
+      await tracked.notesRewriteBatch([{ id: note.id, body: '# Después\n', expected: note.revision }]);
+    });
+    expect(journal.entries()[0].effects).toMatchObject([{ kind: 'note-rewrite', after: '# Después\n' }]);
+  });
+
   it('deshace creación seguida de reescritura y movimiento seguido de reescritura', async () => {
     const { vault, journal } = await setup();
     const created = await journal.run('create-id', 'Crear y editar', async (tracked) => {
@@ -164,13 +199,35 @@ describe('Hebra journal', () => {
 
   it('restaura una nota enviada a papelera con la revisión y marca de trash registradas', async () => {
     const { vault, storage } = await setup();
-    const noteRestore = vi.fn(async () => false);
-    const journal = await createJdexJournal(Object.assign(vault, { noteRestore }), storage);
+    const realRestore = vault.noteRestoreIfUnchanged.bind(vault);
+    const noteRestoreIfUnchanged = vi.fn().mockResolvedValueOnce(null).mockImplementation(realRestore);
+    const journal = await createJdexJournal(Object.assign(vault, { noteRestoreIfUnchanged }), storage);
     await journal.run('fix', 'Papelera', (tracked) => tracked.noteTrash('n1'));
     const trashed = (await vault.noteRead('n1'))!;
     expect((await journal.undoLast()).undone).toBe(0);
-    expect(noteRestore).toHaveBeenCalledWith('n1', { trashedAt: trashed.trashedAt, revision: trashed.revision });
-    noteRestore.mockResolvedValue(true);
+    expect(noteRestoreIfUnchanged).toHaveBeenCalledWith('n1', { trashedAt: trashed.trashedAt, revision: trashed.revision });
     expect((await journal.undoLast()).undone).toBe(1);
+  });
+
+  it('las cuatro inversas usan CAS y preservan cambios entre la lectura y la escritura', async () => {
+    const { vault, journal } = await setup();
+    await journal.run('move', 'Mover nota', (tracked) => tracked.noteMove('n1', 'f2'));
+    const move = vault.noteMoveIfUnchanged.bind(vault);
+    vi.spyOn(vault, 'noteMoveIfUnchanged').mockImplementation(async (...args) => {
+      vault.saveElsewhere('n1', '# Manual\n');
+      return move(...args);
+    });
+    expect((await journal.undoLast()).undone).toBe(0);
+    expect((await vault.noteRead('n1'))?.folderId).toBe('f2');
+    vi.restoreAllMocks();
+
+    await journal.run('move', 'Renombrar carpeta', (tracked) => tracked.folderRename('f1', '21.11 Nueva'));
+    const rename = vault.folderRenameIfUnchanged.bind(vault);
+    vi.spyOn(vault, 'folderRenameIfUnchanged').mockImplementation(async (...args) => {
+      await vault.folderRename('f1', '21.11 Manual');
+      return rename(...args);
+    });
+    expect((await journal.undoLast()).undone).toBe(0);
+    expect((await vault.foldersList()).find((folder) => folder.id === 'f1')?.name).toBe('21.11 Manual');
   });
 });

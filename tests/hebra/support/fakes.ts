@@ -37,7 +37,6 @@ import type {
   PluginNoteTitleRenamedEvent,
   PluginNotesChange,
   PluginNotesPage,
-  PluginNotesRewriteResult,
   PluginNotesScope,
   PluginUi,
   PluginUnregister,
@@ -225,20 +224,23 @@ export class FakeJdexVault implements PluginVault {
   async notesRewriteBatch(
     entries: readonly PluginNoteRewrite[],
     options?: { cause?: string | null; touchUpdatedAt?: boolean }
-  ): Promise<PluginNotesRewriteResult> {
+  ) {
     this.rewriteCalls.push({ entries: entries.map((entry) => ({ ...entry })), options });
     const written: string[] = [];
     const stale: string[] = [];
+    const committed: { id: string; body: string; revision: PluginNote['revision'] }[] = [];
     for (const entry of entries) {
       const current = this.#notes.get(entry.id);
-      if (!current || current.revision.localSeq !== entry.expected.localSeq) {
+      if (!current || current.locked || current.trashedAt !== null || current.revision.localSeq !== entry.expected.localSeq || current.revision.bodySha256 !== entry.expected.bodySha256) {
         stale.push(entry.id);
         continue;
       }
-      this.#notes.set(entry.id, this.#rewritten(current, entry.body));
+      const next = this.#rewritten(current, entry.body);
+      this.#notes.set(entry.id, next);
       written.push(entry.id);
+      committed.push({ id: entry.id, body: next.body!, revision: { ...next.revision } });
     }
-    return { written, stale };
+    return { written, stale, committed };
   }
 
   async noteMove(id: string, folderId: string): Promise<PluginNote> {
@@ -251,6 +253,30 @@ export class FakeJdexVault implements PluginVault {
   async noteTrash(id: string): Promise<PluginNote> {
     this.setTrashed(id, true);
     return this.#clone(this.#require(id));
+  }
+
+  async noteTrashIfUnchanged(id: string, expected: { revision: PluginNote['revision']; folderId: string }): Promise<PluginNote | null> {
+    const current = this.#notes.get(id);
+    if (!current || current.trashedAt !== null || current.folderId !== expected.folderId || current.revision.localSeq !== expected.revision.localSeq || current.revision.bodySha256 !== expected.revision.bodySha256) return null;
+    return this.noteTrash(id);
+  }
+
+  async noteMoveIfUnchanged(id: string, folderId: string, expected: { revision: PluginNote['revision']; folderId: string }): Promise<PluginNote | null> {
+    const current = this.#notes.get(id);
+    if (!current || current.trashedAt !== null || current.folderId !== expected.folderId || current.revision.localSeq !== expected.revision.localSeq || current.revision.bodySha256 !== expected.revision.bodySha256) return null;
+    return this.noteMove(id, folderId);
+  }
+
+  async noteRestoreIfUnchanged(id: string, expected: { trashedAt: number; revision: PluginNote['revision'] }): Promise<PluginNote | null> {
+    const current = this.#notes.get(id);
+    if (!current || current.trashedAt !== expected.trashedAt || current.revision.localSeq !== expected.revision.localSeq || current.revision.bodySha256 !== expected.revision.bodySha256) return null;
+    const restored = { ...current, trashedAt: null, revision: { ...current.revision, localSeq: current.revision.localSeq + 1 } };
+    this.#notes.set(id, restored);
+    return this.#clone(restored);
+  }
+
+  async noteRestore(id: string, expected: { trashedAt: number; revision: PluginNote['revision'] }): Promise<boolean> {
+    return (await this.noteRestoreIfUnchanged(id, expected)) !== null;
   }
 
   async noteSummary(ids: readonly string[]): Promise<PluginNoteSummary[]> {
@@ -334,6 +360,23 @@ export class FakeJdexVault implements PluginVault {
     const next = { ...current, parentId, updatedAt: current.updatedAt + 1 };
     this.#folders.set(id, next);
     return { ...next };
+  }
+
+  async folderRenameIfUnchanged(id: string, name: string, expected: { name: string; parentId: string | null }): Promise<PluginFolder | null> {
+    const current = this.#folders.get(id);
+    return current && current.name === expected.name && current.parentId === expected.parentId ? this.folderRename(id, name) : null;
+  }
+
+  async folderMoveIfUnchanged(id: string, parentId: string | null, expected: { name: string; parentId: string | null }): Promise<PluginFolder | null> {
+    const current = this.#folders.get(id);
+    return current && current.name === expected.name && current.parentId === expected.parentId ? this.folderMove(id, parentId) : null;
+  }
+
+  async folderTrashEmpty(id: string, expected: { name: string; parentId: string | null }): Promise<boolean> {
+    const current = this.#folders.get(id);
+    if (!current || current.name !== expected.name || current.parentId !== expected.parentId || [...this.#folders.values()].some((folder) => folder.parentId === id) || [...this.#notes.values()].some((note) => note.folderId === id)) return false;
+    this.#folders.delete(id);
+    return true;
   }
 
   /** Esta biblioteca de pruebas no modela ficheros (adjuntos), solo notas. */
