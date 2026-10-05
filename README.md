@@ -10,13 +10,13 @@ An Obsidian plugin for vaults organised with [Johnny.Decimal](https://johnnydeci
 
 ## Status
 
-What works today (0.2.0):
+What works today (0.4.0):
 
 - **Create ID** (command and ribbon icon): pick a category, get the next free number (zeros and headers skipped), type a title, optionally tick "also create the folder". The JDex note is created from the template and opened. Nothing is ever overwritten: a number already used by a note or a folder is rejected with the name that uses it.
 - **Settings with auto-detection**: JDex folder, system root, templates folder and reports folder. Empty fields are filled on startup from `00-09*/00*/00.00`, `00.02` and `00.03`; a button and a command run the detection again. A configured value is never replaced.
 - **Templates per note type** (`id`, `cabecera`, `categoria`, `area`): a note in the templates folder (names configurable, `JDex - id` by default) wins over the built-in template. Variables: `{{id}}`, `{{title}}`, `{{area}}`, `{{areaTitle}}`, `{{category}}`, `{{categoryTitle}}`, `{{date}}`. A command writes the built-in templates into the templates folder so you can edit them. A note with a category or area suffix (`JDex - id - 21`, `JDex - id - 20-29`) wins over the general one for that scope.
 
-- **Audit** (command, status bar counter on desktop, optional run on startup): writes `Auditoría JD - YYYY-MM-DD.md` in the reports folder with eight sections: folders without a JDex note, note and folder with different names, frontmatter that does not match the name or position, duplicate IDs, management numbers (`.00`, `.02` to `.08`) holding content, headers with files inside, numbers outside their parent, and (for information) notes without a folder. Sub-folders inside an ID are never a finding. "Apply mechanical fixes from last audit" fixes frontmatter and renames folders after their note, with a checklist first.
+- **Audit and repair** (command, status bar counter on desktop, optional audit on startup): lists errors and informational findings, including missing partners, different names, inconsistent frontmatter, duplicate IDs, misplaced or malformed numbers and old inbox entries. **Reparar JDex** opens a preview grouped by finding type and reaudits before applying each selection. Only derived `jd`, `tipo`, `area` and `categoria` fields start selected; creation, renaming, moving, descriptions and duplicate conflict copies require an explicit selection. Completed steps remain in the undo journal if a later step fails.
 
 - **Rename in pairs**: renaming a JDex note offers to rename its ID folder, and the other way round (a setting skips the question). Changing the number is refused with a notice: an ID is never renumbered. Moving an ID folder to another category also gets a notice.
 - **Frontmatter from the name**: "Normalize JDex frontmatter" fills or corrects `jd`, `tipo`, `area` and `categoria` from the note's number and the system folders, for the active note or the whole JDex, with a checklist before writing.
@@ -43,8 +43,10 @@ What works today (0.2.0):
 - **Missing category and area notes**: one command creates them from the folders with the `categoria` and `area` templates; the audit can then require them.
 - **System index note**: the whole system as a nested list (areas, categories, headers, IDs with their `descripcion`, `+` children) between `<!-- jdex:indice -->` markers, regenerated on demand or when an ID is created.
 - **Empty descriptions**: the audit lists JDex notes without `descripcion` and proposes the first sentence of the body as a mechanical fix.
-- **Several systems**: an optional identifier (`D01`) so `D01.21.22` names are understood, and new names can carry it.
-- **Undo last JDex operation**: the last 20 operations (create ID, retire, move, send to inbox, archive, audit and frontmatter fixes) are journaled in `data.json`; the command shows what undoing will do and does it in reverse. Nothing is deleted outright: notes and folders the plugin created go to the trash, and a move is moved back.
+- **Several systems**: `D01`, `D02` and names without a prefix have separate identities. Numbering, audit and repair preserve each system’s prefix and do not pair items across systems.
+- **Undo last JDex operation**: the last 20 operations are stored in plugin settings (per library in Hebra). The command previews the inverses and runs them in reverse, preserving remaining steps if one fails. Edited notes and non-empty created folders are kept for review. Trashing follows the host’s recovery mechanism.
+- **Optional automatic maintenance**: off by default. When enabled, updates derived frontmatter, header lists and the system index after changes, with an undo journal. Other repairs require the preview.
+- **System report**: run manually to write `Informe JD - YYYY-MM-DD` in the reports folder (`00.02` by auto-detection), with audit, health and differences from the previous report. Inbox age is informational; its default threshold is 30 days and is configurable.
 - **Status bar**: audit findings, inbox count and the JD path of the active file (`21 Productos … › 21.22 JDex Manager`; click jumps between the JDex note and the folder). On mobile, where there is no status bar, "Show where the active file lives" and "Toggle between JDex note and folder" do the same.
 
 Categories come from the folders under the system root (`20-29 …/21 …`) and from any `AC Title` notes in the JDex; IDs come from both the JDex notes and the ID folders.
@@ -55,7 +57,7 @@ Categories come from the folders under the system root (`20-29 …/21 …`) and 
 
 **Manual**: download `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/jdex-manager/` and enable the plugin.
 
-**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list or by URL (`fodaveg/jdex-manager`).
+**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list or by URL (`fodaveg/jdex-manager`). Version 0.4.0 requires a Hebra host with plugin API 1.2 or later; the manifest checks compatibility before loading.
 
 ## Develop
 

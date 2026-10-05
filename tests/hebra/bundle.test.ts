@@ -61,8 +61,8 @@ describe.runIf(existsSync(BUNDLE))('hebra-main.mjs (hay que construirlo: npm run
     };
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
     expect(manifest.version).toBe(pkg.version);
-    // Subirlo dejaría el plugin sin cargar en las apps con host 1.0.0: la 1.1 es opcional.
-    expect(manifest.apiVersion).toBe('^1.0.0');
+    // Las inversas con guardas atómicas y sus revisiones requieren la API 1.2 del host.
+    expect(manifest.apiVersion).toBe('^1.2.0');
     for (const [name, hash] of Object.entries(manifest.files)) {
       const digest = createHash('sha256').update(readFileSync(join(ROOT, name))).digest('hex');
       expect(hash).toBe(`sha256:${digest}`);
