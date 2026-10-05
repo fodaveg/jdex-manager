@@ -177,7 +177,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const auditHandle = host.registerStatusBarItem({
     id: JDEX_STATUS_AUDIT_ID,
     text: 'JD: …',
-    icon: 'search-check',
+    icon: 'circle-check',
     tooltip: 'Auditoría del sistema JDex',
     order: 41,
     onClick: () => host.revealView(JDEX_AUDIT_VIEW_ID)
@@ -1186,7 +1186,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const offAuditView = host.registerView({
     id: JDEX_AUDIT_VIEW_ID,
     title: 'Auditoría JDex',
-    icon: 'search-check',
+    icon: 'circle-check',
     placement: 'dialog',
     mount: (el) => {
       auditViewEl = el;

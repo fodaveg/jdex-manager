@@ -120,7 +120,7 @@ export function auditSystem(input: AuditInput): Finding[] {
 
   const archived = new Set(notes.filter((n) => asString(n.frontmatter?.tipo) === "archivado").map((n) => n.path));
 
-  // 1 and 2: folder without note, note without folder (ID level). A retired ID keeps its note on purpose.
+  // 1 and 2: folder without note, note without folder (ID level). Retired IDs and headers keep their notes without folders by design.
   for (const entry of index.ids) {
     if (entry.notePath && archived.has(entry.notePath)) continue;
     if (entry.folderPath && !entry.notePath) {
@@ -130,7 +130,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         paths: [entry.folderPath],
         message: `La carpeta ${entry.label} no tiene nota en el JDex.`,
       });
-    } else if (entry.notePath && !entry.folderPath) {
+    } else if (entry.notePath && !entry.folderPath && !isHeaderEntry(entry)) {
       findings.push({
         kind: "note-without-folder",
         number: entry.id,

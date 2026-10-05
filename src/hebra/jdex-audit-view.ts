@@ -63,6 +63,7 @@ function findingRow(
 export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOptions): () => void {
   const findings = options.findings();
   const problems = findings.filter((f) => !f.informative).length;
+  el.classList.add('hebra-jdex-audit');
 
   const summary = document.createElement('p');
   summary.className = 'hebra-jdex-audit-summary';
@@ -76,19 +77,36 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
     ? (finding: Finding) => void options.applyFrontmatterFix?.(finding)
     : null;
 
-  for (const kind of FINDING_KINDS) {
-    const rows = findings.filter((f) => f.kind === kind);
-    if (rows.length === 0) continue;
-    const section = document.createElement('section');
-    section.className = 'hebra-jdex-audit-section';
-    const heading = document.createElement('h3');
-    heading.textContent = `${KIND_TITLES[kind]} (${rows.length})`;
-    const list = document.createElement('ul');
-    list.className = 'hebra-jdex-audit-list';
-    for (const finding of rows) list.append(findingRow(finding, (path) => options.openPath(path), applyFix));
-    section.append(heading, list);
-    el.append(section);
+  /** Conserva los grupos del motor dentro de problemas y avisos por separado. */
+  function appendSections(parent: HTMLElement, groupedFindings: readonly Finding[]): void {
+    for (const kind of FINDING_KINDS) {
+      const rows = groupedFindings.filter((f) => f.kind === kind);
+      if (rows.length === 0) continue;
+      const section = document.createElement('section');
+      section.className = 'hebra-jdex-audit-section';
+      const heading = document.createElement('h3');
+      heading.textContent = `${KIND_TITLES[kind]} (${rows.length})`;
+      const list = document.createElement('ul');
+      list.className = 'hebra-jdex-audit-list';
+      for (const finding of rows) list.append(findingRow(finding, (path) => options.openPath(path), applyFix));
+      section.append(heading, list);
+      parent.append(section);
+    }
   }
 
-  return () => el.replaceChildren();
+  appendSections(el, findings.filter((f) => !f.informative));
+  const warnings = findings.filter((f) => f.informative);
+  if (warnings.length > 0) {
+    const details = document.createElement('details');
+    const heading = document.createElement('summary');
+    heading.textContent = `Avisos (${warnings.length})`;
+    details.append(heading);
+    appendSections(details, warnings);
+    el.append(details);
+  }
+
+  return () => {
+    el.replaceChildren();
+    el.classList.remove('hebra-jdex-audit');
+  };
 }

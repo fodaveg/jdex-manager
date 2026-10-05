@@ -8,6 +8,22 @@ const findings = auditSystem({ index, notes: NOTES, filePaths: FILES });
 const of = (kind: FindingKind): Finding[] => findings.filter((f) => f.kind === kind);
 
 describe("auditSystem", () => {
+  it.each([false, true])("headers never need a folder, even when strict=%s", (strict) => {
+    const notePaths = ["JDex/11.10 Cabecera.md", "JDex/11.22 ■ Grupo.md", "JDex/11.23 Contenido.md"];
+    const headers = buildIndex({ systemRoot: "", folderPaths: [], jdexFolder: "JDex", notePaths });
+    const input = {
+      index: headers,
+      notes: [],
+      filePaths: notePaths,
+      options: { noteWithoutFolderIsFinding: strict },
+    };
+    const before = JSON.stringify(input);
+    const out = auditSystem(input).filter((f) => f.kind === "note-without-folder");
+    expect(out.map((f) => f.number)).toEqual(["11.23"]);
+    expect(out[0].informative).toBe(!strict);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
   it("finds exactly one case of each kind", () => {
     const counts = Object.fromEntries(
       [

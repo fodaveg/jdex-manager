@@ -13,6 +13,8 @@ describe('mountJdexAuditView', () => {
     mountJdexAuditView(el, { findings: () => [], openPath: vi.fn() });
     expect(el.textContent).toContain('Sin problemas');
     expect(el.querySelectorAll('section')).toHaveLength(0);
+    expect(el.classList.contains('hebra-jdex-audit')).toBe(true);
+    expect(el.querySelector('details')).toBeNull();
   });
 
   it('agrupa por tipo con el título del motor y el recuento', () => {
@@ -36,6 +38,34 @@ describe('mountJdexAuditView', () => {
     mountJdexAuditView(el, { findings: () => findings, openPath: vi.fn() });
     expect(el.textContent).toContain('Sin problemas');
     expect(el.querySelector('h3')?.textContent).toBe('Notas sin carpeta (informativo) (1)');
+    const details = el.querySelector('details')!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toBe('Avisos (1)');
+  });
+
+  it('separa los avisos al final, incluso cuando comparten tipo con un problema', () => {
+    const findings: Finding[] = [
+      { kind: 'folder-without-note', paths: ['aviso.md'], message: 'Aviso.', informative: true },
+      { kind: 'folder-without-note', paths: ['problema'], message: 'Problema.' },
+      { kind: 'duplicate-id', paths: [], message: 'Otro aviso.', informative: true }
+    ];
+    const el = document.createElement('div');
+    const openPath = vi.fn();
+    const unmount = mountJdexAuditView(el, { findings: () => findings, openPath });
+    const problemSection = el.querySelector(':scope > section')!;
+    expect(problemSection.textContent).toContain('Problema.');
+    expect(problemSection.textContent).not.toContain('Aviso.');
+    const details = el.querySelector('details')!;
+    expect(el.lastElementChild).toBe(details);
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toBe('Avisos (2)');
+    expect(details.querySelectorAll('section')).toHaveLength(2);
+    details.open = true;
+    (details.querySelector('button') as HTMLButtonElement).click();
+    expect(openPath).toHaveBeenCalledWith('aviso.md');
+    unmount();
+    expect(el.children).toHaveLength(0);
+    expect(el.classList.contains('hebra-jdex-audit')).toBe(false);
   });
 
   it('cada ruta es un botón que llama a openPath con esa ruta', () => {

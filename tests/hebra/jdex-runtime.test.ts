@@ -264,6 +264,7 @@ describe('activate', () => {
     const audit = registry.statusBarItems().find((item) => item.id === JDEX_STATUS_AUDIT_ID)!;
     expect(audit.text).toMatch(/^JD: [1-9]\d*$/);
     expect(audit.tone).toBe('warning');
+    expect(audit.icon).toBe('circle-check');
     // 21.01 tiene 1 nota directa.
     const inbox = registry.statusBarItems().find((item) => item.id === JDEX_STATUS_INBOX_ID)!;
     expect(inbox.text).toBe('Inbox: 1');
@@ -274,6 +275,7 @@ describe('activate', () => {
     );
 
     expect(registry.views().map((v) => v.id)).toContain(JDEX_AUDIT_VIEW_ID);
+    expect(registry.views().find((v) => v.id === JDEX_AUDIT_VIEW_ID)?.icon).toBe('circle-check');
     expect(registry.settingsPanels()).toHaveLength(1);
   });
 

@@ -3,6 +3,10 @@
    retiran con el módulo (`install-styles.ts`), NUNCA en `app.css`: JDex se carga con
    `import()` perezoso y `app.css` viaja entero en el primer pintado
    (`initial-bundle-budget.test.ts`). */
+.hebra-jdex-audit {
+  padding: var(--space-3) var(--space-4);
+}
+
 .hebra-jdex-audit-summary {
   margin: 0 0 var(--space-3);
   font-weight: 600;
@@ -47,6 +51,11 @@
 }
 
 .hebra-jdex-audit-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  min-height: 0;
+  text-align: start;
   color: var(--accent-text);
   font-size: var(--type-ui-xs);
   text-decoration: underline;
