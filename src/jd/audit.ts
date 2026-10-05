@@ -11,6 +11,7 @@ import { firstSentence } from "./description";
 import { missingPatternFolders } from "./patterns";
 import { extractJdPrefix, isHeader, isReserved, jdexNoteName, parseJdNumber } from "./parse";
 import { titleForCompare } from "./title";
+import { filesByFolder } from "./path-index";
 
 export type FindingKind =
   | "folder-without-note"
@@ -103,11 +104,6 @@ function parentOf(path: string): string {
   return i === -1 ? "" : path.slice(0, i);
 }
 
-function filesUnder(folder: string, filePaths: string[]): string[] {
-  const prefix = folder + "/";
-  return filePaths.filter((p) => p.startsWith(prefix));
-}
-
 function extensionOf(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1);
   const i = base.lastIndexOf(".");
@@ -129,6 +125,13 @@ function expectedValues(frontmatter: Record<string, unknown>, keys: string[]): R
 export function auditSystem(input: AuditInput): Finding[] {
   const { index, notes, filePaths } = input;
   const findings: Finding[] = [];
+  const contentFolders = index.ids.filter((entry) => {
+    if (!entry.folderPath) return false;
+    if (isHeaderEntry(entry)) return true;
+    const number = parseJdNumber(entry.id);
+    return number?.kind === "id" && isReserved(number) && !["01", "09"].includes(number.id.split(".")[1]);
+  }).map((entry) => entry.folderPath!);
+  const folderFiles = filesByFolder(filePaths, contentFolders);
 
   const archived = new Set(notes.filter((n) => asString(n.frontmatter?.tipo) === "archivado").map((n) => n.path));
 
@@ -242,7 +245,7 @@ export function auditSystem(input: AuditInput): Finding[] {
     if (!n || n.kind !== "id" || !isReserved(n)) continue;
     const last = n.id.split(".")[1];
     if (last === "01" || last === "09") continue;
-    const content = filesUnder(entry.folderPath, filePaths).filter(
+    const content = (folderFiles.get(entry.folderPath) ?? []).filter(
       (p) => !ATTACHMENT_FOLDER.test(p.slice(entry.folderPath!.length)) && !MANAGEMENT_EXTENSIONS.has(extensionOf(p)),
     );
     if (content.length === 0) continue;
@@ -257,7 +260,7 @@ export function auditSystem(input: AuditInput): Finding[] {
   // 7: header IDs (AC.X0 ■) whose folder contains files.
   for (const entry of index.ids) {
     if (!entry.folderPath || !isHeaderEntry(entry)) continue;
-    const files = filesUnder(entry.folderPath, filePaths);
+    const files = folderFiles.get(entry.folderPath) ?? [];
     if (files.length === 0) continue;
     findings.push({
       kind: "header-with-files",

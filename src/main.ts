@@ -39,7 +39,7 @@ export default class JdexManagerPlugin extends Plugin {
   private statusBar: HTMLElement | null = null;
   private inboxBar: HTMLElement | null = null;
   private whereBar: HTMLElement | null = null;
-  private indexCache: { at: number; index: JdIndex } | null = null;
+  private indexCache: { systemRoot: string; jdexFolder: string; index: JdIndex } | null = null;
   private journal: Operation[] = [];
 
   async onload(): Promise<void> {
@@ -160,7 +160,7 @@ export default class JdexManagerPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (this.settings.jdexFolder === "") return;
-        const index = scanVault(this.app, this.settings);
+        const index = this.cachedIndex();
         const loc = locate(index, this.settings, file.path);
         if (file instanceof TFile && !loc?.atNote) {
           menu.addItem((item) =>
@@ -229,7 +229,7 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Show where the active file lives",
       checkCallback: (checking) =>
         this.fileCommand(checking, async (file) => {
-          const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+          const loc = locate(this.cachedIndex(), this.settings, file.path);
           new Notice(loc ? loc.text : "The active file is not inside an ID.");
         }),
     });
@@ -238,7 +238,7 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Copy ID of the active file",
       checkCallback: (checking) =>
         this.fileCommand(checking, async (file) => {
-          const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+          const loc = locate(this.cachedIndex(), this.settings, file.path);
           if (!loc) {
             new Notice("The active file is not inside an ID.");
             return;
@@ -253,7 +253,7 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Copy JD path of the active file",
       checkCallback: (checking) =>
         this.fileCommand(checking, async (file) => {
-          const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+          const loc = locate(this.cachedIndex(), this.settings, file.path);
           if (!loc) {
             new Notice("The active file is not inside an ID.");
             return;
@@ -273,7 +273,7 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Go to ID",
       callback: () => {
         if (!this.ready()) return;
-        const index = scanVault(this.app, this.settings);
+        const index = this.cachedIndex();
         new IdSuggestModal(this.app, index, (entry, openFolder) => {
           void openEntry(this.app, entry, openFolder).then((msg) => msg && new Notice(msg));
         }).open();
@@ -313,9 +313,23 @@ export default class JdexManagerPlugin extends Plugin {
       callback: () => void this.undoLast(),
     });
 
-    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => void this.onRename(file, oldPath)));
-    this.registerEvent(this.app.vault.on("delete", () => this.refreshInboxCount()));
-    this.registerEvent(this.app.vault.on("create", (file) => void this.onCreate(file)));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      this.invalidateIndex();
+      void this.onRename(file, oldPath);
+    }));
+    this.registerEvent(this.app.vault.on("delete", () => {
+      this.invalidateIndex();
+      this.refreshInboxCount();
+    }));
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      if (!(file instanceof TFile) || file.extension !== "md" || this.settings.jdexFolder === "") return;
+      const rel = relativeTo(this.settings.jdexFolder, file.path);
+      if (rel !== null && rel !== "" && !rel.includes("/")) this.invalidateIndex();
+    }));
+    this.registerEvent(this.app.vault.on("create", (file) => {
+      this.invalidateIndex();
+      void this.onCreate(file);
+    }));
 
     this.addRibbonIcon("file-plus-2", "Create ID", () => void this.createIdFlow());
 
@@ -437,13 +451,20 @@ export default class JdexManagerPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  /** The index, rescanned at most every two seconds; enough for keystroke-driven lookups. */
+  /** The in-memory index stays valid until vault paths, JDex notes or root settings change. */
   cachedIndex(): JdIndex {
-    const now = Date.now();
-    if (this.indexCache && now - this.indexCache.at < 2000) return this.indexCache.index;
+    const { systemRoot, jdexFolder } = this.settings;
+    if (this.indexCache?.systemRoot === systemRoot && this.indexCache.jdexFolder === jdexFolder) {
+      return this.indexCache.index;
+    }
     const index = scanVault(this.app, this.settings);
-    this.indexCache = { at: now, index };
+    this.indexCache = { systemRoot, jdexFolder, index };
     return index;
+  }
+
+  /** Vault events invalidate before any callback can consume the changed paths. */
+  private invalidateIndex(): void {
+    this.indexCache = null;
   }
 
   /** Frontmatter fixes for one note or for the whole JDex, with the checklist modal as preview. */
@@ -708,7 +729,7 @@ export default class JdexManagerPlugin extends Plugin {
       this.whereBar.setText("");
       return;
     }
-    const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+    const loc = locate(this.cachedIndex(), this.settings, file.path);
     this.whereBar.setText(loc ? loc.text : "");
   }
 
@@ -716,7 +737,7 @@ export default class JdexManagerPlugin extends Plugin {
   async toggleNoteAndFolder(): Promise<void> {
     const file = this.app.workspace.getActiveFile();
     if (!file || !this.ready()) return;
-    const loc = locate(scanVault(this.app, this.settings), this.settings, file.path);
+    const loc = locate(this.cachedIndex(), this.settings, file.path);
     if (!loc) {
       new Notice("The active file is not inside an ID.");
       return;
@@ -731,7 +752,7 @@ export default class JdexManagerPlugin extends Plugin {
       this.inboxBar.setText("");
       return;
     }
-    const n = inboxFiles(this.app, scanVault(this.app, this.settings)).length;
+    const n = inboxFiles(this.app, this.cachedIndex()).length;
     this.inboxBar.setText(n === 0 ? "Inbox: empty" : `Inbox: ${n}`);
   }
 
@@ -769,7 +790,7 @@ export default class JdexManagerPlugin extends Plugin {
     const parsed = extractJdPrefix(file.name);
     if (!parsed || parsed.number.kind !== "id" || parsed.number.extension) return null;
     const id = parsed.number.id;
-    const index = scanVault(this.app, this.settings);
+    const index = this.cachedIndex();
     const entry = index.ids.find((e) => e.id === id);
     if (!entry) return null;
     const isNote = file instanceof TFile && entry.notePath === file.path;

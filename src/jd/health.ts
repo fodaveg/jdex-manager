@@ -4,6 +4,7 @@
  */
 
 import { categoryUsage, type JdIndex } from "./index";
+import { filesByFolder } from "./path-index";
 
 export interface HealthOptions {
   /** IDs holding more files than this are candidates for a `+` child or subfolders. Default 50. */
@@ -16,13 +17,6 @@ export const DEFAULT_HEALTH_OPTIONS: HealthOptions = { maxFiles: 50, nearlyFull:
 
 export function healthFileName(date: string): string {
   return `Salud JD - ${date}.md`;
-}
-
-function countUnder(folder: string, filePaths: string[]): number {
-  const prefix = folder + "/";
-  let n = 0;
-  for (const p of filePaths) if (p.startsWith(prefix)) n += 1;
-  return n;
 }
 
 function noteLink(notePath: string | undefined, label: string): string {
@@ -57,9 +51,10 @@ export interface Health {
 
 /** The numbers behind the report, so they can be tested and reused. */
 export function measureHealth(index: JdIndex, filePaths: string[], options: HealthOptions = DEFAULT_HEALTH_OPTIONS): Health {
+  const folderFiles = filesByFolder(filePaths);
   const categories: CategoryHealth[] = index.categories.map((c) => {
     const usage = categoryUsage(index, c.number);
-    return { number: c.number, label: c.label, used: usage.used, total: usage.total, next: usage.next, files: c.path ? countUnder(c.path, filePaths) : null };
+    return { number: c.number, label: c.label, used: usage.used, total: usage.total, next: usage.next, files: c.path ? (folderFiles.get(c.path)?.length ?? 0) : null };
   });
   const nearlyFull = categories.filter((c) => c.used > options.nearlyFull);
 
@@ -71,7 +66,7 @@ export function measureHealth(index: JdIndex, filePaths: string[], options: Heal
     // Management numbers (.00 to .09): an empty inbox or archive is healthy, not a finding.
     if (Number(entry.id.slice(3, 5)) < 10) continue;
     idsWithFolder += 1;
-    const files = countUnder(entry.folderPath, filePaths);
+    const files = folderFiles.get(entry.folderPath)?.length ?? 0;
     const row: IdHealth = { id: entry.id, label: entry.label, notePath: entry.notePath, folderPath: entry.folderPath, files };
     if (files === 0) emptyIds.push(row);
     else if (files > options.maxFiles) crowdedIds.push(row);
