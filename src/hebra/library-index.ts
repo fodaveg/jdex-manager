@@ -30,7 +30,6 @@ import {
   type NoteMeta
 } from './engine';
 import {
-  jdexFrontmatterString,
   readJdexFrontmatter,
   type JdexFrontmatterMarkdown
 } from './frontmatter';
@@ -290,11 +289,11 @@ function jdexAuditEntryOf(row: PluginNote, markdown: JdexFrontmatterMarkdown): J
     return { sha: row.revision.bodySha256, frontmatter: null, body: undefined };
   }
   const frontmatter = readJdexFrontmatter(row.body, markdown);
-  const hasDescription = jdexFrontmatterString(frontmatter, 'descripcion') !== '';
   return {
     sha: row.revision.bodySha256,
     frontmatter,
-    body: hasDescription ? undefined : row.body
+    // Exact body is also needed to prove that a conflict copy is identical.
+    body: row.body
   };
 }
 

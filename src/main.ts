@@ -97,9 +97,10 @@ export default class JdexManagerPlugin extends Plugin {
 
     this.addCommand({
       id: "apply-fixes",
-      name: "Apply mechanical fixes from last audit",
+      name: "Reparar JDex",
       callback: () => void this.applyFixes(),
     });
+    this.addRibbonIcon("wrench", "Reparar JDex", () => void this.applyFixes());
 
     this.addCommand({
       id: "normalize-frontmatter-active",
@@ -440,9 +441,9 @@ export default class JdexManagerPlugin extends Plugin {
     await this.audit(false);
     if (!this.lastFindings) return;
     const modal = new FixFindingsModal(this.app, this.lastFindings, async () => {
-      await this.record("fix", "Apply audit fixes", modal.effects);
+      await this.record("fix", "Reparar JDex", modal.effects);
       await this.audit(false);
-    });
+    }, async () => (await runAudit(this.app, this.settings)).findings, this.settings);
     modal.open();
   }
 

@@ -18,16 +18,23 @@ async function undoEffect(app: App, e: Effect): Promise<string> {
       const file = app.vault.getAbstractFileByPath(e.path);
       if (!(file instanceof TFile)) return `${e.path} was already gone.`;
       const current = await app.vault.read(file);
+      if (current !== e.content) throw new Error(`${e.path} was edited after creation; keep it and review manually.`);
       // Always through the file manager so the user's trash preference is respected.
       await app.fileManager.trashFile(file);
-      return current === e.content ? `Trashed ${e.path}.` : `${e.path} had been edited: trashed anyway, recover it from the trash if needed.`;
+      return `Trashed ${e.path}.`;
+    }
+    case "trashed-note": {
+      if (app.vault.getAbstractFileByPath(e.path)) throw new Error(`${e.path} already exists; cannot restore the duplicate.`);
+      await app.vault.create(e.path, e.content);
+      return `Restored ${e.path} from the recorded content; the original remains in the trash.`;
     }
     case "created-folder": {
       const folder = app.vault.getAbstractFileByPath(e.path);
       if (!(folder instanceof TFolder)) return `${e.path} was already gone.`;
       const empty = folder.children.length === 0;
+      if (!empty) throw new Error(`${e.path} is not empty; keep its content and review manually.`);
       await app.fileManager.trashFile(folder);
-      return empty ? `Trashed the empty folder ${e.path}.` : `${e.path} was not empty: trashed with its content, recover it from the trash if needed.`;
+      return `Trashed the empty folder ${e.path}.`;
     }
     case "moved": {
       const target = app.vault.getAbstractFileByPath(e.to);

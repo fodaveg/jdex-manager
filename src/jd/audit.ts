@@ -53,7 +53,11 @@ export type Fix =
       expected?: Record<string, unknown>;
     }
   | { type: "rename"; from: string; to: string }
-  | { type: "folders"; paths: string[] };
+  | { type: "folders"; paths: string[] }
+  | { type: "create-note"; path: string; number: string; title: string; kind: "id" | "cabecera"; category: string }
+  | { type: "create-folder"; path: string; paths: string[] }
+  | { type: "move"; items: { from: string; to: string }[] }
+  | { type: "trash"; path: string; identicalTo: string };
 
 export interface Finding {
   kind: FindingKind;
@@ -77,6 +81,8 @@ export interface NoteMeta {
 
 export interface AuditInput {
   index: JdIndex;
+  /** Location of flat JDex notes, needed to propose a missing note. */
+  jdexFolder?: string;
   /** Frontmatter of the notes directly inside the JDex folder. */
   notes: NoteMeta[];
   /** Every file path in the vault (at least those under the system root). */
@@ -97,6 +103,7 @@ export interface AuditInput {
 
 const ATTACHMENT_FOLDER = /(^|\/)(70 )?adjuntos(\/|$)/i;
 const MANAGEMENT_EXTENSIONS = new Set(["md", "base", "json", "canvas"]);
+const CONFLICT_COPY = /(?:conflicted copy|conflict copy|copia en conflicto|sync.conflict|conflicto de sincronizaci[oó]n)/i;
 
 function noteName(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1);
@@ -136,6 +143,10 @@ export function auditSystem(input: AuditInput): Finding[] {
     return number?.kind === "id" && isReserved(number) && !["01", "09"].includes(number.id.split(".")[1]);
   }).map((entry) => entry.folderPath!);
   const folderFiles = filesByFolder(filePaths, contentFolders);
+  const categoryFolder = (number: string, system?: string): string | undefined =>
+    index.categories.find((category) => category.number === number && (category.system ?? "") === (system ?? ""))?.path;
+  const inboxFolder = (category: string, system?: string): string | undefined =>
+    index.ids.find((entry) => entry.id === `${category}.01` && (entry.system ?? "") === (system ?? ""))?.folderPath;
 
   const archived = new Set(notes.filter((n) => asString(n.frontmatter?.tipo) === "archivado").map((n) => n.path));
 
@@ -143,19 +154,31 @@ export function auditSystem(input: AuditInput): Finding[] {
   for (const entry of index.ids) {
     if (entry.notePath && archived.has(entry.notePath)) continue;
     if (entry.folderPath && !entry.notePath) {
+      const folderName = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
+      const child = entry.id.endsWith("+") && folderName.startsWith("+ ");
+      const title = child ? folderName.slice(2) : extractJdPrefix(folderName)?.title;
+      const noteName = child ? `${entry.id} ${title}` : folderName;
       findings.push({
         kind: "folder-without-note",
         number: entry.id,
         paths: [entry.folderPath],
         message: `La carpeta ${entry.label} no tiene nota en el JDex.`,
+        ...(input.jdexFolder && title ? { fix: { type: "create-note", path: `${input.jdexFolder}/${noteName}.md`, number: entry.id, title, kind: isHeaderEntry(entry) ? "cabecera" : "id", category: entry.category } } : {}),
       });
     } else if (entry.notePath && !entry.folderPath && !isHeaderEntry(entry)) {
+      const parent = entry.id.endsWith("+")
+        ? index.ids.find((candidate) => candidate.id === entry.id.slice(0, -1) && sameSystem(candidate, entry))?.folderPath
+        : categoryFolder(entry.category, entry.system);
+      const name = entry.id.endsWith("+") ? `+ ${entry.title}` : jdexNoteName(entry.id, titleForCompare(entry.title), entry.system ?? "");
+      const path = parent ? `${parent}/${name}` : undefined;
+      const pattern = path && !entry.id.endsWith("+") ? input.patternFor?.(entry.category) ?? [] : [];
       findings.push({
         kind: "note-without-folder",
         number: entry.id,
         paths: [entry.notePath],
         message: `La nota ${entry.label} no tiene carpeta en el sistema.`,
         informative: !input.options?.noteWithoutFolderIsFinding,
+        ...(path ? { fix: { type: "create-folder", path, paths: [path, ...pattern.map((part) => `${path}/${part}`)] } } : {}),
       });
     }
   }
@@ -234,11 +257,18 @@ export function auditSystem(input: AuditInput): Finding[] {
     }
     for (const [id, paths] of byId) {
       if (paths.length < 2) continue;
+      const duplicate = source === "notas" ? paths.find((path) => {
+        if (!CONFLICT_COPY.test(path)) return false;
+        const body = notes.find((note) => note.path === path)?.body;
+        return body !== undefined && paths.some((other) => other !== path && notes.find((note) => note.path === other)?.body === body);
+      }) : undefined;
+      const original = duplicate ? paths.find((path) => path !== duplicate && notes.find((note) => note.path === path)?.body === notes.find((note) => note.path === duplicate)?.body) : undefined;
       findings.push({
         kind: "duplicate-id",
         number: id,
         paths,
         message: `${id} está repetido en ${paths.length} ${source}.`,
+        ...(duplicate && original ? { fix: { type: "trash", path: duplicate, identicalTo: original } } : {}),
       });
     }
   }
@@ -259,6 +289,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       number: entry.id,
       paths: [entry.folderPath, ...content.slice(0, 5)],
       message: `${entry.label} es un número de gestión y contiene ${content.length} fichero(s) de contenido.`,
+      ...(inboxFolder(entry.category, entry.system) ? { fix: { type: "move", items: content.map((from) => ({ from, to: `${inboxFolder(entry.category, entry.system)}/${from.slice(from.lastIndexOf("/") + 1)}` })) } } : {}),
     });
   }
 
@@ -272,6 +303,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       number: entry.id,
       paths: [entry.folderPath, ...files.slice(0, 5)],
       message: `La cabecera ${entry.label} contiene ${files.length} fichero(s); una cabecera solo agrupa.`,
+      ...(inboxFolder(entry.category, entry.system) ? { fix: { type: "move", items: files.map((from) => ({ from, to: `${inboxFolder(entry.category, entry.system)}/${from.slice(from.lastIndexOf("/") + 1)}` })) } } : {}),
     });
   }
 
@@ -320,11 +352,16 @@ export function auditSystem(input: AuditInput): Finding[] {
 
   // 8: numbers outside their parent.
   for (const m of index.misplaced) {
+    const parsed = parseJdNumber(m.number);
+    const correctParent = !m.wrongDepth && parsed?.kind === "id" ? categoryFolder(parsed.category, m.system) : undefined;
+    const target = correctParent ? `${correctParent}/${m.path.slice(m.path.lastIndexOf("/") + 1)}` : undefined;
+    const occupied = index.ids.some((entry) => entry.id === m.number && sameSystem(entry, m) && entry.folderPath);
     findings.push({
       kind: m.wrongDepth ? "misplaced-number" : "out-of-parent",
       number: m.number,
       paths: [m.path],
       message: `${m.label} está dentro de ${m.parent}, que no es su padre.`,
+      ...(target && !occupied && !input.folderPaths?.includes(target) ? { fix: { type: "move", items: [{ from: m.path, to: target }] } } : {}),
     });
   }
 

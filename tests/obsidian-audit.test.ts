@@ -91,8 +91,9 @@ describe("Obsidian audit fixes", () => {
     const done = vi.fn(async () => {});
     const modal = new FixFindingsModal({} as App, findings, done);
     modal.open();
-    expect(ui.toggles.map((toggle) => toggle.value)).toEqual([true, false, false, false]);
-    ui.toggles[0].change?.(false);
+    // The preview groups by finding kind, so name-mismatch precedes frontmatter.
+    expect(ui.toggles.map((toggle) => toggle.value)).toEqual([false, true, false, false]);
+    ui.toggles[1].change?.(false);
     ui.buttons[0]();
     await vi.waitFor(() => expect(done).toHaveBeenCalled());
     expect(modal.effects).toEqual([]);

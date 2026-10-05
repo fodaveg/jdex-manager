@@ -9,6 +9,8 @@ export type Effect =
   | { kind: "note-rewrite"; path: string; before: string; after: string }
   /** A note the plugin wrote, with the content it wrote (to tell "untouched" from "edited" at undo time). */
   | { kind: "created-note"; path: string; content: string }
+  /** Exact bytes of a duplicate conflict note sent to trash, for guarded recreation. */
+  | { kind: "trashed-note"; path: string; content: string }
   | { kind: "created-folder"; path: string }
   | { kind: "moved"; from: string; to: string }
   /** Frontmatter keys the plugin set, with the value each one had before (`undefined` = absent). */
@@ -46,6 +48,9 @@ export function describeUndo(op: Operation): string[] {
         break;
       case "created-note":
         lines.push(`Move ${e.path} to the trash.`);
+        break;
+      case "trashed-note":
+        lines.push(`Restore the trashed note ${e.path}.`);
         break;
       case "created-folder":
         lines.push(`Move the folder ${e.path} to the trash.`);

@@ -20,6 +20,8 @@ export interface JdexAuditViewOptions {
    *  hallazgos no llevan botón (compatibilidad con quien monte esta vista sin la
    *  tarea 2 aún, como el propio test del lote 1). */
   applyFrontmatterFix?(finding: Finding): void | Promise<void>;
+  /** Apply the selected preview after the runtime has reaudited live state. */
+  repair?(findings: readonly Finding[]): void | Promise<void>;
 }
 
 function pathLink(path: string, onClick: () => void): HTMLButtonElement {
@@ -34,10 +36,22 @@ function pathLink(path: string, onClick: () => void): HTMLButtonElement {
 function findingRow(
   finding: Finding,
   openPath: (path: string) => void,
-  applyFix: ((finding: Finding) => void) | null
+  applyFix: ((finding: Finding) => void) | null,
+  onSelect?: (selected: boolean) => void
 ): HTMLLIElement {
   const row = document.createElement('li');
   row.className = 'hebra-jdex-audit-finding';
+  if (finding.fix && onSelect) {
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'hebra-jdex-repair-select';
+    checkbox.checked = finding.kind === 'frontmatter-mismatch' && finding.fix.type === 'frontmatter' &&
+      Object.keys(finding.fix.set).every((key) => ['jd', 'tipo', 'area', 'categoria'].includes(key));
+    checkbox.addEventListener('change', () => onSelect(checkbox.checked));
+    label.append(checkbox, ' Reparar');
+    row.append(label);
+  }
   const message = document.createElement('p');
   message.textContent = finding.message;
   row.append(message);
@@ -72,6 +86,16 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
       ? 'Sin problemas. El sistema y el JDex coinciden.'
       : `${problems} problema(s) que corregir.`;
   el.append(summary);
+  const selected = new Set(findings.filter((finding) => finding.kind === 'frontmatter-mismatch' && finding.fix?.type === 'frontmatter' &&
+    Object.keys(finding.fix.set).every((key) => ['jd', 'tipo', 'area', 'categoria'].includes(key))));
+  if (options.repair && findings.some((finding) => finding.fix)) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'hebra-jdex-repair-apply';
+    button.textContent = 'Reparar';
+    button.addEventListener('click', () => void options.repair?.(findings.filter((finding) => selected.has(finding))));
+    el.append(button);
+  }
 
   const applyFix = options.applyFrontmatterFix
     ? (finding: Finding) => void options.applyFrontmatterFix?.(finding)
@@ -88,7 +112,8 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
       heading.textContent = `${KIND_TITLES[kind]} (${rows.length})`;
       const list = document.createElement('ul');
       list.className = 'hebra-jdex-audit-list';
-      for (const finding of rows) list.append(findingRow(finding, (path) => options.openPath(path), applyFix));
+      for (const finding of rows) list.append(findingRow(finding, (path) => options.openPath(path), applyFix,
+        options.repair ? (chosen) => { if (chosen) selected.add(finding); else selected.delete(finding); } : undefined));
       section.append(heading, list);
       parent.append(section);
     }
