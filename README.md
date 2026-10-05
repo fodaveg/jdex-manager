@@ -10,13 +10,15 @@ An Obsidian plugin for vaults organised with [Johnny.Decimal](https://johnnydeci
 
 ## Status
 
-What works today (0.4.0):
+What works today (0.4.1):
 
 - **Create ID** (command and ribbon icon): pick a category, get the next free number (zeros and headers skipped), type a title, optionally tick "also create the folder". The JDex note is created from the template and opened. Nothing is ever overwritten: a number already used by a note or a folder is rejected with the name that uses it.
 - **Settings with auto-detection**: JDex folder, system root, templates folder and reports folder. Empty fields are filled on startup from `00-09*/00*/00.00`, `00.02` and `00.03`; a button and a command run the detection again. A configured value is never replaced.
 - **Templates per note type** (`id`, `cabecera`, `categoria`, `area`): a note in the templates folder (names configurable, `JDex - id` by default) wins over the built-in template. Variables: `{{id}}`, `{{title}}`, `{{area}}`, `{{areaTitle}}`, `{{category}}`, `{{categoryTitle}}`, `{{date}}`. A command writes the built-in templates into the templates folder so you can edit them. A note with a category or area suffix (`JDex - id - 21`, `JDex - id - 20-29`) wins over the general one for that scope.
 
 - **Audit and repair** (command, status bar counter on desktop, optional audit on startup): lists errors and informational findings, including missing partners, different names, inconsistent frontmatter, duplicate IDs, misplaced or malformed numbers and old inbox entries. **Reparar JDex** opens a preview grouped by finding type and reaudits before applying each selection. Only derived `jd`, `tipo`, `area` and `categoria` fields start selected; creation, renaming, moving, descriptions and duplicate conflict copies require an explicit selection. Completed steps remain in the undo journal if a later step fails.
+
+  Numbered content subfolders such as `70 Attachments` or `40 Audits` inside a valid ID are local organisation, not misplaced JD categories. Repair is enabled when at least one available repair is selected; findings without a safe repair require manual review.
 
 - **Rename in pairs**: renaming a JDex note offers to rename its ID folder, and the other way round (a setting skips the question). Changing the number is refused with a notice: an ID is never renumbered. Moving an ID folder to another category also gets a notice.
 - **Frontmatter from the name**: "Normalize JDex frontmatter" fills or corrects `jd`, `tipo`, `area` and `categoria` from the note's number and the system folders, for the active note or the whole JDex, with a checklist before writing.
@@ -57,7 +59,7 @@ Categories come from the folders under the system root (`20-29 …/21 …`) and 
 
 **Manual**: download `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/jdex-manager/` and enable the plugin.
 
-**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list or by URL (`fodaveg/jdex-manager`). Version 0.4.0 requires a Hebra host with plugin API 1.2 or later; the manifest checks compatibility before loading.
+**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list or by URL (`fodaveg/jdex-manager`). Version 0.4.1 requires a Hebra host with plugin API 1.2 or later; the manifest checks compatibility before loading.
 
 ## Develop
 
