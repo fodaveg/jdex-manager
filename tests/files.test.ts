@@ -59,6 +59,17 @@ describe("directFiles", () => {
 });
 
 describe("locate", () => {
+  it("locates a child note, folder and nested file at the child instead of its parent", () => {
+    const child = `${ID}/+ Manual`;
+    const note = `${JDEX}/21.22+ Manual.md`;
+    const childIndex = buildIndex({ systemRoot: "", folderPaths: [...FOLDERS, child], jdexFolder: JDEX, notePaths: [...NOTES, note] });
+    expect(locate(childIndex, settings, note)).toMatchObject({ atNote: true, entry: { id: "21.22+", folderPath: child } });
+    for (const path of [child, `${child}/Documento.md`, `${child}/Adjuntos/Detalle.md`]) {
+      expect(locate(childIndex, settings, path)).toMatchObject({ atNote: false, entry: { id: "21.22+", notePath: note } });
+    }
+    expect(locate(childIndex, settings, `${ID}/Documento.md`)?.entry.id).toBe("21.22");
+  });
+
   it("names the ID of a JDex note, of a folder and of a file inside it", () => {
     expect(locate(index, settings, `${JDEX}/21.22 JDex Manager.md`)).toMatchObject({
       atNote: true,

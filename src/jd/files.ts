@@ -23,12 +23,15 @@ export function categoryOfPath(systemRoot: string, path: string): string | null 
   return cat.number.category;
 }
 
-/** The ID whose folder contains `path` (the file itself excluded), or null. */
+/** The nearest ID whose folder contains `path` (the file itself excluded), or null. */
 export function idFolderOfPath(index: JdIndex, path: string): IdEntry | null {
+  let found: IdEntry | null = null;
   for (const entry of index.ids) {
-    if (entry.folderPath && path.startsWith(entry.folderPath + "/")) return entry;
+    if (entry.folderPath && path.startsWith(entry.folderPath + "/") && entry.folderPath.length > (found?.folderPath?.length ?? 0)) {
+      found = entry;
+    }
   }
-  return null;
+  return found;
 }
 
 /** Every inbox folder (`AC.01`) that exists in the system, 00.01 included. */

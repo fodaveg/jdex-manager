@@ -3,7 +3,7 @@
  * No Obsidian imports: the vault layer feeds it folder and note paths, tests feed it literals.
  *
  * Two sources, merged by number:
- * - System folders under `systemRoot`: `AREA/CATEGORY/ID`, each level validated against its parent
+ * - System folders under `systemRoot`: `AREA/CATEGORY/ID`, with `+ Title` children inside IDs, each level validated against its parent
  *   (a `21` folder only counts inside a `20-29` area; a `21.22` folder only inside `21`).
  * - JDex notes directly inside `jdexFolder`: `AC.ID Title.md` is an ID, `AC Title.md` a category,
  *   `A0-A9 Title.md` an area.
@@ -11,6 +11,7 @@
 
 import { relativeTo } from "./detect";
 import { extractJdPrefix, nextFreeId } from "./parse";
+import { titleForCompare } from "./title";
 
 export interface AreaEntry {
   /** First category of the area: 20 for `20-29`. */
@@ -95,7 +96,7 @@ function idKey(id: string, extension?: "+"): string {
 
 /** Map key: `+` children of one ID are different entries, told apart by title. */
 function mapKey(id: string, extension: "+" | undefined, title: string): string {
-  return extension ? `${id}+ ${title}` : id;
+  return extension ? `${id}+ ${titleForCompare(title)}` : id;
 }
 
 export function buildIndex(input: IndexInput): JdIndex {
@@ -111,11 +112,25 @@ export function buildIndex(input: IndexInput): JdIndex {
     .map((path) => ({ path, rel: relativeTo(input.systemRoot, path) }))
     .filter((f): f is { path: string; rel: string } => f.rel !== null && f.rel !== "")
     .map((f) => ({ ...f, parts: f.rel.split("/") }))
-    .filter((f) => f.parts.length <= 3)
+    .filter((f) => f.parts.length <= 4)
     .sort((a, b) => a.parts.length - b.parts.length);
 
   for (const f of folders) {
     const name = f.parts[f.parts.length - 1];
+    // Only `+ Title` folders directly inside a validated ID are child IDs.
+    if (f.parts.length === 4) {
+      if (!name.startsWith("+ ") || name.slice(2).trim() === "") continue;
+      const parentPath = f.path.slice(0, f.path.lastIndexOf("/"));
+      const parent = rawIdFolders.find((entry) => entry.path === parentPath && !entry.id.endsWith("+"));
+      if (!parent) continue;
+      const title = name.slice(2);
+      const key = `${parent.id}+`;
+      const mk = mapKey(parent.id, "+", title);
+      const label = `${key} ${title}`;
+      rawIdFolders.push({ id: key, path: f.path, label });
+      ids.set(mk, { id: key, category: parent.id.slice(0, 2), title, label, folderPath: f.path });
+      continue;
+    }
     const parsed = extractJdPrefix(name);
     if (!parsed) continue;
     const n = parsed.number;

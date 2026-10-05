@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { areaCode, areaOfCategory, buildIndex, categoryUsage, findId, knownIds } from "../src/jd/index";
 import { nextFreeId } from "../src/jd/parse";
+import { auditSystem } from "../src/jd/audit";
 import { FOLDERS, JDEX, NOTES } from "./fixtures";
 
 const index = buildIndex({ systemRoot: "", folderPaths: FOLDERS, jdexFolder: JDEX, notePaths: NOTES });
@@ -73,6 +74,44 @@ describe("buildIndex", () => {
     expect(findId(nested, "21.22")?.folderPath).toBe(
       "Sistema/20-29 Trabajo y productos/21 Productos de software propios/21.22 JDex Manager",
     );
+  });
+
+  it("pairs fourth-level + folders with their child notes, ignoring trailing tags", () => {
+    const parent = "20-29 Trabajo/21 Productos/21.22 JDex Manager";
+    const child = `${parent}/+ Manual`;
+    const childIndex = buildIndex({
+      systemRoot: "Sistema",
+      folderPaths: ["Sistema/20-29 Trabajo", "Sistema/20-29 Trabajo/21 Productos", `Sistema/${parent}`, `Sistema/${child}`],
+      jdexFolder: "Sistema/JDex",
+      notePaths: ["Sistema/JDex/21.22 JDex Manager.md", "Sistema/JDex/21.22+ Manual #jd-ayuda.md"],
+    });
+    expect(childIndex.ids.find((e) => e.id === "21.22+")).toMatchObject({
+      title: "Manual #jd-ayuda",
+      notePath: "Sistema/JDex/21.22+ Manual #jd-ayuda.md",
+      folderPath: `Sistema/${child}`,
+    });
+    expect(childIndex.ids).toHaveLength(2);
+    expect(auditSystem({ index: childIndex, notes: [], filePaths: [] }).filter((f) => f.kind === "note-without-folder" || f.kind === "folder-without-note")).toEqual([]);
+  });
+
+  it("audits an orphan + folder and ignores ordinary, deeper and unvalidated subfolders", () => {
+    const parent = "20-29 Trabajo/21 Productos/21.22 JDex Manager";
+    const child = `${parent}/+ Sin nota`;
+    const childIndex = buildIndex({
+      systemRoot: "",
+      folderPaths: [
+        "20-29 Trabajo", "20-29 Trabajo/21 Productos", parent, child,
+        `${parent}/Documentos`, `${parent}/21.22+ No es un hijo`, `${child}/+ Demasiado profundo`,
+        "20-29 Trabajo/21 Productos/Notas sueltas/+ Sin padre",
+        "20-29 Trabajo/21 Productos/22.11 Fuera de categoría/+ Inválido",
+      ],
+      jdexFolder: "JDex",
+      notePaths: ["JDex/21.22 JDex Manager.md"],
+    });
+    expect(childIndex.ids.map((e) => e.id)).toEqual(["21.22", "21.22+"]);
+    expect(auditSystem({ index: childIndex, notes: [], filePaths: [] }).filter((f) => f.kind === "folder-without-note")).toEqual([
+      expect.objectContaining({ number: "21.22+", paths: [child] }),
+    ]);
   });
 });
 
