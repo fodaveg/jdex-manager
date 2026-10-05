@@ -69,7 +69,7 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
         },
         notesRewriteBatch: async (requests, options) => {
           const before = new Map(await Promise.all(requests.map(async (entry) => [entry.id, await vault.noteRead(entry.id)] as const)));
-          const result: BatchWithCommits = await vault.notesRewriteBatch(requests, options);
+          const result: BatchWithCommits = await vault.notesRewriteBatch(requests.map((request) => ({ ...request, strictRevision: true })), options);
           const committed = new Map(result.committed?.map((entry) => [entry.id, entry]));
           const effects: JdexJournalEffect[] = [];
           for (const id of result.written) {
@@ -88,12 +88,15 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
         },
         noteSave: async (input) => {
           const prior = await vault.noteRead(input.id);
-          const result = await vault.noteSave(input);
-          if (result.outcome === 'saved' && prior?.body !== null && prior && sameRevision(prior.revision, input.expected) && prior.body !== input.body) {
-            await append({ kind: 'note-rewrite', id: input.id, before: prior.body, after: input.body, revision: { ...result.revision } });
-          }
-          if (result.outcome === 'redirected' && prior) await append({ kind: 'note-create', id: result.id, body: input.body, folderId: prior.folderId, revision: { ...result.revision } });
-          return result;
+          if (!prior || prior.body === null || !sameRevision(prior.revision, input.expected)) throw new Error('La nota cambió antes del guardado; se conserva sin modificar.');
+          // Journaled saves require a strict preimage and the exact committed body.
+          // A stale save stops the operation instead of creating an untracked conflict copy.
+          const result: BatchWithCommits = await vault.notesRewriteBatch([{ ...input, strictRevision: true }]);
+          const committed = result.committed?.find((entry) => entry.id === input.id);
+          if (!result.written.includes(input.id)) throw new Error('La nota cambió durante el guardado; se conserva sin modificar.');
+          if (prior.body !== (committed?.body ?? input.body)) await append({ kind: 'note-rewrite', id: input.id, before: prior.body, after: committed?.body ?? input.body, revision: committed ? { ...committed.revision } : undefined });
+          if (!committed) throw new Error('Hebra no devolvió la revisión exacta del guardado; se conserva el diario.');
+          return { outcome: 'saved', id: input.id, revision: { ...committed.revision } };
         },
         noteMove: async (id, folderId) => {
           const prior = await vault.noteRead(id);
@@ -131,6 +134,18 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
           const before = (await vault.foldersList()).find((folder) => folder.id === id);
           const folder = await vault.folderRename(id, name);
           if (before && before.name !== folder.name) await append({ kind: 'folder-change', id, beforeName: before.name, beforeParentId: before.parentId, afterName: folder.name, afterParentId: folder.parentId });
+          return folder;
+        },
+        folderRenameIfUnchanged: async (id, name, expected) => {
+          if (!vault.folderRenameIfUnchanged) throw new Error('Hebra no ofrece renombrado atómico de carpetas.');
+          const folder = await vault.folderRenameIfUnchanged(id, name, expected);
+          if (folder && expected.name !== folder.name) await append({ kind: 'folder-change', id, beforeName: expected.name, beforeParentId: expected.parentId, afterName: folder.name, afterParentId: folder.parentId });
+          return folder;
+        },
+        folderMoveIfUnchanged: async (id, parentId, expected) => {
+          if (!vault.folderMoveIfUnchanged) throw new Error('Hebra no ofrece movimiento atómico de carpetas.');
+          const folder = await vault.folderMoveIfUnchanged(id, parentId, expected);
+          if (folder && expected.parentId !== folder.parentId) await append({ kind: 'folder-change', id, beforeName: expected.name, beforeParentId: expected.parentId, afterName: folder.name, afterParentId: folder.parentId });
           return folder;
         },
         folderMove: async (id, parentId) => {

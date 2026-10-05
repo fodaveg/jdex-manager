@@ -230,4 +230,99 @@ describe('Hebra journal', () => {
     expect((await journal.undoLast()).undone).toBe(0);
     expect((await vault.foldersList()).find((folder) => folder.id === 'f1')?.name).toBe('21.11 Manual');
   });
+  it('refuses a same-body newer revision before capture and during the strict forward batch', async () => {
+    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
+    const vault = api.vault;
+    const original = await vault.noteCreate({ folderId: vault.rootFolderId(), body: '# Original\n' });
+    const journal = await createJdexJournal(vault, api.storage.settings);
+    await vault.noteSave({ id: original.id, body: original.body!, expected: original.revision });
+    const stale = await journal.run('fix', 'Old capture', (tracked) => tracked.notesRewriteBatch([{ id: original.id, body: '# Unexpected\n', expected: original.revision }]));
+    expect(stale.stale).toEqual([original.id]);
+    expect(journal.entries()).toHaveLength(0);
+    const current = (await vault.noteRead(original.id))!;
+    const batch = vault.notesRewriteBatch.bind(vault);
+    vi.spyOn(vault, 'notesRewriteBatch').mockImplementation(async (requests, options) => {
+      await vault.noteSave({ id: current.id, body: current.body!, expected: current.revision });
+      return batch(requests, options);
+    });
+    const race = await journal.run('fix', 'Concurrent capture', (tracked) => tracked.notesRewriteBatch([{ id: current.id, body: '# Unexpected\n', expected: current.revision }]));
+    expect(race.stale).toEqual([current.id]);
+    expect(journal.entries()).toHaveLength(0);
+    expect((await vault.noteRead(current.id))?.body).toBe(original.body);
+  });
+
+  it('keeps exact committed revisions when another writer edits immediately after the batch', async () => {
+    const { vault, journal } = await setup();
+    const batch = vault.notesRewriteBatch.bind(vault);
+    vi.spyOn(vault, 'notesRewriteBatch').mockImplementation(async (requests, options) => {
+      const result = await batch(requests, options);
+      vault.saveElsewhere('n1', '# Después\n');
+      return result;
+    });
+    await journal.run('fix', 'Edit', async (tracked) => {
+      const note = (await tracked.noteRead('n1'))!;
+      await tracked.notesRewriteBatch([{ id: note.id, body: '# Después\n', expected: note.revision }]);
+    });
+    expect((await journal.undoLast()).undone).toBe(0);
+    expect((await vault.noteRead('n1'))?.body).toBe('# Después\n');
+  });
+
+  it('rebasing across operations never adopts a concurrent same-body revision after undo', async () => {
+    const { vault, journal } = await setup();
+    for (const body of ['# Intermedio\n', '# Final\n']) await journal.run('fix', 'Edit', async (tracked) => {
+      const note = (await tracked.noteRead('n1'))!;
+      await tracked.notesRewriteBatch([{ id: note.id, body, expected: note.revision }]);
+    });
+    const batch = vault.notesRewriteBatch.bind(vault);
+    vi.spyOn(vault, 'notesRewriteBatch').mockImplementation(async (requests, options) => {
+      const result = await batch(requests, options);
+      vault.saveElsewhere('n1', '# Intermedio\n');
+      return result;
+    });
+    expect((await journal.undoLast()).undone).toBe(1);
+    expect((await journal.undoLast()).undone).toBe(0);
+    expect(journal.entries()).toHaveLength(1);
+  });
+
+  it('undoes nested folder creation in child-before-parent order', async () => {
+    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
+    const journal = await createJdexJournal(api.vault, api.storage.settings);
+    await journal.run('fix', 'Nested', async (tracked) => {
+      const parent = await tracked.folderCreate(api.vault.rootFolderId(), 'Parent');
+      await tracked.folderCreate(parent.id, 'Child');
+    });
+    expect(await journal.undoLast()).toEqual({ undone: 2, warnings: [] });
+    expect((await api.vault.foldersList()).map((folder) => folder.name)).not.toContain('Parent');
+  });
+
+  it('journals the transformed committed save body and rejects stale saves without conflict copies', async () => {
+    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
+    const vault = api.vault;
+    const note = await vault.noteCreate({ folderId: vault.rootFolderId(), body: '# Before\n' });
+    const journal = await createJdexJournal(vault, api.storage.settings);
+    const batch = vault.notesRewriteBatch.bind(vault);
+    const spy = vi.spyOn(vault, 'notesRewriteBatch').mockImplementation((requests, options) => batch(requests.map((request) => ({ ...request, body: '# Canonical\n' })), options));
+    await journal.run('fix', 'Save', (tracked) => tracked.noteSave({ id: note.id, body: '# Requested\n', expected: note.revision }));
+    expect(journal.entries()[0].effects[0]).toMatchObject({ after: '# Canonical\n' });
+    spy.mockRestore();
+    await expect(journal.run('fix', 'Stale save', (tracked) => tracked.noteSave({ id: note.id, body: '# Wrong\n', expected: note.revision }))).rejects.toThrow('cambió antes');
+    expect(await journal.undoLast()).toEqual({ undone: 1, warnings: [] });
+    expect((await vault.noteRead(note.id))?.body).toBe('# Before\n');
+  });
+
+  it('preserves same-body external edits made after creation or between the undo read and trash', async () => {
+    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
+    const vault = api.vault;
+    const journal = await createJdexJournal(vault, api.storage.settings);
+    const note = await journal.run('create-id', 'Create', (tracked) => tracked.noteCreate({ folderId: vault.rootFolderId(), body: '# New\n' }));
+    const trash = vault.noteTrashIfUnchanged.bind(vault);
+    vi.spyOn(vault, 'noteTrashIfUnchanged').mockImplementation(async (...args) => {
+      await vault.noteSave({ id: note.id, body: note.body!, expected: note.revision });
+      return trash(...args);
+    });
+    expect((await journal.undoLast()).undone).toBe(0);
+    expect((await vault.noteRead(note.id))?.trashedAt).toBeNull();
+    expect((await journal.undoLast()).undone).toBe(0);
+  });
+
 });
