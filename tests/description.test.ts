@@ -55,8 +55,18 @@ describe("audit: missing description", () => {
       type: "frontmatter",
       path: "JDex/21.22 A.md",
       set: { descripcion: "Plugin de Obsidian hecho en casa que trata el JDex como lo que es: el sistema." },
+      expected: { descripcion: "" },
     });
     expect(findings[1].fix).toBeUndefined();
     expect(findings[0].informative).toBe(false);
+  });
+
+  it("keeps an absent description distinct from an empty one in the audit snapshot", () => {
+    const absent = auditSystem({
+      index,
+      filePaths: [],
+      notes: [{ path: "JDex/21.22 A.md", frontmatter: { jd: "21.22", tipo: "id" }, body: NOTE }],
+    }).find((finding) => finding.kind === "missing-description");
+    expect(absent?.fix).toMatchObject({ expected: { descripcion: undefined } });
   });
 });
