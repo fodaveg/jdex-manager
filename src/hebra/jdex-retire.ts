@@ -14,7 +14,7 @@ import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
 import { rewriteJdexNotes, type JdexRewriteLibrary } from './jdex-write';
 
 export type JdexRetireLibrary = JdexRewriteLibrary &
-  Pick<PluginVault, 'folderRename' | 'folderMove'>;
+  Pick<PluginVault, 'folderRenameIfUnchanged' | 'folderMoveIfUnchanged'>;
 
 export interface JdexRetireOutcome {
   plan: RetirePlan;
@@ -37,21 +37,27 @@ function baseName(path: string): string {
  *  plan trae `move`. Lanza si `entry` no tiene nota JDex (`retirePlan` lo comprueba). */
 export async function retireJdexId(
   library: JdexRetireLibrary,
-  markdown: Pick<PluginMarkdown, 'setProperty'>,
+  markdown: Pick<PluginMarkdown, 'setProperty' | 'frontmatter'>,
   walk: JdexLibraryWalk,
   index: JdIndex,
   entry: IdEntry,
   date: string
 ): Promise<JdexRetireOutcome> {
-  const plan = retirePlan(index, entry, date);
+  const noteId = entry.notePath ? walk.noteIdByPath?.get(entry.notePath) ?? walk.systemNotes.find((note) => note.path === entry.notePath)?.id : undefined;
+  if (!noteId) throw new Error(`No se encontró la nota JDex de ${entry.label} en la biblioteca.`);
+  const current = await library.noteRead(noteId);
+  if (!current || current.body === null) throw new Error(`La nota JDex de ${entry.label} no está disponible para retirar.`);
+  const frontmatter = markdown.frontmatter(current.body);
+  const archivedAt = frontmatter?.tipo === 'archivado'
+    ? typeof frontmatter.archivado === 'string' ? frontmatter.archivado : ''
+    : undefined;
+  const plan = retirePlan(index, entry, date, undefined, archivedAt);
   if ('error' in plan) throw new Error(plan.error);
-
-  const noteId = walk.systemNotes.find((note) => note.path === plan.notePath)?.id;
-  if (!noteId) throw new Error(`No se encontró la nota JDex de ${plan.id} en la biblioteca.`);
-  await rewriteJdexNotes(
+  const result = await rewriteJdexNotes(
     library,
     [noteId],
     (current) => {
+      if (markdown.frontmatter(current.body)?.tipo === 'archivado') return null;
       let next = current.body;
       for (const [key, value] of Object.entries(plan.frontmatter)) {
         next = markdown.setProperty(next, key, value);
@@ -61,14 +67,29 @@ export async function retireJdexId(
     },
     'Antes de retirar el ID'
   );
+  if (!result.written.includes(noteId)) throw new Error(`No se pudo marcar ${entry.label} como retirado: la nota está bloqueada, obsoleta o no se escribió.`);
 
   let moved = false;
   if (plan.move) {
     const folderId = jdexResolveFolderId(walk, plan.move.from);
     const archiveFolderId = jdexResolveFolderId(walk, parentPath(plan.move.to));
-    if (folderId && archiveFolderId) {
-      await library.folderRename(folderId, baseName(plan.move.to));
-      await library.folderMove(folderId, archiveFolderId);
+    if (!folderId || !archiveFolderId) throw new Error('No se encontró la carpeta o el archivo; la nota marcada queda en el diario.');
+    {
+      const originalName = baseName(plan.move.from);
+      const originalParentId = jdexResolveFolderId(walk, parentPath(plan.move.from));
+      const renamed = await library.folderRenameIfUnchanged(folderId, baseName(plan.move.to), { name: originalName, parentId: originalParentId });
+      if (!renamed) throw new Error('La carpeta cambió antes de retirarla; se conserva la nota marcada en el diario.');
+      const expected = { name: renamed.name, parentId: renamed.parentId };
+      try {
+        if (!await library.folderMoveIfUnchanged(folderId, archiveFolderId, expected)) throw new Error('La carpeta cambió antes de moverla.');
+      } catch (error) {
+        try {
+          if (!await library.folderRenameIfUnchanged(folderId, originalName, expected)) throw new Error('La carpeta cambió; se conserva su estado actual.');
+        } catch (rollbackError) {
+          throw new Error(`Falló el movimiento y no se pudo revertir el nombre de la carpeta: ${String(rollbackError)}. Causa: ${String(error)}`);
+        }
+        throw new Error(`Falló el movimiento; comprueba la carpeta antes de reintentar. ${String(error)}`);
+      }
       moved = true;
     }
   }

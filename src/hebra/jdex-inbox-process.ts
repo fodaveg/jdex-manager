@@ -9,14 +9,13 @@
  * sola.
  */
 import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
-import { todayIso } from './engine';
+import { datedName, zeroOf, type DateFormat, type JdIndex } from './engine';
 import {
   jdexResolveFolderId,
   type JdexInboxSummary,
   type JdexLibraryWalk,
   type JdexNoteRef
 } from './library-index';
-import { rewriteJdexNotes, type JdexRewriteLibrary } from './jdex-write';
 
 /** Notas directas de cualquier carpeta `.01`, en el mismo orden que
  *  `buildJdexInboxSummary` construyó `summary.folders` (por id de categoría): una por
@@ -45,25 +44,46 @@ export async function moveJdexInboxNote(
   await library.noteMove(note.id, folderId);
 }
 
-/** «Archivar»: mismo criterio que retirar un ID (`retirePlan`, `vendor/jdex-manager/
- *  src/jd/retire.ts`) — `tipo: archivado` y `archivado: <fecha>` en el frontmatter,
- *  conservando el resto de la nota byte a byte (`api.markdown.setProperty`, el mismo
- *  escritor que usa el editor de Hebra). A diferencia de retirar un ID, una nota de
- *  inbox no tiene `.09` a la que mudarse: solo se marca, nunca se mueve. */
-export async function archiveJdexInboxNote(
-  library: JdexRewriteLibrary,
-  markdown: Pick<PluginMarkdown, 'setProperty'>,
+/** A note in `.01` can be archived only when its own category has a live `.09` folder. */
+export function jdexInboxArchiveTarget(
   note: JdexNoteRef,
-  date = todayIso()
-): Promise<{ written: string[]; skipped: string[] }> {
-  return rewriteJdexNotes(
-    library,
-    [note.id],
-    (current) => {
-      let next = markdown.setProperty(current.body, 'tipo', 'archivado');
-      next = markdown.setProperty(next, 'archivado', date);
-      return next === current.body ? null : next;
-    },
-    'Antes de archivar desde el inbox'
-  );
+  walk: JdexLibraryWalk,
+  index: JdIndex
+): { folderId: string; label: string } | null {
+  const inboxPath = walk.folderPaths.get(note.folderId);
+  const inbox = index.ids.find((entry) => entry.folderPath === inboxPath && entry.id.endsWith('.01'));
+  if (!inbox) return null;
+  const archive = zeroOf(index, inbox.category, '09', inbox.system ?? '');
+  const folderId = archive?.folderPath ? jdexResolveFolderId(walk, archive.folderPath) : null;
+  return archive && folderId ? { folderId, label: archive.label } : null;
+}
+
+/** Move to `.09` with the note creation date prefixed to its title. A stale title
+ *  rewrite aborts before the move; a later move failure remains in the journal. */
+export async function archiveJdexInboxNote(
+  library: Pick<PluginVault, 'noteRead' | 'notesRewriteBatch' | 'noteMoveIfUnchanged'>,
+  markdown: Pick<PluginMarkdown, 'withTitle'>,
+  note: JdexNoteRef,
+  walk: JdexLibraryWalk,
+  index: JdIndex,
+  dateFormat: DateFormat
+): Promise<void> {
+  const target = jdexInboxArchiveTarget(note, walk, index);
+  if (!target) throw new Error('Esta categoría no tiene una carpeta .09 para archivar.');
+  const current = await library.noteRead(note.id);
+  if (!current || current.body === null || current.trashedAt !== null || current.folderId !== note.folderId) {
+    throw new Error('La nota cambió desde que se abrió el inbox; vuelve a abrirlo.');
+  }
+  let revision = current.revision;
+  const title = datedName(current.title, new Date(current.createdAt), dateFormat);
+  if (title !== current.title) {
+    const body = markdown.withTitle(current.body, title);
+    if (body === current.body) throw new Error('No se pudo poner la fecha al título de la nota.');
+    const result = await library.notesRewriteBatch([{ id: note.id, body, expected: current.revision, strictRevision: true }], { cause: 'Antes de archivar desde el inbox' });
+    if (!result.written.includes(note.id)) throw new Error('La nota cambió antes de fecharla; no se archivó.');
+    const committed = result.committed.find((entry) => entry.id === note.id);
+    if (!committed) throw new Error('Hebra no devolvió la revisión exacta; la nota fechada se conserva en el inbox.');
+    revision = committed.revision;
+  }
+  if (!await library.noteMoveIfUnchanged(note.id, target.folderId, { revision, folderId: current.folderId })) throw new Error('La nota cambió antes de moverla al archivo; se conserva en el inbox.');
 }

@@ -26,6 +26,10 @@ export interface JdexManagerSettings {
   renamePairsWithoutAsking: boolean;
   /** Keep the children list of header notes up to date automatically. */
   liveHeaders: boolean;
+  /** Apply only derived JDex frontmatter and managed index blocks after system changes. */
+  automaticMaintenance: boolean;
+  /** Age threshold for informative inbox-stale findings. */
+  inboxStaleDays: number;
   /** Prefix used by "Date file name" and when archiving. */
   dateFormat: DateFormat;
   /** Date new files inside an ID folder as they are created. */
@@ -78,6 +82,8 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   noteWithoutFolderIsFinding: false,
   renamePairsWithoutAsking: false,
   liveHeaders: true,
+  automaticMaintenance: false,
+  inboxStaleDays: 30,
   dateFormat: "YYYY-MM-DD",
   dateOnCreate: false,
   dateOnMove: false,
@@ -100,6 +106,8 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
 /** Merge stored data over the defaults, one level deep for `templateNames`. */
 export function mergeSettings(stored: Partial<JdexManagerSettings> | null | undefined): JdexManagerSettings {
   const base = { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
+  if (!Number.isInteger(base.inboxStaleDays) || base.inboxStaleDays < 1) base.inboxStaleDays = DEFAULT_SETTINGS.inboxStaleDays;
+  base.automaticMaintenance = base.automaticMaintenance === true;
   base.templateNames = { ...DEFAULT_SETTINGS.templateNames, ...(stored?.templateNames ?? {}) };
   base.subfolderPatternsByCategory = { ...(stored?.subfolderPatternsByCategory ?? {}) };
   return base;

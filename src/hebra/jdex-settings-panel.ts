@@ -104,7 +104,7 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       row.append(input);
       container.append(row);
     }
-    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders']] as const) {
+    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings']] as const) {
       const row = document.createElement('label');
       row.className = 'hebra-jdex-settings-row';
       const input = document.createElement('input');
@@ -114,6 +114,37 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       row.append(input, document.createTextNode(labelText));
       container.append(row);
     }
+    const dateRow = document.createElement('label');
+    dateRow.className = 'hebra-jdex-settings-row';
+    dateRow.append(document.createTextNode('Formato de fecha al archivar'));
+    const dateFormat = document.createElement('select');
+    for (const format of ['YYYY-MM-DD', 'YYYY-MM'] as const) {
+      const option = document.createElement('option');
+      option.value = format;
+      option.textContent = format;
+      dateFormat.append(option);
+    }
+    dateFormat.value = options.get().dateFormat;
+    dateFormat.addEventListener('change', () => {
+      if (dateFormat.value === 'YYYY-MM-DD' || dateFormat.value === 'YYYY-MM') options.save({ ...options.get(), dateFormat: dateFormat.value });
+    });
+    dateRow.append(dateFormat);
+    container.append(dateRow);
+    const staleRow = document.createElement('label');
+    staleRow.className = 'hebra-jdex-settings-row';
+    staleRow.append(document.createTextNode('Días para inbox antiguo'));
+    const staleDays = document.createElement('input');
+    staleDays.type = 'number';
+    staleDays.min = '1';
+    staleDays.step = '1';
+    staleDays.value = String(options.get().inboxStaleDays);
+    staleDays.addEventListener('change', () => {
+      const days = Number(staleDays.value);
+      if (!Number.isInteger(days) || days < 1) { staleDays.value = String(options.get().inboxStaleDays); return; }
+      options.save({ ...options.get(), inboxStaleDays: days });
+    });
+    staleRow.append(staleDays);
+    container.append(staleRow);
 
     const auto = document.createElement('p');
     auto.className = 'hebra-jdex-settings-hint';

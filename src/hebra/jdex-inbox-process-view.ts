@@ -26,6 +26,8 @@ export interface JdexInboxProcessViewOptions {
    *  cabecera de la fila activa. */
   folderLabel(note: JdexNoteRef): string;
   onMove(note: JdexNoteRef, entry: IdEntry): Promise<void>;
+  /** Archive label when this inbox's category has a live `.09` folder. */
+  archiveTarget?(note: JdexNoteRef): string | null;
   onArchive(note: JdexNoteRef): Promise<void>;
   onOpen(note: JdexNoteRef): void;
 }
@@ -78,9 +80,13 @@ export function mountJdexInboxProcessView(
 
     const actions = document.createElement('div');
     actions.className = 'hebra-jdex-goto-actions';
+    const target = options.archiveTarget ? options.archiveTarget(note) : '';
+    const archive = actionButton(target ? `Archivar en ${target}` : 'Archivar', () => void runArchive(note));
+    archive.disabled = target === null;
+    if (target === null) archive.title = 'Esta categoría no tiene una carpeta .09.';
     actions.append(
       actionButton('Mover…', () => openMove(note)),
-      actionButton('Archivar', () => void runArchive(note)),
+      archive,
       actionButton('Omitir', () => advance()),
       actionButton('Abrir', () => {
         options.onOpen(note);

@@ -63,6 +63,7 @@ import {
   pairAction,
   extractJdPrefix,
   patternFor,
+  staleInboxFindings,
   type Finding,
   type IdEntry,
   type JdIndex,
@@ -119,7 +120,7 @@ import {
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import { mountJdexGotoView } from './jdex-goto-view';
 import { retireJdexId } from './jdex-retire';
-import { archiveJdexInboxNote, jdexInboxQueue, moveJdexInboxNote } from './jdex-inbox-process';
+import { archiveJdexInboxNote, jdexInboxArchiveTarget, jdexInboxQueue, moveJdexInboxNote } from './jdex-inbox-process';
 import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
 import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
@@ -128,6 +129,7 @@ import { createJdexJournal } from './jdex-journal';
 import { mountJdexJournalView } from './jdex-journal-view';
 import { createJdexHealthReport } from './jdex-health';
 import { applyJdexRepair } from './jdex-repair';
+import { createJdexSystemReport } from './jdex-system-report';
 
 export const JDEX_AUDIT_VIEW_ID = 'jdex:auditoria';
 export const JDEX_ID_SECTION_VIEW_ID = 'jdex:seccion-del-id';
@@ -152,6 +154,7 @@ export const JDEX_COMMAND_GOTO_ID = 'jdex-ir-a-un-id';
 export const JDEX_COMMAND_PROCESS_INBOX = 'jdex-procesar-inbox';
 export const JDEX_COMMAND_UNDO = 'jdex-deshacer-ultima-operacion';
 export const JDEX_COMMAND_HEALTH = 'jdex-informe-de-salud';
+export const JDEX_COMMAND_SYSTEM_REPORT = 'jdex-informe-del-sistema';
 
 /** Reconstruir el índice tras un `library-changed` no en CADA aviso (una biblioteca que
  *  sincroniza muchas notas seguidas dispararía varias reconstrucciones completas). */
@@ -297,6 +300,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     auditInput.patternFor = (category) => patternFor(settings, category);
     auditInput.jdexFolder = settings.jdexFolder;
     findings = auditSystem(auditInput);
+    findings.push(...staleInboxFindings(index, walk.systemNotes.flatMap((note) => {
+      const folderPath = walk!.folderPaths.get(note.folderId);
+      return folderPath && note.createdAt !== undefined ? [{ path: note.path, folderPath, createdAt: note.createdAt }] : [];
+    }), settings.inboxStaleDays, Date.now()));
     inboxSummary = buildJdexInboxSummary(index, walk);
     refreshCounterItems();
     refreshPathItem();
@@ -388,9 +395,33 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   /** Manual JDex and folder changes refresh managed blocks; unchanged bodies do not write. */
   async function syncLiveHeaders(): Promise<void> {
-    if (disposed || !settings.liveHeaders || !walk || !index) return;
+    if (disposed || !(settings.liveHeaders || settings.automaticMaintenance) || !walk || !index) return;
     const result = await journal.run('fix', 'Actualizar cabeceras e índice vivos', (vault) => refreshJdexHeadersAndIndex(vault, walk!, index!, settings.systemIndexNote));
     if (result.written.length > 0) await refreshNotes(result.written);
+  }
+
+  /** Only fields derived from JDex structure are safe to repair after external edits. */
+  async function maintainDerivedFrontmatter(): Promise<void> {
+    if (disposed || !settings.automaticMaintenance || !walk || !index) return;
+    const keys = new Set(['jd', 'tipo', 'area', 'categoria']);
+    const chosen = frontmatterFindingsFor(findings).flatMap((finding) => {
+      if (finding.fix?.type !== 'frontmatter') return [];
+      const set = Object.fromEntries(Object.entries(finding.fix.set).filter(([key]) => keys.has(key)));
+      if (Object.keys(set).length === 0) return [];
+      const expected = finding.fix.expected
+        ? Object.fromEntries(Object.entries(finding.fix.expected).filter(([key]) => keys.has(key)))
+        : undefined;
+      return [{ ...finding, fix: { ...finding.fix, set, expected } }];
+    });
+    if (chosen.length === 0) return;
+    const result = await journal.run('fix', 'Mantenimiento automático JDex', (vault) => applyJdexFrontmatterFixes(vault, api.markdown, chosen, noteIdByPath));
+    for (const warning of result.warnings) host.notice(warning);
+    if (result.written.length > 0) await refreshNotes(result.written);
+  }
+
+  async function syncDerived(): Promise<void> {
+    await maintainDerivedFrontmatter();
+    await syncLiveHeaders();
   }
 
   function reportCreateOutcome(outcome: JdexCreateOutcome): void {
@@ -880,7 +911,15 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       );
     } catch (error) {
       host.notice(error instanceof Error ? error.message : String(error));
+      await rebuild().catch((cause: unknown) => report(cause, 'rebuild-tras-retirada-parcial'));
     }
+  }
+
+  function retiredAt(entry: IdEntry): string | null {
+    const noteId = entry.notePath ? noteIdByPath(entry.notePath) : null;
+    const fm = noteId ? auditEntries.get(noteId)?.frontmatter : null;
+    if (fm?.tipo !== 'archivado') return null;
+    return typeof fm.archivado === 'string' ? fm.archivado : '';
   }
 
   function openGotoIdDialog(): void {
@@ -897,6 +936,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountJdexGotoView(el, {
           entries: currentIndex.ids,
           hasActiveNote: latestNote !== null,
+          retiredAt,
           onGoto: (entry) => {
             handle?.close();
             gotoJdexEntry(entry, currentWalk);
@@ -956,13 +996,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           queue,
           entries: currentIndex.ids,
           folderLabel: (note) => labelByFolderId.get(note.folderId) ?? 'Bandeja de entrada',
+          archiveTarget: (note) => jdexInboxArchiveTarget(note, currentWalk, currentIndex)?.label ?? null,
           onMove: async (note, entry) => {
             if (!entry.folderPath) throw new Error(`${entry.label} no tiene carpeta.`);
             await journal.run('move', `Mover inbox a ${entry.label}`, (vault) => moveJdexInboxNote(vault, note, currentWalk, entry.folderPath!));
             await rebuild();
           },
           onArchive: async (note) => {
-            await journal.run('fix', 'Archivar nota de inbox', (vault) => archiveJdexInboxNote(vault, api.markdown, note));
+            await journal.run('move', 'Archivar nota de inbox', (vault) => archiveJdexInboxNote(vault, api.markdown, note, currentWalk, currentIndex, settings.dateFormat));
             await rebuild();
           },
           onOpen: (note) => api.workspace.openNote(note.id)
@@ -1026,7 +1067,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     pendingFull = false;
     pendingIds.clear();
     if (full) {
-      await rebuild().then(async () => { settleFolderChanges(); await syncLiveHeaders(); }).catch((error: unknown) => {
+      await rebuild().then(async () => { settleFolderChanges(); await syncDerived(); }).catch((error: unknown) => {
         report(error, 'rebuild');
         // Sin esto un fallo dejaría `walk` viejo (o `null`) hasta el próximo aviso de
         // carpetas.
@@ -1036,7 +1077,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     }
     if (ids.length === 0) return;
     notesTail = notesTail
-      .then(async () => { await refreshNotes(ids); await syncLiveHeaders(); })
+      .then(async () => { await refreshNotes(ids); await syncDerived(); })
       .catch((error: unknown) => {
         report(error, 'actualizar-notas');
         // Los ids ya salieron de `pendingIds`: sin una reconstrucción completa una
@@ -1279,6 +1320,18 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
     }
   });
+  const offCommandSystemReport = host.registerCommand({
+    id: JDEX_COMMAND_SYSTEM_REPORT,
+    name: 'JDex: informe del sistema',
+    run: async () => {
+      try {
+        await rebuild();
+        if (!walk || !index) return;
+        const note = await journal.run('fix', 'Crear informe del sistema', (vault) => createJdexSystemReport(vault, walk!, index!, findings, settings, todayIso()));
+        api.workspace.openNote(note.id);
+      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+    }
+  });
 
   let unmountAuditView: (() => void) | undefined;
   let auditViewEl: HTMLElement | null = null;
@@ -1496,6 +1549,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandProcessInbox();
     offCommandUndo();
     offCommandHealth();
+    offCommandSystemReport();
     offAuditView();
     offIdSectionActiveNote();
     offIdSectionView();

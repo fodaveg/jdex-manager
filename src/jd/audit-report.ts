@@ -19,6 +19,7 @@ export const KIND_TITLES: Record<FindingKind, string> = {
   "structure-without-note": "Áreas y categorías sin nota en el JDex",
   "pattern-missing": "IDs sin el patrón de subcarpetas (informativo)",
   "note-without-folder": "Notas sin carpeta (informativo)",
+  "inbox-stale": "Elementos antiguos en el inbox (informativo)",
 };
 
 export function reportFileName(date: string): string {

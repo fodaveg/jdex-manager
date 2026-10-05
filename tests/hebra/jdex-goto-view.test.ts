@@ -129,4 +129,15 @@ describe('mountJdexGotoView', () => {
     expect((el.querySelector('.hebra-jdex-goto-actions') as HTMLElement).hidden).toBe(true);
     expect((el.querySelector('input[type="search"]') as HTMLInputElement).hidden).toBe(false);
   });
+  it('disables retiring again and shows the original retirement date', () => {
+    const el = document.createElement('div');
+    const callbacks = noop();
+    mountJdexGotoView(el, { entries: [entry()], hasActiveNote: true, retiredAt: () => '2026-09-21', ...callbacks });
+    (el.querySelector('[role="option"]') as HTMLButtonElement).click();
+    const button = [...el.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Ya retirado el 2026-09-21')!;
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(callbacks.onRetire).not.toHaveBeenCalled();
+  });
+
 });

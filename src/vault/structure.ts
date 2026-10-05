@@ -4,6 +4,7 @@ import { jdexNoteName } from "../jd/parse";
 import { appendIndexMarkers, renderSystemIndex, replaceSystemIndex } from "../jd/system-index";
 import type { JdexManagerSettings } from "../settings";
 import { createJdexNote } from "./create";
+import type { Effect } from "../jd/journal";
 
 export interface MissingStructure {
   areas: { system?: string; number: number; label: string; title: string }[];
@@ -52,7 +53,7 @@ export function systemIndexFile(app: App, settings: JdexManagerSettings, index: 
 }
 
 /** Regenerates the block between the index markers; adds the markers at the end when missing. */
-export async function updateSystemIndex(app: App, settings: JdexManagerSettings, index: JdIndex, addMarkers: boolean): Promise<boolean> {
+export async function updateSystemIndex(app: App, settings: JdexManagerSettings, index: JdIndex, addMarkers: boolean, effects?: Effect[]): Promise<boolean> {
   const file = systemIndexFile(app, settings, index);
   if (!file) {
     new Notice("No note for the system index: set one in the settings or create the 00.00 note.");
@@ -63,17 +64,25 @@ export async function updateSystemIndex(app: App, settings: JdexManagerSettings,
     const d: unknown = app.metadataCache.getFileCache(f)?.frontmatter?.descripcion;
     if (typeof d === "string" && d.trim() !== "") descriptions.set(f.path, d.trim());
   }
-  let content = await app.vault.read(file);
-  let next = replaceSystemIndex(content, renderSystemIndex(index, descriptions));
+  const body = renderSystemIndex(index, descriptions);
+  const transform = (content: string): string | null => {
+    const next = replaceSystemIndex(content, body);
+    return next === null && addMarkers ? replaceSystemIndex(appendIndexMarkers(content), body) : next;
+  };
+  const content = await app.vault.read(file);
+  const next = transform(content);
   if (next === null) {
-    if (!addMarkers) {
-      new Notice(`${file.basename} has no <!-- jdex:indice --> markers.`);
-      return false;
-    }
-    content = appendIndexMarkers(content);
-    next = replaceSystemIndex(content, renderSystemIndex(index, descriptions));
+    new Notice(`${file.basename} has no <!-- jdex:indice --> markers.`);
+    return false;
   }
-  if (next === null || next === content) return false;
-  await app.vault.modify(file, next);
-  return true;
+  if (next === content) return false;
+  let effect: Effect | null = null;
+  await app.vault.process(file, (current) => {
+    const updated = transform(current);
+    if (updated === null || updated === current) return current;
+    effect = { kind: "note-rewrite", path: file.path, before: current, after: updated };
+    return updated;
+  });
+  if (effect) effects?.push(effect);
+  return effect !== null;
 }

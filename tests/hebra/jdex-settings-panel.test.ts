@@ -77,4 +77,27 @@ describe('mountJdexSettingsPanel', () => {
     input.dispatchEvent(new Event('change'));
     expect(save).not.toHaveBeenCalled();
   });
+  it('keeps structure findings off by default and lets the user explicitly enable them', () => {
+    const el = document.createElement('div');
+    const save = vi.fn();
+    mountJdexSettingsPanel(el, { get: () => DEFAULT_SETTINGS, save, pickFolder: vi.fn(async () => '') });
+    const row = [...el.querySelectorAll('label')].find((label) => label.textContent?.includes('Avisar de áreas y categorías sin nota'))!;
+    const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox.checked).toBe(false);
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ structureNotesAreFindings: true }));
+  });
+
+  it('lets the archive date use the monthly format from settings', () => {
+    const el = document.createElement('div');
+    const save = vi.fn();
+    mountJdexSettingsPanel(el, { get: () => DEFAULT_SETTINGS, save, pickFolder: vi.fn(async () => '') });
+    const date = el.querySelector<HTMLSelectElement>('select')!;
+    expect(date.value).toBe('YYYY-MM-DD');
+    date.value = 'YYYY-MM';
+    date.dispatchEvent(new Event('change'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ dateFormat: 'YYYY-MM' }));
+  });
+
 });

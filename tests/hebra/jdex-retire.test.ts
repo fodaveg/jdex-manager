@@ -1,10 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
+import { describe, expect, it, vi } from 'vitest';
+import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { buildIndex, type IndexInput, type IdEntry, type JdIndex } from '../../src/hebra/engine';
+import { createJdexJournal } from '../../src/hebra/jdex-journal';
 import { retireJdexId } from '../../src/hebra/jdex-retire';
 import type { JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
 import { FakeJdexVault, fakeFolder, fakeNote, fakeSetProperty } from './support/fakes';
 
-const markdown = { setProperty: fakeSetProperty };
+const markdown = {
+  ...createFakePluginApi().api.markdown,
+  setProperty: fakeSetProperty,
+  frontmatter(body: string): Record<string, unknown> | null {
+    const block = /^---\r?\n([\s\S]*?)\r?\n---/u.exec(body)?.[1];
+    const value: unknown = block ? parseYaml(block) : null;
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  }
+};
 
 const JDEX_FOLDER = '00.00 JDex';
 const CATEGORY_PATH = '20-29 Productos/21 Productos de software';
@@ -132,4 +143,52 @@ describe('retireJdexId', () => {
 
     await expect(retireJdexId(library, markdown, walk, index, entry, '2026-09-28')).rejects.toThrow();
   });
+
+  it('una nota bloqueada u obsoleta aborta sin tocar la carpeta', async () => {
+    const { index, walk, entry, library } = fixture();
+    vi.spyOn(library, 'notesRewriteBatch').mockResolvedValue({ written: [], stale: ['n-2111'], committed: [] });
+    await expect(retireJdexId(library, markdown, walk, index, entry, '2026-09-28')).rejects.toThrow('No se pudo marcar');
+    expect((await library.foldersList()).find((folder) => folder.id === 'f-2111')).toMatchObject({ name: '21.11 Hebra', parentId: 'f-cat21' });
+  });
+
+  it('si falla mover, revierte el renombrado y deja la nota marcada para deshacer', async () => {
+    const { index, walk, entry, library } = fixture();
+    vi.spyOn(library, 'folderMoveIfUnchanged').mockRejectedValue(new Error('Sin permiso'));
+    await expect(retireJdexId(library, markdown, walk, index, entry, '2026-09-28')).rejects.toThrow('Falló el movimiento');
+    expect((await library.foldersList()).find((folder) => folder.id === 'f-2111')).toMatchObject({ name: '21.11 Hebra', parentId: 'f-cat21' });
+    expect((await library.noteRead('n-2111'))?.body).toContain('archivado:');
+  });
+
+  it('un ID ya retirado conserva su fecha y no escribe otra línea', async () => {
+    const { index, walk, entry, library } = fixture();
+    library.saveElsewhere('n-2111', '---\ntipo: archivado\narchivado: 2026-09-21\n---\n# 21.11 Hebra\nRetirado el 2026-09-21.\n');
+    await expect(retireJdexId(library, markdown, walk, index, entry, '2026-09-28')).rejects.toThrow('Ya retirado el 2026-09-21');
+    expect(library.rewriteCalls).toHaveLength(0);
+    expect((await library.foldersList()).find((folder) => folder.id === 'f-2111')?.name).toBe('21.11 Hebra');
+  });
+  it('does not overwrite a concurrent rename when compensating a failed move', async () => {
+    const { index, walk, entry, library } = fixture();
+    vi.spyOn(library, 'folderMoveIfUnchanged').mockRejectedValue(new Error('Move failed'));
+    const rename = library.folderRenameIfUnchanged.bind(library);
+    let calls = 0;
+    vi.spyOn(library, 'folderRenameIfUnchanged').mockImplementation(async (...args) => {
+      if (++calls === 2) await library.folderRename('f-2111', 'Manual concurrente');
+      return rename(...args);
+    });
+    await expect(retireJdexId(library, markdown, walk, index, entry, '2026-09-28')).rejects.toThrow('no se pudo revertir');
+    expect((await library.foldersList()).find((folder) => folder.id === 'f-2111')?.name).toBe('Manual concurrente');
+  });
+
+  it('journals a failed retirement including compensation and undoes every completed step', async () => {
+    const { index, walk, entry, library } = fixture();
+    const before = (await library.noteRead('n-2111'))!.body;
+    const journal = await createJdexJournal(library, createFakePluginApi().api.storage.settings);
+    vi.spyOn(library, 'folderMoveIfUnchanged').mockRejectedValue(new Error('Move failed'));
+    await expect(journal.run('retire', 'Retire', (tracked) => retireJdexId(tracked, markdown, walk, index, entry, '2026-09-28'))).rejects.toThrow('Falló el movimiento');
+    expect(journal.entries()[0].effects.map((effect) => effect.kind)).toEqual(['note-rewrite', 'folder-change', 'folder-change']);
+    expect(await journal.undoLast()).toEqual({ undone: 3, warnings: [] });
+    expect((await library.noteRead('n-2111'))?.body).toBe(before);
+    expect((await library.foldersList()).find((folder) => folder.id === 'f-2111')).toMatchObject({ name: '21.11 Hebra', parentId: 'f-cat21' });
+  });
+
 });

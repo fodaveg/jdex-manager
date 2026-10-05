@@ -26,7 +26,8 @@ export type FindingKind =
   | "malformed-number"
   | "missing-description"
   | "structure-without-note"
-  | "pattern-missing";
+  | "pattern-missing"
+  | "inbox-stale";
 
 export const FINDING_KINDS: FindingKind[] = [
   "folder-without-note",
@@ -42,6 +43,7 @@ export const FINDING_KINDS: FindingKind[] = [
   "structure-without-note",
   "pattern-missing",
   "note-without-folder",
+  "inbox-stale",
 ];
 
 export type Fix =

@@ -30,6 +30,8 @@ export {
   categoryOfPath,
   idFolderOfPath,
   inboxFolders,
+  datedName,
+  staleInboxFindings,
   zeroOf,
   locate,
   // audit.ts — la auditoría del «bibliotecario».
@@ -93,7 +95,8 @@ export {
   // enlace y ofrece las sugerencias (`jdex-editor-extension.ts`).
   findJdNumbers,
   pushOperation, JOURNAL_MAX, patternFor, parseCategoryPatterns, formatCategoryPatterns,
-  healthFileName, renderHealthReport
+  healthFileName, renderHealthReport,
+  systemReportName, renderSystemReport, previousSystemSnapshot
 } from '../jd/public';
 
 export type {
@@ -112,6 +115,7 @@ export type {
   NoteMeta,
   AuditInput,
   JdexManagerSettings,
+  DateFormat,
   JdexNoteType,
   JdArea,
   JdCategory,

@@ -38,6 +38,7 @@ function buildFixture() {
   const productosCat = folder('21 Productos de software propios', productosArea.id);
   const catInbox = folder('21.01 Bandeja de entrada', productosCat.id);
   const hebraId = folder('21.11 Hebra', productosCat.id);
+  const archiveId = folder('21.09 Archivo', productosCat.id);
 
   const folders: PluginFolder[] = [
     sistemaArea,
@@ -46,6 +47,7 @@ function buildFixture() {
     productosArea,
     productosCat,
     catInbox,
+    archiveId,
     hebraId
   ];
 
@@ -72,7 +74,7 @@ function buildFixture() {
   library.seedNote(fakeNote('n-inbox-1', catInbox.id, '# 2026-09-28 Suelta 1\n'));
   library.seedNote(fakeNote('n-inbox-2', catInbox.id, '# 2026-09-28 Suelta 2\n'));
 
-  return { folders, library, ids: { jdexId, productosCat, catInbox, hebraId } };
+  return { folders, library, ids: { jdexId, productosCat, catInbox, hebraId, archiveId } };
 }
 
 async function setup(fixture: ReturnType<typeof buildFixture>) {
@@ -115,7 +117,7 @@ describe('activate — lote 4, «Procesar inbox»', () => {
     expect(dialog.textContent).toContain('Suelta 1');
   });
 
-  it('Mover lleva la nota a 21.11 Hebra; Archivar marca la siguiente como archivada', async () => {
+  it('Mover lleva la nota a 21.11 Hebra; Archivar mueve la siguiente a .09 y la quita de la cola', async () => {
     const fixture = buildFixture();
     const { api, fake } = await setup(fixture);
     await activateJdex(api);
@@ -135,12 +137,15 @@ describe('activate — lote 4, «Procesar inbox»', () => {
     expect(moved?.folderId).toBe(fixture.ids.hebraId.id);
 
     const archive = [...dialog.querySelectorAll('.hebra-jdex-goto-action')].find(
-      (b) => b.textContent === 'Archivar'
+      (b) => b.textContent?.startsWith('Archivar en')
     ) as HTMLButtonElement;
     archive.click();
     await vi.waitFor(() => expect(dialog.textContent).toContain('Bandeja de entrada procesada'));
     const archived = await fixture.library.noteRead('n-inbox-2');
-    expect(archived?.body).toContain('tipo: "archivado"');
+    expect(archived?.body).not.toContain('tipo:');
+    expect(archived?.folderId).toBe(fixture.ids.archiveId.id);
+    void findCommand(fake, JDEX_COMMAND_PROCESS_INBOX).run();
+    expect(document.body.textContent).toContain('La bandeja de entrada está vacía');
   });
 
   it('Omitir y Abrir avanzan sin escribir; Abrir llama a openNoteById', async () => {

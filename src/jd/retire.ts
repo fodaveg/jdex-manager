@@ -18,8 +18,11 @@ export interface RetirePlan {
   line: string;
 }
 
-export function retirePlan(index: JdIndex, entry: IdEntry, date: string, successor?: string): RetirePlan | { error: string } {
+/** `archivedAt` is supplied by the host after reading the live JDex note. An empty
+ * string means it is archived but has no recorded date. */
+export function retirePlan(index: JdIndex, entry: IdEntry, date: string, successor?: string, archivedAt?: string): RetirePlan | { error: string } {
   if (!entry.notePath) return { error: `${entry.label} has no JDex note; there is nothing to mark as retired.` };
+  if (archivedAt !== undefined) return { error: archivedAt ? `Ya retirado el ${archivedAt}.` : 'Este ID ya está retirado.' };
   const frontmatter: Record<string, string> = { tipo: "archivado", archivado: date };
   let move: RetirePlan["move"];
   let moveProblem: string | undefined;

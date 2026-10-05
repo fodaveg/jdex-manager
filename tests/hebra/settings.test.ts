@@ -39,7 +39,8 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       reportsFolder: 'I',
       systemId: 'S',
       systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
-      createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50
+      createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
+      automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD'
     });
     expect(await storage.load()).toEqual({
       jdexFolder: 'J',
@@ -48,7 +49,8 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       reportsFolder: 'I',
       systemId: 'S',
       systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
-      createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50
+      createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
+      automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD'
     });
   });
 
@@ -106,4 +108,12 @@ describe('autodetectJdexSettings', () => {
     expect(changed).toBe(false);
     expect(settings).toEqual(DEFAULT_SETTINGS);
   });
+  it('persists the archive date format and structure opt-in, rejecting unknown formats', async () => {
+    const storage = memoryStorage();
+    await persistJdexSettings(storage, { ...DEFAULT_SETTINGS, dateFormat: 'YYYY-MM', structureNotesAreFindings: true });
+    expect(await loadJdexSettings(storage)).toMatchObject({ dateFormat: 'YYYY-MM', structureNotesAreFindings: true });
+    await storage.save({ dateFormat: 'invalid' });
+    expect((await loadJdexSettings(storage)).dateFormat).toBe('YYYY-MM-DD');
+  });
+
 });

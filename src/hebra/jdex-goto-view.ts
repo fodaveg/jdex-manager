@@ -30,9 +30,11 @@ export interface JdexGotoViewOptions {
   onCopyId(entry: IdEntry): void;
   onCopyPath(entry: IdEntry): void;
   onRetire(entry: IdEntry): void;
+  /** Fecha de la nota JDex ya retirada, o `null` si sigue activa. */
+  retiredAt?(entry: IdEntry): string | null;
 }
 
-function actionsFor(entry: IdEntry, hasActiveNote: boolean): Record<string, JdexGotoAction> {
+function actionsFor(entry: IdEntry, hasActiveNote: boolean, retiredAt: string | null): Record<string, JdexGotoAction> {
   const ok: JdexGotoAction = { disabled: false, reason: '' };
   const noFolder: JdexGotoAction = { disabled: true, reason: `${entry.label} no tiene carpeta.` };
   return {
@@ -46,7 +48,9 @@ function actionsFor(entry: IdEntry, hasActiveNote: boolean): Record<string, Jdex
     copyId: ok,
     copyPath: entry.folderPath || entry.notePath ? ok : noFolder,
     retire: entry.notePath
-      ? ok
+      ? retiredAt !== null
+        ? { disabled: true, reason: retiredAt ? `Ya retirado el ${retiredAt}` : 'Ya retirado' }
+        : ok
       : { disabled: true, reason: `${entry.label} no tiene nota JDex: no hay nada que retirar.` }
   };
 }
@@ -81,7 +85,7 @@ export function mountJdexGotoView(el: HTMLElement, options: JdexGotoViewOptions)
 
   function openActions(entry: IdEntry): void {
     panel = 'actions';
-    const acts = actionsFor(entry, options.hasActiveNote);
+    const acts = actionsFor(entry, options.hasActiveNote, options.retiredAt?.(entry) ?? null);
     picker.root.hidden = true;
     actions.hidden = false;
     actions.replaceChildren();
@@ -106,7 +110,7 @@ export function mountJdexGotoView(el: HTMLElement, options: JdexGotoViewOptions)
       ),
       actionButton('Copiar ID', acts.copyId, () => options.onCopyId(entry)),
       actionButton('Copiar ruta', acts.copyPath, () => options.onCopyPath(entry)),
-      actionButton('Retirar este ID', acts.retire, () => options.onRetire(entry))
+      actionButton(acts.retire.disabled && acts.retire.reason.startsWith('Ya retirado') ? acts.retire.reason : 'Retirar este ID', acts.retire, () => options.onRetire(entry))
     );
     back.focus();
   }

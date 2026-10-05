@@ -33,6 +33,17 @@ function noop() {
 }
 
 describe('mountJdexInboxProcessView', () => {
+  it('sin .09 muestra Archivar desactivado y no llama al escritor', () => {
+    const el = document.createElement('div');
+    const callbacks = noop();
+    mountJdexInboxProcessView(el, { queue: [note('n1', 'f1', 'Suelta')], entries: [], folderLabel: () => 'Inbox', archiveTarget: () => null, ...callbacks });
+    const archive = [...el.querySelectorAll<HTMLButtonElement>('.hebra-jdex-goto-action')].find((button) => button.textContent === 'Archivar')!;
+    expect(archive.disabled).toBe(true);
+    expect(archive.title).toContain('.09');
+    archive.click();
+    expect(callbacks.onArchive).not.toHaveBeenCalled();
+  });
+
   it('cola vacía: aviso de nada que procesar', () => {
     const el = document.createElement('div');
     mountJdexInboxProcessView(el, {

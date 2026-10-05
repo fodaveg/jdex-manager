@@ -32,6 +32,8 @@ import { applyDetection } from "./vault/detect";
 import { registerReadingLinks } from "./vault/reading-links";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
+import { maintainSystem } from "./vault/maintenance";
+import { createSystemReport } from "./vault/system-report";
 
 export default class JdexManagerPlugin extends Plugin {
   settings: JdexManagerSettings = mergeSettings(null);
@@ -42,6 +44,8 @@ export default class JdexManagerPlugin extends Plugin {
   private whereBar: HTMLElement | null = null;
   private indexCache: { systemRoot: string; jdexFolder: string; index: JdIndex } | null = null;
   private journal: Operation[] = [];
+  private maintenanceTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
+  private maintenanceRunning = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -208,6 +212,8 @@ export default class JdexManagerPlugin extends Plugin {
       checkCallback: (checking) => {
         const entry = this.activeIdEntry();
         if (!entry) return false;
+        const note = entry.notePath ? this.app.vault.getAbstractFileByPath(entry.notePath) : null;
+        if (note instanceof TFile && this.app.metadataCache.getFileCache(note)?.frontmatter?.tipo === "archivado") return false;
         if (!checking) void this.retireFlow(entry);
         return true;
       },
@@ -310,6 +316,7 @@ export default class JdexManagerPlugin extends Plugin {
       },
     });
     this.addCommand({ id: "health-report", name: "System health report", callback: () => void this.healthReport() });
+    this.addCommand({ id: "system-report", name: "Informe del sistema", callback: () => void this.systemReport() });
     this.addCommand({
       id: "undo-last",
       // eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -320,12 +327,15 @@ export default class JdexManagerPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       this.invalidateIndex();
       void this.onRename(file, oldPath);
+      this.queueMaintenance(file, oldPath);
     }));
-    this.registerEvent(this.app.vault.on("delete", () => {
+    this.registerEvent(this.app.vault.on("delete", (file) => {
       this.invalidateIndex();
       this.refreshInboxCount();
+      this.queueMaintenance(file);
     }));
     this.registerEvent(this.app.vault.on("modify", (file) => {
+      this.queueMaintenance(file);
       if (!(file instanceof TFile) || file.extension !== "md" || this.settings.jdexFolder === "") return;
       const rel = relativeTo(this.settings.jdexFolder, file.path);
       if (rel !== null && rel !== "" && !rel.includes("/")) this.invalidateIndex();
@@ -333,6 +343,7 @@ export default class JdexManagerPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("create", (file) => {
       this.invalidateIndex();
       void this.onCreate(file);
+      this.queueMaintenance(file);
     }));
 
     this.addRibbonIcon("file-plus-2", "Create ID", () => void this.createIdFlow());
@@ -356,6 +367,49 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Create JDex templates in the templates folder",
       callback: () => void this.createTemplates(),
     });
+  }
+
+  onunload(): void {
+    if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
+  }
+
+  /** Coalesces vault changes; events produced by maintenance never enqueue another pass. */
+  private queueMaintenance(file: TAbstractFile, oldPath?: string): void {
+    if (!this.settings.automaticMaintenance || this.maintenanceRunning || !this.app.workspace.layoutReady) return;
+    const relevant = (path: string) => relativeTo(this.settings.systemRoot, path) !== null || relativeTo(this.settings.jdexFolder, path) !== null;
+    if (!relevant(file.path) && !(oldPath && relevant(oldPath))) return;
+    if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
+    this.maintenanceTimer = activeWindow.setTimeout(() => {
+      this.maintenanceTimer = null;
+      void this.maintainAutomatically();
+    }, 200);
+  }
+
+  /** Records completed maintenance steps, including a partial pass. */
+  async maintainAutomatically(): Promise<void> {
+    if (!this.settings.automaticMaintenance || this.maintenanceRunning) return;
+    this.maintenanceRunning = true;
+    const effects: Effect[] = [];
+    try {
+      await maintainSystem(this.app, this.settings, effects);
+    } catch (error) {
+      new Notice(`Automatic maintenance stopped: ${String(error)}`);
+    } finally {
+      try { await this.record("fix", "Automatic JDex maintenance", effects); }
+      finally { this.maintenanceRunning = false; }
+    }
+  }
+
+  /** Runs only on command; each report contains audit, health and changes since the previous. */
+  async systemReport(): Promise<void> {
+    if (!this.ready()) return;
+    const effects: Effect[] = [];
+    try {
+      const note = await createSystemReport(this.app, this.settings, effects);
+      await this.app.workspace.getLeaf(false).openFile(note);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    } finally { await this.record("fix", "Create system report", effects); }
   }
 
   async loadSettings(): Promise<void> {
@@ -901,13 +955,22 @@ export default class JdexManagerPlugin extends Plugin {
     ];
     const ok = await confirm(this.app, `Retire ${entry.id}?`, lines, "Retire");
     if (!ok) return;
+    const effects: Effect[] = [];
+    let recorded = false;
     try {
-      const effects: Effect[] = [];
       const done = await retireId(this.app, index, entry, undefined, effects);
       await this.record("retire", `Retire ${entry.id}`, effects);
+      recorded = true;
       new Notice(done.join(" · "), 8000);
       await this.refreshHeaders(entry.category, false);
     } catch (error) {
+      if (!recorded && effects.length > 0) {
+        try {
+          await this.record("retire", `Retire ${entry.id} (partial)`, effects);
+        } catch (journalError) {
+          new Notice(`Retirement changed files but its undo journal could not be saved: ${String(journalError)}`, 10000);
+        }
+      }
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -1076,6 +1139,24 @@ class JdexManagerSettingTab extends PluginSettingTab {
       .addButton((button) => button.setButtonText("Write").onClick(() => void this.plugin.createTemplates()));
 
     new Setting(containerEl).setName("Audit").setHeading();
+
+    new Setting(containerEl)
+      .setName("Automatic maintenance")
+      .setDesc("After system changes, updates derived properties, header lists and the system index, with undo history.")
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.automaticMaintenance).onChange(async (value) => {
+        this.plugin.settings.automaticMaintenance = value;
+        await this.plugin.saveSettings();
+      }));
+
+    new Setting(containerEl)
+      .setName("Inbox age in days")
+      .setDesc("Notes created more than this many days ago in an inbox appear as informative findings.")
+      .addText((text) => text.setValue(String(this.plugin.settings.inboxStaleDays)).onChange(async (value) => {
+        const days = Number(value);
+        if (!Number.isInteger(days) || days < 1) return;
+        this.plugin.settings.inboxStaleDays = days;
+        await this.plugin.saveSettings();
+      }));
 
     new Setting(containerEl)
       .setName("Audit on startup")

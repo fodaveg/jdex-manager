@@ -10,6 +10,8 @@ import { allFolderPaths, scanVault } from "./scan";
 import { ensureFolder } from "./create";
 import { resolveTemplate } from "./templates";
 import { durableEffect, type Effect } from "../jd/journal";
+import { staleInboxFindings } from "../jd/inbox-stale";
+import type { JdIndex } from "../jd/index";
 
 export interface AuditResult {
   findings: Finding[];
@@ -37,8 +39,8 @@ export async function jdexNoteMetas(app: App, settings: JdexManagerSettings, dup
   return out;
 }
 
-/** Reads live vault state and returns repair proposals without writing a report. */
-export async function collectAuditFindings(app: App, settings: JdexManagerSettings): Promise<Finding[]> {
+/** Reads one live audit snapshot for repairs, maintenance and reports. */
+export async function collectAudit(app: App, settings: JdexManagerSettings): Promise<{ index: JdIndex; findings: Finding[]; filePaths: string[] }> {
   const index = scanVault(app, settings);
   const idCounts = new Map<string, number>();
   for (const entry of index.rawIdNotes) {
@@ -51,7 +53,7 @@ export async function collectAuditFindings(app: App, settings: JdexManagerSettin
     .getAllLoadedFiles()
     .filter((f): f is TFile => f instanceof TFile)
     .map((f) => f.path);
-  return auditSystem({
+  const findings = auditSystem({
     index,
     jdexFolder: settings.jdexFolder,
     notes: await jdexNoteMetas(app, settings, duplicatePaths),
@@ -64,11 +66,20 @@ export async function collectAuditFindings(app: App, settings: JdexManagerSettin
       structureNotesAreFindings: settings.structureNotesAreFindings,
     },
   });
+  findings.push(...staleInboxFindings(index, app.vault.getAllLoadedFiles().filter((file): file is TFile => file instanceof TFile).map((file) => ({
+    path: file.path, folderPath: file.path.slice(0, file.path.lastIndexOf('/')), createdAt: file.stat.ctime,
+  })), settings.inboxStaleDays, Date.now()));
+  return { index, findings, filePaths };
 }
 
-/** Runs the audit over the live vault and writes (or replaces) today's report note. */
+/** Fresh repair proposals without creating a report note. */
+export async function collectAuditFindings(app: App, settings: JdexManagerSettings): Promise<Finding[]> {
+  return (await collectAudit(app, settings)).findings;
+}
+
+/** Audits without mutating system content, then writes today's audit report. */
 export async function runAudit(app: App, settings: JdexManagerSettings): Promise<AuditResult> {
-  const findings = await collectAuditFindings(app, settings);
+  const { findings } = await collectAudit(app, settings);
 
   if (settings.reportsFolder === "") {
     new Notice("No reports folder set; the audit ran but no report was written.");

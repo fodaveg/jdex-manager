@@ -1,13 +1,16 @@
+import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { describe, expect, it, vi } from 'vitest';
+import { buildIndex } from '../../src/hebra/engine';
 import {
   archiveJdexInboxNote,
+  jdexInboxArchiveTarget,
   jdexInboxQueue,
   moveJdexInboxNote
 } from '../../src/hebra/jdex-inbox-process';
 import type { JdexInboxSummary, JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
-import { FakeJdexVault, fakeNote, fakeSetProperty } from './support/fakes';
+import { FakeJdexVault, fakeNote } from './support/fakes';
 
-const markdown = { setProperty: fakeSetProperty };
+const markdown = createFakePluginApi().api.markdown;
 
 function note(id: string, folderId: string, title: string): JdexNoteRef {
   return { id, folderId, title, path: `${title}.md` };
@@ -62,36 +65,52 @@ describe('moveJdexInboxNote', () => {
 });
 
 describe('archiveJdexInboxNote', () => {
-  it('marca tipo: archivado y la fecha, conservando el resto del cuerpo', async () => {
-    const body = ['---', 'title: Suelta', '---', '', 'Contenido.'].join('\n');
+  function fixture(withArchive = true) {
+    const inboxPath = '20-29 Productos/21 Software/21.01 Inbox';
+    const archivePath = '20-29 Productos/21 Software/21.09 Archivo';
+    const paths = ['20-29 Productos', '20-29 Productos/21 Software', inboxPath, ...(withArchive ? [archivePath] : [])];
+    const index = buildIndex({ systemRoot: '', jdexFolder: '', folderPaths: paths, notePaths: [] });
+    const walk: JdexLibraryWalk = { rootFolderId: 'root', folderPaths: new Map([
+      ['inbox', inboxPath], ...(withArchive ? [['archive', archivePath] as const] : [])
+    ]), systemFolderPaths: paths, systemNotes: [note('n1', 'inbox', 'Suelta')] };
     const library = new FakeJdexVault();
-    library.seedNote(fakeNote('n1', 'f-inbox', body));
-    const result = await archiveJdexInboxNote(
-      library,
-      markdown,
-      note('n1', 'f-inbox', 'Suelta'),
-      '2026-09-28'
-    );
-    expect(result.written).toEqual(['n1']);
-    expect(library.rewriteCalls).toHaveLength(1);
-    expect(library.rewriteCalls[0].options).toEqual({ cause: 'Antes de archivar desde el inbox' });
-    const written = library.rewriteCalls[0].entries;
-    expect(written).toHaveLength(1);
-    expect(written[0].body).toContain('tipo: "archivado"');
-    expect(written[0].body).toContain('archivado: "2026-09-28"');
-    expect(written[0].body).toContain('Contenido.');
+    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n\nContenido.\n', { createdAt: new Date(2026, 8, 28).getTime() }));
+    return { library, walk, index };
+  }
+
+  it('mueve a la .09 con fecha de creación y no toca tipo', async () => {
+    const { library, walk, index } = fixture();
+    expect(jdexInboxArchiveTarget(note('n1', 'inbox', 'Suelta'), walk, index)?.folderId).toBe('archive');
+    await archiveJdexInboxNote(library, markdown, note('n1', 'inbox', 'Suelta'), walk, index, 'YYYY-MM');
+    expect((await library.noteRead('n1'))).toMatchObject({ folderId: 'archive', title: '2026-09 Suelta' });
+    expect((await library.noteRead('n1'))?.body).toContain('Contenido.');
+    expect((await library.noteRead('n1'))?.body).not.toContain('tipo: archivado');
   });
 
-  it('nota purgada entre medias: no escribe nada', async () => {
-    const notesRewriteBatch = vi.fn();
-    const library = { noteRead: async () => null, notesRewriteBatch };
-    const result = await archiveJdexInboxNote(
-      library,
-      markdown,
-      note('n1', 'f-inbox', 'Suelta'),
-      '2026-09-28'
-    );
-    expect(result.written).toEqual([]);
-    expect(notesRewriteBatch).not.toHaveBeenCalled();
+  it('sin carpeta .09 aborta antes de escribir o mover', async () => {
+    const { library, walk, index } = fixture(false);
+    const move = vi.spyOn(library, 'noteMoveIfUnchanged');
+    expect(jdexInboxArchiveTarget(note('n1', 'inbox', 'Suelta'), walk, index)).toBeNull();
+    await expect(archiveJdexInboxNote(library, markdown, note('n1', 'inbox', 'Suelta'), walk, index, 'YYYY-MM-DD')).rejects.toThrow('.09');
+    expect(move).not.toHaveBeenCalled();
   });
+
+  it('una revisión obsoleta no mueve la nota', async () => {
+    const { library, walk, index } = fixture();
+    vi.spyOn(library, 'notesRewriteBatch').mockResolvedValue({ written: [], stale: ['n1'], committed: [] });
+    const move = vi.spyOn(library, 'noteMoveIfUnchanged');
+    await expect(archiveJdexInboxNote(library, markdown, note('n1', 'inbox', 'Suelta'), walk, index, 'YYYY-MM-DD')).rejects.toThrow('cambió');
+    expect(move).not.toHaveBeenCalled();
+  });
+  it('does not move a note changed after its title was dated', async () => {
+    const { library, walk, index } = fixture();
+    const move = library.noteMoveIfUnchanged.bind(library);
+    vi.spyOn(library, 'noteMoveIfUnchanged').mockImplementation(async (...args) => {
+      library.saveElsewhere('n1', '# Edición concurrente\n');
+      return move(...args);
+    });
+    await expect(archiveJdexInboxNote(library, markdown, note('n1', 'inbox', 'Suelta'), walk, index, 'YYYY-MM-DD')).rejects.toThrow('cambió antes de moverla');
+    expect((await library.noteRead('n1'))).toMatchObject({ folderId: 'inbox', body: '# Edición concurrente\n' });
+  });
+
 });

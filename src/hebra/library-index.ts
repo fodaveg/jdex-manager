@@ -123,6 +123,8 @@ export interface JdexNoteRef {
   readonly id: string;
   readonly folderId: string;
   readonly title: string;
+  /** Creation timestamp from the library, used by the informative inbox age check. */
+  readonly createdAt?: number;
   /** Ruta completa con `.md`, como la vería el motor. */
   readonly path: string;
 }
@@ -144,6 +146,7 @@ async function directNotesOf(
         id: item.id,
         folderId,
         title,
+        createdAt: item.createdAt,
         path: folderPath ? `${folderPath}/${jdexNoteFileStem(title)}.md` : `${jdexNoteFileStem(title)}.md`
       });
     }
@@ -415,6 +418,7 @@ export async function applyJdexNoteChanges(
           id,
           folderId,
           title,
+          createdAt: summary.createdAt,
           path: folderPath ? `${folderPath}/${jdexNoteFileStem(title)}.md` : `${jdexNoteFileStem(title)}.md`
         };
       }

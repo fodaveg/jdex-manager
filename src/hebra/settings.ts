@@ -28,7 +28,9 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
     const value = source[key];
     if (typeof value === 'string') (out as Record<string, unknown>)[key] = value;
   }
-  for (const key of ['createPatternByDefault', 'liveHeaders'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  if (source.dateFormat === 'YYYY-MM-DD' || source.dateFormat === 'YYYY-MM') out.dateFormat = source.dateFormat;
+  if (typeof source.inboxStaleDays === 'number' && Number.isInteger(source.inboxStaleDays) && source.inboxStaleDays >= 1) out.inboxStaleDays = source.inboxStaleDays;
   if (typeof source.healthMaxFiles === 'number' && Number.isFinite(source.healthMaxFiles) && source.healthMaxFiles >= 0) out.healthMaxFiles = source.healthMaxFiles;
   if (typeof source.subfolderPatternsByCategory === 'object' && source.subfolderPatternsByCategory !== null && !Array.isArray(source.subfolderPatternsByCategory)) {
     out.subfolderPatternsByCategory = Object.fromEntries(Object.entries(source.subfolderPatternsByCategory).filter(([, value]) => typeof value === 'string'));

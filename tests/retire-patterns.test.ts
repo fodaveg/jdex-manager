@@ -14,6 +14,9 @@ const index = buildIndex({
 });
 
 describe("retirePlan", () => {
+  it("rechaza volver a retirar un ID y conserva la fecha original", () => {
+    expect(retirePlan(index, findId(index, "21.22")!, "2026-10-05", undefined, "2026-09-21")).toEqual({ error: "Ya retirado el 2026-09-21." });
+  });
   it("moves the folder to the archive with a date and marks the note", () => {
     const plan = retirePlan(index, findId(index, "21.22")!, "2026-09-10", "21.23 Sucesor");
     expect(plan).toMatchObject({
