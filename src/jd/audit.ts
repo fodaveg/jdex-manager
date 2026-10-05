@@ -9,7 +9,8 @@
 import { areaCode, areaOfCategory, type IdEntry, type JdIndex } from "./index";
 import { firstSentence } from "./description";
 import { missingPatternFolders } from "./patterns";
-import { extractJdPrefix, isHeader, isReserved, parseJdNumber } from "./parse";
+import { extractJdPrefix, isHeader, isReserved, jdexNoteName, parseJdNumber } from "./parse";
+import { titleForCompare } from "./title";
 
 export type FindingKind =
   | "folder-without-note"
@@ -39,7 +40,13 @@ export const FINDING_KINDS: FindingKind[] = [
 ];
 
 export type Fix =
-  | { type: "frontmatter"; path: string; set: Record<string, string> }
+  | {
+      type: "frontmatter";
+      path: string;
+      set: Record<string, string>;
+      /** Raw values at audit time; hosts skip fields changed before writing. */
+      expected?: Record<string, unknown>;
+    }
   | { type: "rename"; from: string; to: string }
   | { type: "folders"; paths: string[] };
 
@@ -114,6 +121,11 @@ function asString(value: unknown): string | undefined {
   return JSON.stringify(value);
 }
 
+/** Independent snapshot of the fields a frontmatter fix proposes to replace. */
+function expectedValues(frontmatter: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.map((key) => [key, frontmatter[key] === undefined ? undefined : JSON.parse(JSON.stringify(frontmatter[key])) as unknown]));
+}
+
 export function auditSystem(input: AuditInput): Finding[] {
   const { index, notes, filePaths } = input;
   const findings: Finding[] = [];
@@ -145,10 +157,14 @@ export function auditSystem(input: AuditInput): Finding[] {
   for (const entry of index.ids) {
     if (!entry.notePath || !entry.folderPath) continue;
     const folderName = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
-    const folderTitle = extractJdPrefix(folderName)?.title ?? "";
-    const noteTitle = extractJdPrefix(noteName(entry.notePath))?.title ?? "";
+    const folderPrefix = extractJdPrefix(folderName);
+    const childFolder = entry.id.endsWith("+") && folderName.startsWith("+ ");
+    const folderTitle = titleForCompare(folderPrefix?.title ?? (childFolder ? folderName.slice(2) : ""));
+    const noteTitle = titleForCompare(extractJdPrefix(noteName(entry.notePath))?.title ?? "");
     if (folderTitle === noteTitle) continue;
-    const to = `${parentOf(entry.folderPath)}/${noteName(entry.notePath)}`;
+    const targetName = childFolder ? `+ ${noteTitle}` : jdexNoteName(entry.id, noteTitle, folderPrefix?.number.system ?? "");
+    const parent = parentOf(entry.folderPath);
+    const to = parent === "" ? targetName : `${parent}/${targetName}`;
     findings.push({
       kind: "name-mismatch",
       number: entry.id,
@@ -177,7 +193,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       message: `${noteName(note.path)}: ${Object.keys(wrong)
         .map((k) => `${k} debería ser «${wrong[k]}» (es «${asString(fm[k]) ?? "vacío"}»)`)
         .join("; ")}.`,
-      fix: { type: "frontmatter", path: note.path, set: wrong },
+      fix: { type: "frontmatter", path: note.path, set: wrong, expected: expectedValues(fm, Object.keys(wrong)) },
     });
   }
 
@@ -194,7 +210,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       paths: [note.path],
       message: proposal ? `${noteName(note.path)}: sin descripción; propuesta «${proposal}».` : `${noteName(note.path)}: sin descripción y sin cuerpo del que sacarla.`,
       informative: input.options?.descriptionIsFinding === false,
-      ...(proposal ? { fix: { type: "frontmatter", path: note.path, set: { descripcion: proposal } } } : {}),
+      ...(proposal ? { fix: { type: "frontmatter", path: note.path, set: { descripcion: proposal }, expected: expectedValues(note.frontmatter ?? {}, ["descripcion"]) } } : {}),
     });
   }
 

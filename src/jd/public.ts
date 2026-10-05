@@ -25,3 +25,4 @@ export * from "./settings";
 export * from "./structure";
 export * from "./system-index";
 export * from "./template";
+export * from "./title";

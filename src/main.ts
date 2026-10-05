@@ -415,10 +415,9 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   async applyFixes(): Promise<void> {
-    if (!this.lastFindings) {
-      await this.audit(false);
-      if (!this.lastFindings) return;
-    }
+    this.lastFindings = null;
+    await this.audit(false);
+    if (!this.lastFindings) return;
     const modal = new FixFindingsModal(this.app, this.lastFindings, async () => {
       await this.record("fix", "Apply audit fixes", modal.effects);
       await this.audit(false);

@@ -77,7 +77,33 @@ describe("auditSystem", () => {
       type: "frontmatter",
       path: `${JDEX}/11.16 Frontmatter mal.md`,
       set: { jd: "11.16", tipo: "id", categoria: "11 Salud" },
+      expected: { jd: "11.61", tipo: "cabecera", categoria: undefined },
     });
+  });
+
+  it("ignores trailing note tags and keeps them out of rename proposals", () => {
+    const notePath = "JDex/15.55 Viaje Santiago de Compostela #claude.md";
+    const folderPath = "10-19 Vida/15 Viajes/15.55 Viaje Santiago de Compostela";
+    const run = (path: string) => auditSystem({
+      index: buildIndex({ systemRoot: "", jdexFolder: "JDex", notePaths: [notePath], folderPaths: [path] }),
+      notes: [], filePaths: [notePath],
+    }).filter((f) => f.kind === "name-mismatch");
+    expect(run(folderPath)).toEqual([]);
+    const mismatch = run(folderPath.replace("Viaje Santiago de Compostela", "Otro viaje"));
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0].fix).toMatchObject({ type: "rename", to: folderPath });
+  });
+
+  it("keeps the folder's existing system prefix convention", () => {
+    for (const prefix of ["", "D01."]) {
+      const notePath = "JDex/D01.21.22 X.md";
+      const parent = "20-29 Productos/21 Software";
+      const out = auditSystem({
+        index: buildIndex({ systemRoot: "", jdexFolder: "JDex", notePaths: [notePath], folderPaths: [`${parent}/${prefix}21.22 Y`] }),
+        notes: [], filePaths: [notePath],
+      }).find((f) => f.kind === "name-mismatch");
+      expect(out?.fix).toMatchObject({ type: "rename", to: `${parent}/${prefix}21.22 X` });
+    }
   });
 
   it("duplicates are reported among notes and among folders", () => {

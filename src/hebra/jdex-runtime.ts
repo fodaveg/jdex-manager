@@ -551,7 +551,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountJdexNormalizeView(el, {
           findings: subset,
           onApply: async (chosenPaths) => {
-            await applyJdexFrontmatterFixes(api.vault, api.markdown, subset, noteIdByPath, chosenPaths);
+            const result = await applyJdexFrontmatterFixes(api.vault, api.markdown, subset, noteIdByPath, chosenPaths);
+            for (const warning of result.warnings) host.notice(warning);
             handle?.close();
             await rebuild();
           }
@@ -1169,7 +1170,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       applyFrontmatterFix: (finding) => {
         void (async () => {
           try {
-            await applyJdexFrontmatterFixes(api.vault, api.markdown, [finding], noteIdByPath);
+            const result = await applyJdexFrontmatterFixes(api.vault, api.markdown, [finding], noteIdByPath);
+            for (const warning of result.warnings) host.notice(warning);
             await rebuild();
             if (auditViewEl) {
               unmountAuditView?.();

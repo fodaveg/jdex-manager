@@ -8,8 +8,10 @@ import {
 } from '../../src/hebra/engine';
 import { applyJdexFrontmatterFixes, frontmatterFindingsFor } from '../../src/hebra/jdex-normalize';
 import { FakeJdexVault, fakeNote, fakeSetProperty } from './support/fakes';
+import { parse as parseYaml } from 'yaml';
+import { createFakePluginApi } from 'hebra-plugin-api/testing';
 
-const markdown = { setProperty: fakeSetProperty };
+const markdown = { ...createFakePluginApi().api.markdown, setProperty: fakeSetProperty };
 
 const JDEX_FOLDER = '00.00 JDex';
 
@@ -83,6 +85,69 @@ describe('frontmatterFindingsFor', () => {
 });
 
 describe('applyJdexFrontmatterFixes', () => {
+  it('conserva la descripción escrita manualmente desde la auditoría', async () => {
+    const { index, notePath, body } = fixture();
+    const content = `${body}\nDescripción propuesta.\n`;
+    const findings = auditSystem({ index, notes: [{ path: notePath, frontmatter: {}, body: content }], filePaths: [notePath] });
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('note-1', 'f-jdex', fakeSetProperty(content, 'descripcion', 'Descripción manual.')));
+    const result = await applyJdexFrontmatterFixes(library, markdown, findings.filter((f) => f.kind === 'missing-description'), () => 'note-1');
+    expect(result.written).toEqual([]);
+    expect(result.warnings.join(' ')).toContain('descripcion porque cambió desde la auditoría');
+    expect((await library.noteRead('note-1'))?.body).toContain('descripcion: "Descripción manual."');
+  });
+
+  it('relee una revisión obsoleta sin pisar una descripción intervenida', async () => {
+    const { index, notePath, body } = fixture();
+    const content = `${body}\nDescripción propuesta.\n`;
+    const findings = auditSystem({ index, notes: [{ path: notePath, frontmatter: {}, body: content }], filePaths: [notePath] });
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('note-1', 'f-jdex', content));
+    let writes = 0;
+    const result = await applyJdexFrontmatterFixes({
+      noteRead: (id) => library.noteRead(id),
+      notesRewriteBatch: async (entries, options) => {
+        writes += 1;
+        library.saveElsewhere('note-1', fakeSetProperty(content, 'descripcion', 'Manual entre intentos.'));
+        return library.notesRewriteBatch(entries, options);
+      },
+    }, markdown, findings.filter((f) => f.kind === 'missing-description'), () => 'note-1');
+    expect(writes).toBe(1);
+    expect(result.written).toEqual([]);
+    expect(result.skipped).toEqual(['note-1']);
+    expect(result.warnings.join(' ')).toContain('descripcion porque cambió desde la auditoría');
+    expect((await library.noteRead('note-1'))?.body).toContain('descripcion: "Manual entre intentos."');
+  });
+
+  it('escribe la descripción propuesta y desaparece el hallazgo al reauditar', async () => {
+    const { index, notePath, body } = fixture();
+    const content = `${body}\nDescripción de la cabecera. Otra frase.\n`;
+    const findings = auditSystem({ index, notes: [{ path: notePath, frontmatter: {}, body: content }], filePaths: [notePath] });
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('note-1', 'f-jdex', content));
+    const result = await applyJdexFrontmatterFixes(library, markdown, findings.filter((f) => f.kind === 'missing-description'), () => 'note-1');
+    expect(result.written).toEqual(['note-1']);
+    expect(result.warnings).toEqual([]);
+    const after = (await library.noteRead('note-1'))!.body!;
+    const frontmatter = parseYaml(after.split('---')[1]) as Record<string, unknown>;
+    expect(frontmatter.descripcion).toBe('Descripción de la cabecera.');
+    expect(auditSystem({ index, notes: [{ path: notePath, frontmatter, body: after }], filePaths: [notePath] }).filter((f) => f.kind === 'missing-description')).toEqual([]);
+  });
+
+  it('devuelve el motivo cuando la nota se bloqueó después de la auditoría', async () => {
+    const { index, notePath, body } = fixture();
+    const content = `${body}\nDescripción propuesta.\n`;
+    const findings = auditSystem({ index, notes: [{ path: notePath, frontmatter: {}, body: content }], filePaths: [notePath] });
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('note-1', 'f-jdex', content));
+    library.setLocked('note-1', true);
+    const result = await applyJdexFrontmatterFixes(library, markdown, findings, () => 'note-1');
+    expect(result.written).toEqual([]);
+    expect(result.skipped).toEqual(['note-1']);
+    expect(result.warnings.join(' ')).toContain('la nota está bloqueada');
+    expect(library.rewriteCalls).toHaveLength(0);
+  });
+
   it('fusiona SOLO jd/tipo/area/categoria y conserva `propia` byte a byte', async () => {
     const { index, notePath, body } = fixture();
     const frontmatter = { jd: 21.2, tipo: 'cabecera', propia: 'dato personal' };
