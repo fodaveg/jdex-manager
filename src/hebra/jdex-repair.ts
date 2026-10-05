@@ -1,7 +1,7 @@
 /** Applies an audited repair through Hebra's vault API. Every write may be wrapped by
  * the durable journal; this module never relies on paths as stable note identities. */
 import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
-import { areaCode, parseJdNumber, renderTemplate, sameSystem, todayIso, type Fix, type JdIndex, type JdexManagerSettings } from './engine';
+import { areaCode, isConflictCopyPath, renderTemplate, selectSystem, todayIso, type Fix, type JdIndex, type JdexManagerSettings } from './engine';
 import { applyJdexFrontmatterFixes } from './jdex-normalize';
 import { resolveJdexTemplate } from './jdex-create-write';
 import { jdexFolderPaths, jdexNoteFileStem, type JdexLibraryWalk } from './library-index';
@@ -57,36 +57,43 @@ export async function applyJdexRepair(
   index: JdIndex,
   settings: JdexManagerSettings,
   fix: Fix
-): Promise<string[]> {
+): Promise<{ applied: boolean; warnings: string[] }> {
   if (fix.type === 'frontmatter') {
     const result = await applyJdexFrontmatterFixes(vault, markdown, [{ kind: 'frontmatter-mismatch', paths: [fix.path], message: '', fix }], (path) => walk.systemNotes.find((note) => note.path === path)?.id ?? null);
-    return result.warnings;
+    return { applied: result.written.length > 0, warnings: result.warnings };
   }
   if (fix.type === 'folders' || fix.type === 'create-folder') {
     for (const path of fix.paths) await ensureFolder(vault, path);
-    return [];
+    return { applied: true, warnings: [] };
   }
   if (fix.type === 'create-note') {
+    if ((fix.kind === 'area' || fix.kind === 'categoria') && !settings.structureNotesAreFindings) {
+      throw new Error('Activa los hallazgos de notas de estructura antes de crearlas desde Reparar.');
+    }
     if (walk.systemNotes.some((note) => note.path === fix.path)) throw new Error(`${fix.path} ya existe.`);
     const jdexFolderId = await folderAt(vault, settings.jdexFolder);
     if (!jdexFolderId) throw new Error('La carpeta JDex no existe.');
     await rejectNoteCollision(vault, jdexFolderId, basename(fix.path));
-    const parsed = parseJdNumber(fix.number);
-    const system = parsed?.system;
-    const category = index.categories.find((entry) => entry.number === fix.category && sameSystem(entry, { system }));
-    const area = index.areas.find((entry) => entry.number === Math.floor(Number(fix.category) / 10) * 10 && sameSystem(entry, { system }));
-    if (!category || !area) throw new Error(`${fix.path}: falta su categoría o área.`);
-    const template = await resolveJdexTemplate(vault, walk, settings, fix.kind, { category: fix.category, area: area.code });
-    const content = renderTemplate(template, { id: fix.number, title: fix.title, area: areaCode(area.number), areaTitle: area.label, category: fix.category, categoryTitle: category.label, date: todayIso() });
+    const creationIndex = selectSystem(index, fix.system ?? '');
+    const category = creationIndex.categories.find((entry) => entry.number === fix.category);
+    const areaNumber = fix.kind === 'area' ? Number(fix.number.slice(0, 2)) : Math.floor(Number(fix.category) / 10) * 10;
+    const area = creationIndex.areas.find((entry) => entry.number === areaNumber);
+    if (!area || (fix.kind !== 'area' && !category)) throw new Error(`${fix.path}: falta su categoría o área.`);
+    const template = await resolveJdexTemplate(vault, walk, settings, fix.kind, { category: fix.category || undefined, area: area.code });
+    const content = renderTemplate(template, { id: fix.number, title: fix.title, area: areaCode(area.number), areaTitle: area.label, category: fix.category, categoryTitle: category?.label ?? '', date: todayIso() });
     await vault.noteCreate({ folderId: jdexFolderId, body: markdown.withTitle(content, basename(fix.path).slice(0, -3)) });
-    return [];
+    return { applied: true, warnings: [] };
   }
   if (fix.type === 'trash') {
+    if (!isConflictCopyPath(fix.path)) throw new Error(`${fix.path}: no está identificada como copia de conflicto.`);
+    if (!vault.noteTrashIfUnchanged) throw new Error('Hebra no ofrece papelera protegida en la API del plugin; actualiza el host.');
     const copy = await vault.noteRead(noteId(walk, fix.path));
     const original = await vault.noteRead(noteId(walk, fix.identicalTo));
     if (!copy || !original || copy.trashedAt !== null || original.trashedAt !== null || copy.body === null || original.body === null || copy.body !== original.body) throw new Error(`${fix.path}: la copia ya no es idéntica.`);
-    await vault.noteTrash(copy.id);
-    return [];
+    if (!await vault.noteTrashIfUnchanged(copy.id, { revision: copy.revision, folderId: copy.folderId })) {
+      throw new Error(`${fix.path}: cambió mientras se enviaba a la papelera.`);
+    }
+    return { applied: true, warnings: [] };
   }
   const items = fix.type === 'move' ? fix.items : [{ from: fix.from, to: fix.to }];
   for (const { from, to } of items) {
@@ -96,15 +103,33 @@ export async function applyJdexRepair(
       const parent = await folderAt(vault, parentOf(to));
       if (!parent) throw new Error(`${to}: falta la carpeta destino.`);
       await rejectNoteCollision(vault, parent, basename(to));
-      await vault.noteMove(noteId(walk, from), parent);
+      const note = await vault.noteRead(noteId(walk, from));
+      const sourceParent = await folderAt(vault, parentOf(from));
+      if (!note || note.trashedAt !== null || note.folderId !== sourceParent) throw new Error(`${from}: cambió de carpeta desde la auditoría.`);
+      if (!vault.noteMoveIfUnchanged) throw new Error('Hebra no ofrece movimiento atómico de notas; actualiza el host.');
+      if (!await vault.noteMoveIfUnchanged(note.id, parent, { revision: note.revision, folderId: note.folderId })) {
+        throw new Error(`${from}: cambió mientras se movía.`);
+      }
     } else {
-      const folder = await folderAt(vault, from);
+      const folders = await vault.foldersList();
+      const paths = jdexFolderPaths(folders, vault.rootFolderId());
+      let folder = folders.find((item) => paths.get(item.id) === from);
       if (!folder) throw new Error(`${from}: la carpeta ya no existe.`);
       const parent = await folderAt(vault, parentOf(to));
       if (!parent) throw new Error(`${to}: falta la carpeta destino.`);
-      if (basename(from) !== basename(to)) await vault.folderRename(folder, basename(to));
-      if (parentOf(from) !== parentOf(to)) await vault.folderMove(folder, parent);
+      if (basename(from) !== basename(to)) {
+        if (!vault.folderRenameIfUnchanged) throw new Error('Hebra no ofrece renombrado atómico de carpetas; actualiza el host.');
+        const renamed = await vault.folderRenameIfUnchanged(folder.id, basename(to), { name: folder.name, parentId: folder.parentId });
+        if (!renamed) throw new Error(`${from}: cambió mientras se renombraba.`);
+        folder = renamed;
+      }
+      if (parentOf(from) !== parentOf(to)) {
+        if (!vault.folderMoveIfUnchanged) throw new Error('Hebra no ofrece movimiento atómico de carpetas; actualiza el host.');
+        if (!await vault.folderMoveIfUnchanged(folder.id, parent, { name: folder.name, parentId: folder.parentId })) {
+          throw new Error(`${from}: cambió mientras se movía.`);
+        }
+      }
     }
   }
-  return [];
+  return { applied: true, warnings: [] };
 }

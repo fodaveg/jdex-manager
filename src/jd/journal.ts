@@ -13,8 +13,8 @@ export type Effect =
   | { kind: "trashed-note"; path: string; content: string }
   | { kind: "created-folder"; path: string }
   | { kind: "moved"; from: string; to: string }
-  /** Frontmatter keys the plugin set, with the value each one had before (`undefined` = absent). */
-  | { kind: "frontmatter"; path: string; previous: Record<string, unknown> }
+  /** Prior values plus absent keys, which must survive JSON dropping `undefined`. */
+  | { kind: "frontmatter"; path: string; previous: Record<string, unknown>; missingKeys?: string[] }
   /** A line the plugin inserted into a note. */
   | { kind: "line"; path: string; line: string };
 
@@ -30,6 +30,13 @@ export interface Operation<E = Effect> {
 }
 
 export const JOURNAL_MAX = 20;
+
+/** Encodes absent frontmatter keys explicitly so a saved journal can remove them at undo. */
+export function durableEffect(effect: Effect): Effect {
+  if (effect.kind !== "frontmatter") return effect;
+  const missingKeys = [...new Set([...(effect.missingKeys ?? []), ...Object.keys(effect.previous).filter((key) => effect.previous[key] === undefined)])];
+  return missingKeys.length > 0 ? { ...effect, missingKeys } : effect;
+}
 
 /** Appends `op` and keeps the last `max` operations. Empty operations are not recorded. */
 export function pushOperation<E>(journal: Operation<E>[], op: Operation<E>, max = JOURNAL_MAX): Operation<E>[] {
@@ -59,7 +66,7 @@ export function describeUndo(op: Operation): string[] {
         lines.push(`Move ${e.to} back to ${e.from}.`);
         break;
       case "frontmatter": {
-        const keys = Object.keys(e.previous);
+        const keys = [...new Set([...Object.keys(e.previous), ...(e.missingKeys ?? [])])];
         lines.push(`Restore ${keys.join(", ")} in the frontmatter of ${e.path}.`);
         break;
       }

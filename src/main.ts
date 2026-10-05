@@ -3,7 +3,7 @@ import { healthFileName, renderHealthReport } from "./jd/health";
 import { todayIso } from "./jd/template";
 import { ensureFolder } from "./vault/create";
 import { openGlobalSearch, pathQuery } from "./vault/search";
-import { describeUndo, type Effect, type Operation, type OperationKind, pushOperation } from "./jd/journal";
+import { describeUndo, durableEffect, type Effect, type Operation, type OperationKind, pushOperation } from "./jd/journal";
 import { undoOperation } from "./vault/journal";
 import { type JdexManagerSettings, type JdexNoteType, mergeSettings, namePrefix } from "./settings";
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
@@ -22,7 +22,7 @@ import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
 import { categoryOfPath, idFolderOfPath, isDatable, locate, zeroOf } from "./jd/files";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
-import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
+import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
 import { headersToMigrate, updateHeaders } from "./vault/headers";
 import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex } from "./vault/structure";
@@ -97,9 +97,11 @@ export default class JdexManagerPlugin extends Plugin {
 
     this.addCommand({
       id: "apply-fixes",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
       name: "Reparar JDex",
       callback: () => void this.applyFixes(),
     });
+    // eslint-disable-next-line obsidianmd/ui/sentence-case
     this.addRibbonIcon("wrench", "Reparar JDex", () => void this.applyFixes());
 
     this.addCommand({
@@ -371,7 +373,7 @@ export default class JdexManagerPlugin extends Plugin {
   /** Records an operation in the undo journal (the last 20) and persists it. */
   async record(kind: OperationKind, label: string, effects: Effect[]): Promise<void> {
     if (effects.length === 0) return;
-    this.journal = pushOperation(this.journal, { kind, label, at: new Date().toISOString(), effects });
+    this.journal = pushOperation(this.journal, { kind, label, at: new Date().toISOString(), effects: effects.map(durableEffect) });
     await this.saveSettings();
   }
 
@@ -388,12 +390,13 @@ export default class JdexManagerPlugin extends Plugin {
       this.renaming = true;
       let done: string[];
       try {
-        done = await undoOperation(this.app, op);
+        done = await undoOperation(this.app, op, async () => {
+          if (op.effects.length === 0) this.journal = this.journal.slice(0, -1);
+          await this.saveSettings();
+        });
       } finally {
         this.renaming = false;
       }
-      this.journal = this.journal.slice(0, -1);
-      await this.saveSettings();
       new Notice(done.join(" · "), 10000);
       this.refreshInboxCount();
       await this.refreshHeaders(undefined, false);
@@ -443,7 +446,7 @@ export default class JdexManagerPlugin extends Plugin {
     const modal = new FixFindingsModal(this.app, this.lastFindings, async () => {
       await this.record("fix", "Reparar JDex", modal.effects);
       await this.audit(false);
-    }, async () => (await runAudit(this.app, this.settings)).findings, this.settings);
+    }, () => collectAuditFindings(this.app, this.settings), this.settings);
     modal.open();
   }
 

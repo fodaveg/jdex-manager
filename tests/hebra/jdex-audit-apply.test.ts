@@ -64,7 +64,7 @@ describe('Hebra — Aplicar desde la auditoría', () => {
 
   it('avisa de una revisión obsoleta después de dos intentos y mantiene el hallazgo', async () => {
     const { library, el, apply, deactivate } = await setup();
-    const write = vi.spyOn(library, 'notesRewriteBatch').mockResolvedValue({ written: [], stale: ['n1'] });
+    const write = vi.spyOn(library, 'notesRewriteBatch').mockResolvedValue({ written: [], stale: ['n1'], committed: [] });
     apply.click();
     await vi.waitFor(() => expect(document.querySelector('.hebra-module-notice')?.textContent).toContain('cambió durante los dos intentos'));
     expect(write).toHaveBeenCalledTimes(2);

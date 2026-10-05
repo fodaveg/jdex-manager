@@ -54,7 +54,7 @@ export type Fix =
     }
   | { type: "rename"; from: string; to: string }
   | { type: "folders"; paths: string[] }
-  | { type: "create-note"; path: string; number: string; title: string; kind: "id" | "cabecera"; category: string }
+  | { type: "create-note"; path: string; number: string; system?: string; title: string; kind: "id" | "cabecera" | "categoria" | "area"; category: string }
   | { type: "create-folder"; path: string; paths: string[] }
   | { type: "move"; items: { from: string; to: string }[] }
   | { type: "trash"; path: string; identicalTo: string };
@@ -105,6 +105,11 @@ const ATTACHMENT_FOLDER = /(^|\/)(70 )?adjuntos(\/|$)/i;
 const MANAGEMENT_EXTENSIONS = new Set(["md", "base", "json", "canvas"]);
 const CONFLICT_COPY = /(?:conflicted copy|conflict copy|copia en conflicto|sync.conflict|conflicto de sincronizaci[oó]n)/i;
 
+/** A conflict marker must be in the duplicate's own filename, not in an ancestor. */
+export function isConflictCopyPath(path: string): boolean {
+  return CONFLICT_COPY.test(path.slice(path.lastIndexOf('/') + 1));
+}
+
 function noteName(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1);
   return base.endsWith(".md") ? base.slice(0, -3) : base;
@@ -143,10 +148,19 @@ export function auditSystem(input: AuditInput): Finding[] {
     return number?.kind === "id" && isReserved(number) && !["01", "09"].includes(number.id.split(".")[1]);
   }).map((entry) => entry.folderPath!);
   const folderFiles = filesByFolder(filePaths, contentFolders);
+  const filePathSet = new Set(filePaths);
   const categoryFolder = (number: string, system?: string): string | undefined =>
     index.categories.find((category) => category.number === number && (category.system ?? "") === (system ?? ""))?.path;
   const inboxFolder = (category: string, system?: string): string | undefined =>
     index.ids.find((entry) => entry.id === `${category}.01` && (entry.system ?? "") === (system ?? ""))?.folderPath;
+  const moveIntoInbox = (sources: string[], category: string, system?: string): Fix | undefined => {
+    const folder = inboxFolder(category, system);
+    if (!folder) return undefined;
+    const items = sources.map((from) => ({ from, to: `${folder}/${from.slice(from.lastIndexOf("/") + 1)}` }));
+    const targets = items.map((item) => item.to);
+    if (new Set(targets).size !== targets.length || targets.some((target) => filePathSet.has(target))) return undefined;
+    return { type: "move", items };
+  };
 
   const archived = new Set(notes.filter((n) => asString(n.frontmatter?.tipo) === "archivado").map((n) => n.path));
 
@@ -156,14 +170,15 @@ export function auditSystem(input: AuditInput): Finding[] {
     if (entry.folderPath && !entry.notePath) {
       const folderName = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
       const child = entry.id.endsWith("+") && folderName.startsWith("+ ");
-      const title = child ? folderName.slice(2) : extractJdPrefix(folderName)?.title;
-      const noteName = child ? `${entry.id} ${title}` : folderName;
+      const rawTitle = child ? folderName.slice(2) : extractJdPrefix(folderName)?.title;
+      const title = isHeaderEntry(entry) ? rawTitle?.replace(/^■\s*/, "") : rawTitle;
+      const noteName = child ? jdexNoteName(entry.id, title ?? "", entry.system ?? "") : folderName;
       findings.push({
         kind: "folder-without-note",
         number: entry.id,
         paths: [entry.folderPath],
         message: `La carpeta ${entry.label} no tiene nota en el JDex.`,
-        ...(input.jdexFolder && title ? { fix: { type: "create-note", path: `${input.jdexFolder}/${noteName}.md`, number: entry.id, title, kind: isHeaderEntry(entry) ? "cabecera" : "id", category: entry.category } } : {}),
+        ...(input.jdexFolder && title ? { fix: { type: "create-note", path: `${input.jdexFolder}/${noteName}.md`, number: entry.id, ...(entry.system ? { system: entry.system } : {}), title, kind: isHeaderEntry(entry) ? "cabecera" : "id", category: entry.category } } : {}),
       });
     } else if (entry.notePath && !entry.folderPath && !isHeaderEntry(entry)) {
       const parent = entry.id.endsWith("+")
@@ -258,7 +273,7 @@ export function auditSystem(input: AuditInput): Finding[] {
     for (const [id, paths] of byId) {
       if (paths.length < 2) continue;
       const duplicate = source === "notas" ? paths.find((path) => {
-        if (!CONFLICT_COPY.test(path)) return false;
+        if (!isConflictCopyPath(path)) return false;
         const body = notes.find((note) => note.path === path)?.body;
         return body !== undefined && paths.some((other) => other !== path && notes.find((note) => note.path === other)?.body === body);
       }) : undefined;
@@ -284,12 +299,13 @@ export function auditSystem(input: AuditInput): Finding[] {
       (p) => !ATTACHMENT_FOLDER.test(p.slice(entry.folderPath!.length)) && !MANAGEMENT_EXTENSIONS.has(extensionOf(p)),
     );
     if (content.length === 0) continue;
+    const fix = moveIntoInbox(content, entry.category, entry.system);
     findings.push({
       kind: "reserved-used-as-content",
       number: entry.id,
       paths: [entry.folderPath, ...content.slice(0, 5)],
       message: `${entry.label} es un número de gestión y contiene ${content.length} fichero(s) de contenido.`,
-      ...(inboxFolder(entry.category, entry.system) ? { fix: { type: "move", items: content.map((from) => ({ from, to: `${inboxFolder(entry.category, entry.system)}/${from.slice(from.lastIndexOf("/") + 1)}` })) } } : {}),
+      ...(fix ? { fix } : {}),
     });
   }
 
@@ -298,35 +314,38 @@ export function auditSystem(input: AuditInput): Finding[] {
     if (!entry.folderPath || !isHeaderEntry(entry)) continue;
     const files = folderFiles.get(entry.folderPath) ?? [];
     if (files.length === 0) continue;
+    const fix = moveIntoInbox(files, entry.category, entry.system);
     findings.push({
       kind: "header-with-files",
       number: entry.id,
       paths: [entry.folderPath, ...files.slice(0, 5)],
       message: `La cabecera ${entry.label} contiene ${files.length} fichero(s); una cabecera solo agrupa.`,
-      ...(inboxFolder(entry.category, entry.system) ? { fix: { type: "move", items: files.map((from) => ({ from, to: `${inboxFolder(entry.category, entry.system)}/${from.slice(from.lastIndexOf("/") + 1)}` })) } } : {}),
+      ...(fix ? { fix } : {}),
     });
   }
 
   // 7b: areas and categories that exist as folders but have no note in the JDex.
-  for (const area of index.areas) {
-    if (area.notePath || !area.path) continue;
-    findings.push({
-      kind: "structure-without-note",
-      number: area.code,
-      paths: [area.path],
-      message: `El área ${area.label} no tiene nota en el JDex.`,
-      informative: !input.options?.structureNotesAreFindings,
-    });
-  }
-  for (const category of index.categories) {
-    if (category.notePath || !category.path) continue;
-    findings.push({
-      kind: "structure-without-note",
-      number: category.number,
-      paths: [category.path],
-      message: `La categoría ${category.label} no tiene nota en el JDex.`,
-      informative: !input.options?.structureNotesAreFindings,
-    });
+  if (input.options?.structureNotesAreFindings) {
+    for (const area of index.areas) {
+      if (area.notePath || !area.path) continue;
+      findings.push({
+        kind: "structure-without-note",
+        number: area.code,
+        paths: [area.path],
+        message: `El área ${area.label} no tiene nota en el JDex.`,
+        ...(input.jdexFolder ? { fix: { type: "create-note", path: `${input.jdexFolder}/${area.label}.md`, number: area.code, ...(area.system ? { system: area.system } : {}), title: area.title, kind: "area", category: "" } } : {}),
+      });
+    }
+    for (const category of index.categories) {
+      if (category.notePath || !category.path) continue;
+      findings.push({
+        kind: "structure-without-note",
+        number: category.number,
+        paths: [category.path],
+        message: `La categoría ${category.label} no tiene nota en el JDex.`,
+        ...(input.jdexFolder ? { fix: { type: "create-note", path: `${input.jdexFolder}/${category.label}.md`, number: category.number, ...(category.system ? { system: category.system } : {}), title: category.title, kind: "categoria", category: category.number } } : {}),
+      });
+    }
   }
 
   // 7c: subfolder pattern of the category missing inside an ID folder.

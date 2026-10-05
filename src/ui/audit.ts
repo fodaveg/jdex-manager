@@ -97,15 +97,17 @@ export class FixFindingsModal extends Modal {
             throw new Error(`${finding.paths[0]}: el hallazgo cambió desde la vista previa; vuelve a abrir Reparar.`);
           }
         }
+        const before = this.effects.length;
         await applyFix(this.app, finding.fix!, this.effects, this.settings);
-        ok += 1;
+        if (this.effects.length > before) ok += 1;
+        else failed += 1;
       } catch (error) {
         failed += 1;
         new Notice(error instanceof Error ? error.message : String(error));
       }
     }
     this.close();
-    new Notice(`Arreglos procesados: ${ok}; fallidos: ${failed}.`);
+    new Notice(`Arreglos procesados: ${ok}; omitidos o fallidos: ${failed}.`);
     await this.onDone();
   }
 }

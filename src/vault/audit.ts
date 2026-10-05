@@ -1,16 +1,15 @@
 import { type App, normalizePath, Notice, TFile, TFolder } from "obsidian";
-import { auditSystem, type Finding, type Fix, type NoteMeta } from "../jd/audit";
+import { auditSystem, isConflictCopyPath, type Finding, type Fix, type NoteMeta } from "../jd/audit";
 import { renderReport, reportFileName } from "../jd/audit-report";
 import { relativeTo } from "../jd/detect";
 import { renderTemplate, todayIso } from "../jd/template";
-import { areaCode, sameSystem } from "../jd/index";
-import { parseJdNumber } from "../jd/parse";
+import { areaCode, selectSystem, systemKey } from "../jd/index";
 import type { JdexManagerSettings } from "../settings";
 import { patternFor } from "../jd/patterns";
 import { allFolderPaths, scanVault } from "./scan";
 import { ensureFolder } from "./create";
 import { resolveTemplate } from "./templates";
-import type { Effect } from "../jd/journal";
+import { durableEffect, type Effect } from "../jd/journal";
 
 export interface AuditResult {
   findings: Finding[];
@@ -20,32 +19,42 @@ export interface AuditResult {
 
 /**
  * Frontmatter of every note directly inside the JDex folder, read from the metadata cache.
- * Bodies also let the audit verify that a conflict copy is byte-identical before offering trash.
+ * Bodies are read for description proposals and candidate duplicate IDs only.
  */
-export async function jdexNoteMetas(app: App, settings: JdexManagerSettings): Promise<NoteMeta[]> {
+export async function jdexNoteMetas(app: App, settings: JdexManagerSettings, duplicatePaths: ReadonlySet<string> = new Set()): Promise<NoteMeta[]> {
   const out: NoteMeta[] = [];
   for (const file of app.vault.getMarkdownFiles()) {
     const rel = relativeTo(settings.jdexFolder, file.path);
     if (rel === null || rel === "" || rel.includes("/")) continue;
     const fm = app.metadataCache.getFileCache(file)?.frontmatter;
     const meta: NoteMeta = { path: file.path, frontmatter: fm ? { ...fm } : null };
-    meta.body = await app.vault.cachedRead(file);
+    const description: unknown = fm?.descripcion;
+    if (typeof description !== "string" || description.trim() === "" || duplicatePaths.has(file.path)) {
+      meta.body = await app.vault.cachedRead(file);
+    }
     out.push(meta);
   }
   return out;
 }
 
-/** Runs the audit over the live vault and writes (or replaces) today's report note. */
-export async function runAudit(app: App, settings: JdexManagerSettings): Promise<AuditResult> {
+/** Reads live vault state and returns repair proposals without writing a report. */
+export async function collectAuditFindings(app: App, settings: JdexManagerSettings): Promise<Finding[]> {
   const index = scanVault(app, settings);
+  const idCounts = new Map<string, number>();
+  for (const entry of index.rawIdNotes) {
+    if (entry.id.endsWith("+")) continue;
+    const key = systemKey(entry.id, entry.system);
+    idCounts.set(key, (idCounts.get(key) ?? 0) + 1);
+  }
+  const duplicatePaths = new Set(index.rawIdNotes.filter((entry) => !entry.id.endsWith("+") && (idCounts.get(systemKey(entry.id, entry.system)) ?? 0) > 1).map((entry) => entry.path));
   const filePaths = app.vault
     .getAllLoadedFiles()
     .filter((f): f is TFile => f instanceof TFile)
     .map((f) => f.path);
-  const findings = auditSystem({
+  return auditSystem({
     index,
     jdexFolder: settings.jdexFolder,
-    notes: await jdexNoteMetas(app, settings),
+    notes: await jdexNoteMetas(app, settings, duplicatePaths),
     filePaths,
     folderPaths: allFolderPaths(app),
     patternFor: (category) => patternFor(settings, category),
@@ -55,6 +64,11 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
       structureNotesAreFindings: settings.structureNotesAreFindings,
     },
   });
+}
+
+/** Runs the audit over the live vault and writes (or replaces) today's report note. */
+export async function runAudit(app: App, settings: JdexManagerSettings): Promise<AuditResult> {
+  const findings = await collectAuditFindings(app, settings);
 
   if (settings.reportsFolder === "") {
     new Notice("No reports folder set; the audit ran but no report was written.");
@@ -95,7 +109,7 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
         fm[key] = value;
       }
     });
-    if (Object.keys(previous).length > 0) effects?.push({ kind: "frontmatter", path: fix.path, previous });
+    if (Object.keys(previous).length > 0) effects?.push(durableEffect({ kind: "frontmatter", path: fix.path, previous }));
     if (skipped.length > 0) new Notice(`${fix.path}: se omitió ${skipped.join(", ")} porque cambió desde la auditoría.`);
     return;
   }
@@ -109,19 +123,23 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
   }
   if (fix.type === "create-note") {
     if (!settings) throw new Error("Faltan los ajustes para crear la nota.");
+    if ((fix.kind === "area" || fix.kind === "categoria") && !settings.structureNotesAreFindings) {
+      throw new Error("Activa los hallazgos de notas de estructura antes de crearlas desde Reparar.");
+    }
     if (app.vault.getAbstractFileByPath(fix.path)) throw new Error(`${fix.path} ya existe.`);
-    const index = scanVault(app, settings);
-    const parsed = parseJdNumber(fix.number);
-    const category = index.categories.find((entry) => entry.number === fix.category && sameSystem(entry, { system: parsed?.system }));
-    const area = index.areas.find((entry) => entry.number === Math.floor(Number(fix.category) / 10) * 10 && sameSystem(entry, { system: parsed?.system }));
-    if (!category || !area) throw new Error(`${fix.path}: categoría o área ausente.`);
-    const template = await resolveTemplate(app, settings, fix.kind, { category: fix.category, area: area.code });
-    const content = renderTemplate(template, { id: fix.number, title: fix.title, area: areaCode(area.number), areaTitle: area.label, category: fix.category, categoryTitle: category.label, date: todayIso() });
+    const index = selectSystem(scanVault(app, settings), fix.system ?? "");
+    const category = index.categories.find((entry) => entry.number === fix.category);
+    const areaNumber = fix.kind === "area" ? Number(fix.number.slice(0, 2)) : Math.floor(Number(fix.category) / 10) * 10;
+    const area = index.areas.find((entry) => entry.number === areaNumber);
+    if (!area || (fix.kind !== "area" && !category)) throw new Error(`${fix.path}: categoría o área ausente.`);
+    const template = await resolveTemplate(app, settings, fix.kind, { category: fix.category || undefined, area: area.code });
+    const content = renderTemplate(template, { id: fix.number, title: fix.title, area: areaCode(area.number), areaTitle: area.label, category: fix.category, categoryTitle: category?.label ?? "", date: todayIso() });
     await app.vault.create(fix.path, content);
     effects?.push({ kind: "created-note", path: fix.path, content });
     return;
   }
   if (fix.type === "trash") {
+    if (!isConflictCopyPath(fix.path)) throw new Error(`${fix.path}: no está identificada como copia de conflicto.`);
     const file = app.vault.getAbstractFileByPath(fix.path);
     const original = app.vault.getAbstractFileByPath(fix.identicalTo);
     if (!(file instanceof TFile) || !(original instanceof TFile)) throw new Error(`${fix.path}: copia u original ausente.`);

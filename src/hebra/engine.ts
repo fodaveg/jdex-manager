@@ -35,6 +35,7 @@ export {
   // audit.ts — la auditoría del «bibliotecario».
   auditSystem,
   countProblems,
+  isConflictCopyPath,
   FINDING_KINDS,
   expectedFrontmatter,
   // audit-report.ts — títulos legibles de cada tipo de hallazgo.

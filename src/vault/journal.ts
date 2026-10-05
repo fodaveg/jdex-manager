@@ -4,16 +4,30 @@ import { type Effect, type Operation, removeLine } from "../jd/journal";
 /**
  * Applies the inverse of each effect, last first. Nothing is deleted outright: notes and folders the
  * plugin created go to the trash (system or `.trash`, as the user prefers), so an edit is recoverable.
- * Returns one line per effect undone; throws on the first effect that cannot be undone.
+ * Returns one line per effect undone; persists removal of each completed inverse so a
+ * later failure can be retried without replaying already restored paths.
  */
-export async function undoOperation(app: App, op: Operation): Promise<string[]> {
+export async function undoOperation(app: App, op: Operation, onProgress?: () => Promise<void>): Promise<string[]> {
   const done: string[] = [];
-  for (const effect of [...op.effects].reverse()) done.push(await undoEffect(app, effect));
+  for (let i = op.effects.length - 1; i >= 0; i -= 1) {
+    done.push(await undoEffect(app, op.effects[i]));
+    op.effects.splice(i, 1);
+    await onProgress?.();
+  }
   return done;
 }
 
 async function undoEffect(app: App, e: Effect): Promise<string> {
   switch (e.kind) {
+    case "note-rewrite": {
+      const file = app.vault.getAbstractFileByPath(e.path);
+      if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
+      await app.vault.process(file, (current) => {
+        if (current !== e.after) throw new Error(`${e.path} was edited after updating its managed blocks; review manually.`);
+        return e.before;
+      });
+      return `Restored the managed blocks in ${e.path}.`;
+    }
     case "created-note": {
       const file = app.vault.getAbstractFileByPath(e.path);
       if (!(file instanceof TFile)) return `${e.path} was already gone.`;
@@ -51,6 +65,7 @@ async function undoEffect(app: App, e: Effect): Promise<string> {
           if (value === undefined) delete fm[key];
           else fm[key] = value;
         }
+        for (const key of e.missingKeys ?? []) delete fm[key];
       });
       return `Restored the frontmatter of ${e.path}.`;
     }

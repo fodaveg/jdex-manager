@@ -135,8 +135,8 @@ describe("auditSystem", () => {
 
   it("counts problems without the informative ones, and can promote them", () => {
     const informative = findings.filter((f) => f.informative).length;
-    // 3 notes without folder + areas 00-09/10-19 and categories 00/11 without a note in this fixture.
-    expect(informative).toBe(7);
+    // Missing structure notes are opt-in; only the three notes without folder are informative.
+    expect(informative).toBe(3);
     expect(countProblems(findings)).toBe(findings.length - informative);
     const strict = auditSystem({
       index,

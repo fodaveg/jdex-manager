@@ -12,9 +12,40 @@ function audit(folderPaths: string[], notePaths: string[], extra: Partial<AuditI
 }
 
 describe('unified repair proposals', () => {
+  it('offers area and category notes only with structure findings enabled', () => {
+    expect(audit([], []).some((finding) => finding.kind === 'structure-without-note')).toBe(false);
+    const fixes = audit([], [], { options: { structureNotesAreFindings: true } })
+      .filter((finding) => finding.kind === 'structure-without-note').map((finding) => finding.fix);
+    expect(fixes).toEqual([
+      { type: 'create-note', path: 'JDex/20-29 Productos.md', number: '20-29', title: 'Productos', kind: 'area', category: '' },
+      { type: 'create-note', path: 'JDex/21 Software.md', number: '21', title: 'Software', kind: 'categoria', category: '21' }
+    ]);
+  });
+
   it('creates a missing JDex note from the numbered folder title', () => {
     expect(audit([`${category}/21.22 Proyecto`], []).find((f) => f.kind === 'folder-without-note' && f.number === '21.22')?.fix).toEqual({
       type: 'create-note', path: 'JDex/21.22 Proyecto.md', number: '21.22', title: 'Proyecto', kind: 'id', category: '21'
+    });
+    expect(audit([`${category}/21.20 ■ Grupo`], []).find((f) => f.number === '21.20' && f.kind === 'folder-without-note')?.fix).toEqual({
+      type: 'create-note', path: 'JDex/21.20 ■ Grupo.md', number: '21.20', title: 'Grupo', kind: 'cabecera', category: '21'
+    });
+  });
+
+  it('keeps D01 and default note identities separate, including a + child', () => {
+    const dArea = 'D01.20-29 Productos';
+    const dCategory = `${dArea}/D01.21 Software`;
+    const dParent = `${dCategory}/D01.21.22 Proyecto`;
+    const folders = [area, category, `${category}/21.22 Proyecto`, dArea, dCategory, dParent, `${dParent}/+ Hijo`];
+    const findings = auditSystem({
+      index: buildIndex({ systemRoot: '', jdexFolder: 'JDex', folderPaths: folders, notePaths: [] }),
+      jdexFolder: 'JDex', folderPaths: folders, notes: [], filePaths: []
+    }).filter((finding) => finding.kind === 'folder-without-note');
+    expect(findings.find((finding) => finding.number === '21.22' && finding.fix?.type === 'create-note' && !finding.fix.system)?.fix).toMatchObject({ path: 'JDex/21.22 Proyecto.md', number: '21.22' });
+    expect(findings.find((finding) => finding.number === '21.22' && finding.fix?.type === 'create-note' && finding.fix.system === 'D01')?.fix).toMatchObject({
+      type: 'create-note', path: 'JDex/D01.21.22 Proyecto.md', number: '21.22', system: 'D01'
+    });
+    expect(findings.find((finding) => finding.number === '21.22+')?.fix).toMatchObject({
+      type: 'create-note', path: 'JDex/D01.21.22+ Hijo.md', number: '21.22+', system: 'D01'
     });
   });
 
@@ -37,6 +68,8 @@ describe('unified repair proposals', () => {
       { from: first, to: `${inbox}/uno.pdf` }, { from: second, to: `${inbox}/dos.pdf` }
     ] });
     expect(findings.find((f) => f.kind === 'header-with-files')?.fix).toEqual({ type: 'move', items: [{ from: third, to: `${inbox}/contenido.txt` }] });
+    expect(audit([reserved], [], { filePaths: [first, `${inbox}/uno.pdf`] })
+      .find((f) => f.kind === 'reserved-used-as-content')?.fix).toBeUndefined();
   });
 
   it('only proposes a trash when the duplicate is visibly a conflict copy with identical body', () => {
@@ -48,6 +81,14 @@ describe('unified repair proposals', () => {
     ] }).find((f) => f.kind === 'duplicate-id');
     expect(run('mismo cuerpo')?.fix).toEqual({ type: 'trash', path: copy, identicalTo: original });
     expect(run('distinto')?.fix).toBeUndefined();
+  });
+
+  it('does not treat a conflict marker in the JDex folder name as a disposable note', () => {
+    const jdexFolder = 'JDex conflicto de sincronización';
+    const paths = [`${jdexFolder}/21.22 Uno.md`, `${jdexFolder}/21.22 Dos.md`];
+    const findings = auditSystem({ index: buildIndex({ systemRoot: '', jdexFolder, folderPaths: [], notePaths: paths }),
+      notes: paths.map((path) => ({ path, frontmatter: null, body: 'idéntico' })), filePaths: paths });
+    expect(findings.find((finding) => finding.kind === 'duplicate-id')?.fix).toBeUndefined();
   });
 
   it('moves an out-of-parent ID only when its true category exists and is free', () => {

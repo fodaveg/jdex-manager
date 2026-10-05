@@ -127,6 +127,7 @@ import { jdexEditorExtension } from './jdex-editor-extension';
 import { createJdexJournal } from './jdex-journal';
 import { mountJdexJournalView } from './jdex-journal-view';
 import { createJdexHealthReport } from './jdex-health';
+import { applyJdexRepair } from './jdex-repair';
 
 export const JDEX_AUDIT_VIEW_ID = 'jdex:auditoria';
 export const JDEX_ID_SECTION_VIEW_ID = 'jdex:seccion-del-id';
@@ -136,6 +137,7 @@ export const JDEX_STATUS_INBOX_ID = 'jdex-inbox';
 export const JDEX_COMMAND_LOCATE = 'jdex-donde-vive-esta-nota';
 export const JDEX_COMMAND_TOGGLE = 'jdex-alternar-nota-y-carpeta';
 export const JDEX_COMMAND_AUDIT = 'jdex-auditar-el-sistema';
+export const JDEX_COMMAND_REPAIR = 'jdex-reparar';
 export const JDEX_COMMAND_CREATE_ID = 'jdex-crear-id';
 export const JDEX_COMMAND_CREATE_CATEGORY = 'jdex-crear-categoria';
 export const JDEX_COMMAND_CREATE_AREA = 'jdex-crear-area';
@@ -293,6 +295,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       structureNotesAreFindings: settings.structureNotesAreFindings
     });
     auditInput.patternFor = (category) => patternFor(settings, category);
+    auditInput.jdexFolder = settings.jdexFolder;
     findings = auditSystem(auditInput);
     inboxSummary = buildJdexInboxSummary(index, walk);
     refreshCounterItems();
@@ -1166,6 +1169,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     name: 'JDex: auditar el sistema',
     run: () => host.revealView(JDEX_AUDIT_VIEW_ID)
   });
+  const offCommandRepair = host.registerCommand({
+    id: JDEX_COMMAND_REPAIR,
+    name: 'JDex: reparar',
+    run: async () => {
+      await rebuild();
+      host.revealView(JDEX_AUDIT_VIEW_ID);
+    }
+  });
   const offCommandCreateId = host.registerCommand({
     id: JDEX_COMMAND_CREATE_ID,
     name: 'JDex: crear ID',
@@ -1299,6 +1310,50 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             host.notice(error instanceof Error ? error.message : String(error));
           }
         })();
+      },
+      repair: (selected) => {
+        void (async () => {
+          let done = 0;
+          let failed = 0;
+          try {
+            await journal.run('fix', 'Reparar JDex', async (vault) => {
+              const order = (finding: Finding): number => {
+                const type = finding.fix?.type;
+                if (type === 'create-note' || type === 'create-folder' || type === 'folders') return 0;
+                if (type === 'frontmatter' || type === 'rename') return 1;
+                if (type === 'move') return 2;
+                return 3;
+              };
+              for (const finding of [...selected].sort((a, b) => order(a) - order(b))) {
+                if (!finding.fix) continue;
+                try {
+                  await rebuild();
+                  if (!findings.some((fresh) => fresh.kind === finding.kind && JSON.stringify(fresh.fix) === JSON.stringify(finding.fix))) {
+                    throw new Error(`${finding.paths[0]}: cambió desde la vista previa; vuelve a abrir Reparar.`);
+                  }
+                  const result = await applyJdexRepair(vault, api.markdown, walk!, index!, settings, finding.fix);
+                  for (const warning of result.warnings) host.notice(warning);
+                  if (result.applied) done += 1;
+                  else failed += 1;
+                } catch (error) {
+                  failed += 1;
+                  host.notice(error instanceof Error ? error.message : String(error));
+                }
+              }
+              if (done > 0) await afterJdexWrite(true, vault);
+            });
+          } catch (error) {
+            report(error, 'reparar');
+            host.notice(error instanceof Error ? error.message : String(error));
+          } finally {
+            await rebuild();
+            if (auditViewEl) {
+              unmountAuditView?.();
+              mountAuditViewInto(auditViewEl);
+            }
+            host.notice(`Reparar: ${done} aplicado(s); ${failed} omitido(s) o fallido(s).`);
+          }
+        })();
       }
     });
   }
@@ -1426,6 +1481,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandLocate();
     offCommandToggle();
     offCommandAudit();
+    offCommandRepair();
     offCommandCreateId();
     offCommandCreateCategory();
     offCommandCreateArea();
