@@ -11,7 +11,7 @@ import { FixFindingsModal } from "../src/ui/audit";
 
 const ui = vi.hoisted(() => ({
   toggles: [] as { value: boolean; change?: (value: boolean) => void }[],
-  buttons: [] as (() => void)[],
+  buttons: [] as { text: string; disabled: boolean; click?: () => void }[],
   messages: [] as string[],
 }));
 
@@ -20,7 +20,7 @@ vi.mock("obsidian", async (importOriginal) => {
   return {
     ...original,
     Modal: class {
-      contentEl = { empty() {}, createEl() {} };
+      contentEl = { empty() {}, createEl() { return { textContent: '' }; } };
       constructor(readonly app: App) {}
       setTitle() {}
       open() { (this as unknown as { onOpen(): void }).onOpen(); }
@@ -37,7 +37,9 @@ vi.mock("obsidian", async (importOriginal) => {
         return this;
       }
       addButton(build: (button: unknown) => void) {
-        const button = { setButtonText() { return button; }, setCta() { return button; }, onClick(fn: () => void) { ui.buttons.push(fn); return button; } };
+        const state = { text: '', disabled: false } as (typeof ui.buttons)[number];
+        ui.buttons.push(state);
+        const button = { setButtonText(text: string) { state.text = text; return button; }, setDisabled(disabled: boolean) { state.disabled = disabled; return button; }, setCta() { return button; }, onClick(fn: () => void) { state.click = fn; return button; } };
         build(button);
         return this;
       }
@@ -253,10 +255,37 @@ describe("Obsidian audit fixes", () => {
     modal.open();
     // The preview groups by finding kind, so name-mismatch precedes frontmatter.
     expect(ui.toggles.map((toggle) => toggle.value)).toEqual([false, true, false, false, false]);
+    expect(ui.buttons[0]).toMatchObject({ text: 'Aplicar (1)', disabled: false });
     ui.toggles[1].change?.(false);
-    ui.buttons[0]();
-    await vi.waitFor(() => expect(done).toHaveBeenCalled());
+    expect(ui.buttons[0]).toMatchObject({ text: 'Aplicar (0)', disabled: true });
+    ui.buttons[0].click?.();
+    await Promise.resolve();
+    expect(done).not.toHaveBeenCalled();
+    expect(ui.messages.join(' ')).toContain('Selecciona');
+    expect(ui.messages.join(' ')).not.toContain('Arreglos procesados');
     expect(modal.effects).toEqual([]);
+  });
+
+  it("enables a repair after explicit selection and writes the selected description", async () => {
+    const path = 'JDex/21.22 X.md';
+    const file = Object.assign(new TFile(), { path });
+    const fm: Record<string, unknown> = {};
+    const write = vi.fn(async (_file: TFile, update: (current: Record<string, unknown>) => void) => update(fm));
+    const app = { vault: { getAbstractFileByPath: () => file }, fileManager: { processFrontMatter: write } } as unknown as App;
+    const finding: Finding = { kind: 'missing-description', paths: [path], message: 'Descripción.',
+      fix: { type: 'frontmatter', path, set: { descripcion: 'Seleccionada.' } } };
+    const done = vi.fn(async () => {});
+    const modal = new FixFindingsModal(app, [finding], done);
+    modal.open();
+    expect(ui.buttons[0]).toMatchObject({ text: 'Aplicar (0)', disabled: true });
+    ui.toggles[0].change?.(true);
+    expect(ui.buttons[0]).toMatchObject({ text: 'Aplicar (1)', disabled: false });
+    ui.buttons[0].click?.();
+    await vi.waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(fm.descripcion).toBe('Seleccionada.');
+    expect(modal.effects).toHaveLength(1);
+    expect(ui.messages).toContain('Arreglos procesados: 1; omitidos o fallidos: 0.');
   });
 
   it("reaudits before opening even with existing findings", async () => {

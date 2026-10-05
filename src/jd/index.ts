@@ -190,6 +190,14 @@ export function buildIndex(input: IndexInput): JdIndex {
     const malformedEntry = malformedNumber(f.path, name);
     if (malformedEntry) malformed.push(malformedEntry);
     const numbered = extractJdPrefix(name);
+    const parentPath = f.path.slice(0, f.path.lastIndexOf("/"));
+    const parentIdFolder = f.parts.length === 4
+      ? rawIdFolders.find((entry) => entry.path === parentPath && !entry.id.endsWith("+"))
+      : undefined;
+    // Local NN names below a validated ID organize its content; they are not
+    // system categories. Explicit system prefixes, IDs and areas remain structural.
+    if (parentIdFolder && !malformed.some((entry) => entry.path === parentPath) &&
+      numbered?.number.kind === "category" && !numbered.number.system) continue;
     if (numbered && ((numbered.number.kind === "area" && f.parts.length !== 1) ||
       (numbered.number.kind === "category" && f.parts.length !== 2) ||
       (numbered.number.kind === "id" && f.parts.length !== 3))) {
@@ -201,8 +209,7 @@ export function buildIndex(input: IndexInput): JdIndex {
     // Only `+ Title` folders directly inside a validated ID are child IDs.
     if (f.parts.length === 4) {
       if (!name.startsWith("+ ") || name.slice(2).trim() === "") continue;
-      const parentPath = f.path.slice(0, f.path.lastIndexOf("/"));
-      const parent = rawIdFolders.find((entry) => entry.path === parentPath && !entry.id.endsWith("+"));
+      const parent = parentIdFolder;
       if (!parent) continue;
       const title = name.slice(2);
       const key = `${parent.id}+`;

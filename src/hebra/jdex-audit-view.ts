@@ -88,13 +88,25 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
   el.append(summary);
   const selected = new Set(findings.filter((finding) => finding.kind === 'frontmatter-mismatch' && finding.fix?.type === 'frontmatter' &&
     Object.keys(finding.fix.set).every((key) => ['jd', 'tipo', 'area', 'categoria'].includes(key))));
+  let updateSelection: (() => void) | undefined;
   if (options.repair && findings.some((finding) => finding.fix)) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'hebra-jdex-repair-apply';
-    button.textContent = 'Reparar';
-    button.addEventListener('click', () => void options.repair?.(findings.filter((finding) => selected.has(finding))));
-    el.append(button);
+    const selectionSummary = document.createElement('p');
+    updateSelection = () => {
+      button.textContent = `Reparar (${selected.size})`;
+      button.disabled = selected.size === 0;
+      selectionSummary.textContent = selected.size === 0
+        ? 'Selecciona los arreglos que quieres aplicar. Los hallazgos sin arreglo disponible requieren revisión manual.'
+        : `${selected.size} arreglo(s) seleccionado(s). Los hallazgos sin arreglo disponible requieren revisión manual.`;
+    };
+    updateSelection();
+    button.addEventListener('click', () => {
+      if (selected.size === 0) return;
+      void options.repair?.(findings.filter((finding) => selected.has(finding)));
+    });
+    el.append(button, selectionSummary);
   }
 
   const applyFix = options.applyFrontmatterFix
@@ -113,7 +125,10 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
       const list = document.createElement('ul');
       list.className = 'hebra-jdex-audit-list';
       for (const finding of rows) list.append(findingRow(finding, (path) => options.openPath(path), applyFix,
-        options.repair ? (chosen) => { if (chosen) selected.add(finding); else selected.delete(finding); } : undefined));
+        options.repair ? (chosen) => {
+          if (chosen) selected.add(finding); else selected.delete(finding);
+          updateSelection?.();
+        } : undefined));
       section.append(heading, list);
       parent.append(section);
     }

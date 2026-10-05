@@ -8,6 +8,49 @@ afterEach(() => {
 });
 
 describe('mountJdexAuditView', () => {
+  it('requires an explicit selection for repairs in closed informative warnings', () => {
+    const finding: Finding = { kind: 'note-without-folder', informative: true, paths: ['a.md'], message: 'A sin carpeta.',
+      fix: { type: 'create-folder', path: 'A', paths: ['A'] } };
+    const repair = vi.fn();
+    const el = document.createElement('div');
+    mountJdexAuditView(el, { findings: () => [finding], openPath: vi.fn(), repair });
+    const button = el.querySelector('.hebra-jdex-repair-apply') as HTMLButtonElement;
+    const checkbox = el.querySelector('.hebra-jdex-repair-select') as HTMLInputElement;
+    expect(el.querySelector('details')?.open).toBe(false);
+    expect(checkbox.checked).toBe(false);
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe('Reparar (0)');
+    expect(el.textContent).toContain('Selecciona');
+    button.dispatchEvent(new Event('click'));
+    expect(repair).not.toHaveBeenCalled();
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toBe('Reparar (1)');
+    button.click();
+    expect(repair).toHaveBeenCalledWith([finding]);
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(button.disabled).toBe(true);
+    button.dispatchEvent(new Event('click'));
+    expect(repair).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts only mechanical frontmatter as initially selected and never selects a manual move', () => {
+    const mechanical: Finding = { kind: 'frontmatter-mismatch', paths: ['a.md'], message: 'Metadatos.',
+      fix: { type: 'frontmatter', path: 'a.md', set: { jd: '21.13' } } };
+    const manual: Finding = { kind: 'out-of-parent', paths: ['B'], message: 'Mover.',
+      fix: { type: 'move', items: [{ from: 'B', to: 'C' }] } };
+    const repair = vi.fn();
+    const el = document.createElement('div');
+    mountJdexAuditView(el, { findings: () => [mechanical, manual], openPath: vi.fn(), repair });
+    const button = el.querySelector('.hebra-jdex-repair-apply') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toBe('Reparar (1)');
+    button.click();
+    expect(repair).toHaveBeenCalledWith([mechanical]);
+  });
+
   it('sin hallazgos, el mensaje de «sin problemas» y ninguna sección', () => {
     const el = document.createElement('div');
     mountJdexAuditView(el, { findings: () => [], openPath: vi.fn() });

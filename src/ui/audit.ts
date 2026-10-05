@@ -57,6 +57,8 @@ export class FixFindingsModal extends Modal {
     contentEl.createEl("p", {
       text: `${this.findings.length} hallazgo(s) con arreglo disponible. Solo los campos jd, tipo, area y categoria están marcados por defecto; revisa los demás antes de seleccionarlos.`,
     });
+    const selectionSummary = contentEl.createEl("p");
+    let updateSelection: (() => void) | undefined;
 
     for (const kind of FINDING_KINDS) {
       const indices = this.findings.flatMap((finding, i) => finding.kind === kind ? [i] : []);
@@ -72,20 +74,31 @@ export class FixFindingsModal extends Modal {
           toggle.setValue(this.selected.has(i)).onChange((value) => {
             if (value) this.selected.add(i);
             else this.selected.delete(i);
+            updateSelection?.();
           }),
         );
       }
     }
 
-    new Setting(contentEl).addButton((button) =>
+    new Setting(contentEl).addButton((button) => {
+      updateSelection = () => {
+        button.setButtonText(`Aplicar (${this.selected.size})`).setDisabled(this.selected.size === 0);
+        selectionSummary.textContent = this.selected.size === 0
+          ? "Selecciona los arreglos que quieres aplicar."
+          : `${this.selected.size} arreglo(s) seleccionado(s).`;
+      };
+      updateSelection();
       button
-        .setButtonText("Aplicar")
         .setCta()
-        .onClick(() => void this.apply()),
-    );
+        .onClick(() => void this.apply());
+    });
   }
 
   private async apply(): Promise<void> {
+    if (this.selected.size === 0) {
+      new Notice("Selecciona los arreglos que quieres aplicar.");
+      return;
+    }
     let ok = 0;
     let failed = 0;
     for (const i of [...this.selected].sort((a, b) => fixOrder(this.findings[a].fix!) - fixOrder(this.findings[b].fix!) || a - b)) {

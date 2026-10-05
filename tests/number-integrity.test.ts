@@ -10,6 +10,61 @@ const indexOf = (folders: string[], notes: string[] = []) => buildIndex({ system
 const settings = { systemRoot: "", jdexFolder: "JDex" };
 
 describe("JD number integrity", () => {
+  it.each(["", "D01.", "D02."])("keeps local NN content folders below a validated %s ID out of structural findings", (prefix) => {
+    const area = `${prefix}20-29 Area`;
+    const category = `${area}/${prefix}21 Category`;
+    const parent = `${category}/${prefix}21.13 Hebra`;
+    const content = ["40 Audits y revisiones", "70 Adjuntos", "83 Other content"].map((name) => `${parent}/${name}`);
+    const child = `${parent}/+ Child`;
+    const index = indexOf([area, category, parent, ...content, child], [`${prefix}21.13 Hebra`, `${prefix}21.13+ Child`]);
+    const findings = auditSystem({ index, notes: [], filePaths: [] });
+    expect(findings.filter((f) => f.kind === "misplaced-number" || f.kind === "malformed-number")).toEqual([]);
+    expect(index.categories).toHaveLength(1);
+    expect(index.ids).toHaveLength(2);
+    expect(childrenPlus(index, "21.13", prefix.slice(0, -1))[0].folderPath).toBe(child);
+  });
+
+  it("preserves structural and malformed findings below IDs and rejects unvalidated content parents", () => {
+    const area = "20-29 Area";
+    const category = `${area}/21 Category`;
+    const parent = `${category}/21.13 Valid`;
+    const structural = ["21.14 Nested ID", "30-39 Nested area", "D01.70 Explicit category"].map((name) => `${parent}/${name}`);
+    const invalid = `${category}/22.11 Wrong category`;
+    const invalidContent = `${invalid}/70 Adjuntos`;
+    const plainContent = `${category}/Plain folder/40 Audits`;
+    const malformed = [`${parent}/21.2 Short ID`, `${parent}/21.23 ■ Content`];
+    const index = indexOf([area, category, parent, ...structural, invalid, invalidContent, plainContent, ...malformed]);
+    const findings = auditSystem({ index, notes: [], filePaths: [] });
+    expect(findings.filter((f) => f.kind === "misplaced-number").map((f) => f.paths[0]).sort()).toEqual([
+      ...structural, invalidContent, plainContent, malformed[1],
+    ].sort());
+    expect(findings.filter((f) => f.kind === "out-of-parent").map((f) => f.paths[0])).toContain(invalid);
+    expect(findings.filter((f) => f.kind === "malformed-number").map((f) => f.paths[0]).sort()).toEqual(malformed.sort());
+    expect(findings.filter((f) => f.kind === "misplaced-number" || f.kind === "malformed-number").every((f) => !f.fix)).toBe(true);
+  });
+
+  it("does not treat explicit system categories below another system ID as local content", () => {
+    const area = "D01.20-29 Area";
+    const category = `${area}/D01.21 Category`;
+    const parent = `${category}/D01.21.13 Valid`;
+    const structural = [`${parent}/D01.70 Same system`, `${parent}/D02.70 Other system`];
+    const index = indexOf([area, category, parent, `${parent}/70 Local content`, ...structural]);
+    expect(index.misplaced.map((f) => f.path).sort()).toEqual(structural.sort());
+  });
+
+  it("reports NN below a malformed ID parent while keeping its + child indexed", () => {
+    const area = "20-29 Area";
+    const category = `${area}/21 Category`;
+    const parent = `${category}/21.23 ■ Invalid parent`;
+    const content = `${parent}/70 Adjuntos`;
+    const child = `${parent}/+ Child`;
+    const index = indexOf([area, category, parent, content, child]);
+    const findings = auditSystem({ index, notes: [], filePaths: [] });
+    expect(findings.filter((f) => f.kind === "malformed-number").map((f) => f.paths[0])).toContain(parent);
+    expect(findings.filter((f) => f.kind === "misplaced-number").map((f) => f.paths[0])).toContain(content);
+    expect(index.rawIdFolders.some((entry) => entry.path === child)).toBe(true);
+  });
+
   it("reports wrong structural depth without a mechanical fix and leaves valid hierarchy alone", () => {
     const index = indexOf(["20-29 Area", "20-29 Area/21 Category", "20-29 Area/21 Category/21.11 Valid", "20-29 Area/21.12 Wrong", "21 Root category", "21.13 Root ID", "20-29 Area/30-39 Nested area"]);
     const findings = auditSystem({ index, notes: [], filePaths: [] }).filter((f) => f.kind === "misplaced-number");
