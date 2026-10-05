@@ -4,7 +4,7 @@
  */
 
 import { relativeTo } from "./detect";
-import type { IdEntry, JdIndex } from "./index";
+import { findId, sameSystem, systemKey, type IdEntry, type JdIndex } from "./index";
 import { extractJdPrefix, isReserved, parseJdNumber } from "./parse";
 
 export type DateFormat = "YYYY-MM-DD" | "YYYY-MM";
@@ -20,7 +20,7 @@ export function categoryOfPath(systemRoot: string, path: string): string | null 
   if (!area || area.number.kind !== "area" || !cat || cat.number.kind !== "category") return null;
   const value = Number(cat.number.category);
   if (value < area.number.area || value > area.number.area + 9) return null;
-  return cat.number.category;
+  return systemKey(cat.number.category, cat.number.system);
 }
 
 /** The nearest ID whose folder contains `path` (the file itself excluded), or null. */
@@ -40,8 +40,8 @@ export function inboxFolders(index: JdIndex): IdEntry[] {
 }
 
 /** The `.01` or `.09` entry of a category. */
-export function zeroOf(index: JdIndex, category: string, zero: "01" | "09"): IdEntry | undefined {
-  return index.ids.find((e) => e.id === `${category}.${zero}`);
+export function zeroOf(index: JdIndex, category: string, zero: "01" | "09", system = index.system ?? ""): IdEntry | undefined {
+  return findId(index, `${category}.${zero}`, system);
 }
 
 const DATE_PREFIX = /^\d{4}-\d{2}(-\d{2})?(?=[\s_.-]|$)/;
@@ -107,6 +107,6 @@ export function locate(index: JdIndex, settings: { jdexFolder: string }, path: s
   if (!entry) entry = index.ids.find((e) => e.folderPath === path) ?? idFolderOfPath(index, path);
   if (!entry) return null;
   const found = entry;
-  const category = index.categories.find((c) => c.number === found.category);
+  const category = index.categories.find((c) => c.number === found.category && sameSystem(c, found));
   return { entry: found, atNote, text: `${category?.label ?? found.category} › ${found.label}` };
 }

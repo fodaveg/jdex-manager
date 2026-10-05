@@ -24,7 +24,7 @@ export function retirePlan(index: JdIndex, entry: IdEntry, date: string, success
   let move: RetirePlan["move"];
   let moveProblem: string | undefined;
   if (entry.folderPath) {
-    const archive = zeroOf(index, entry.category, "09");
+    const archive = zeroOf(index, entry.category, "09", entry.system);
     if (!archive?.folderPath) moveProblem = `${entry.category}.09 has no folder; the ID folder stays where it is.`;
     else {
       const name = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);

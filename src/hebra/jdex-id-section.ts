@@ -8,7 +8,7 @@
  * son dos consultas nuevas, nunca proporcionales al tamaño de la biblioteca.
  */
 import type { PluginActiveNote, PluginVault } from 'hebra-plugin-api';
-import { childrenPlus, locate, type IdEntry, type JdIndex, type Location } from './engine';
+import { childrenPlus, locate, sameSystem, type IdEntry, type JdIndex, type Location } from './engine';
 import {
   jdexFrontmatterString,
   readJdexFrontmatter,
@@ -84,7 +84,7 @@ export async function loadJdexIdSection(
   const located = locate(index, settings, path);
   if (!located) return EMPTY;
   const entry = located.entry;
-  const category = index.categories.find((c) => c.number === entry.category);
+  const category = index.categories.find((c) => c.number === entry.category && sameSystem(c, entry));
 
   let description = '';
   if (entry.notePath) {
@@ -103,10 +103,10 @@ export async function loadJdexIdSection(
     if (folderId) files = await folderContents(library, folderId);
   }
 
-  const children = childrenPlus(index, entry.id);
+  const children = childrenPlus(index, entry.id, entry.system);
   const siblings = index.ids.filter(
     (candidate) =>
-      candidate.category === entry.category &&
+      candidate.category === entry.category && sameSystem(candidate, entry) &&
       candidate.id !== entry.id &&
       !candidate.id.endsWith('+')
   );

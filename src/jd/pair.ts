@@ -4,7 +4,7 @@
  */
 
 import { relativeTo } from "./detect";
-import type { JdIndex } from "./index";
+import { sameSystem, systemKey, type JdIndex } from "./index";
 import { extractJdPrefix, jdexNoteName } from "./parse";
 import { titleForCompare } from "./title";
 
@@ -17,6 +17,7 @@ export interface RenameEvent {
 export type PairAction =
   | { type: "none" }
   /** The number changed: an ID is never renumbered (johnnydecimal.com). Nothing is done. */
+  | { type: "unnumbered"; oldId: string }
   | { type: "renumbered"; oldId: string; newId: string }
   /** An ID folder or note moved to another category or area. Nothing is done. */
   | { type: "moved"; id: string; from: string; to: string }
@@ -38,7 +39,7 @@ function renamePrefix(path: string, isFolder: boolean): ReturnType<typeof extrac
   if (isFolder && name.startsWith("+ ")) {
     const parent = extractJdPrefix(baseName(parentOf(path)));
     if (!parent || parent.number.kind !== "id" || parent.number.extension) return null;
-    return extractJdPrefix(`${parent.number.id}+ ${name.slice(2)}`);
+    return extractJdPrefix(`${systemKey(parent.number.id, parent.number.system)}+ ${name.slice(2)}`);
   }
   return extractJdPrefix(name);
 }
@@ -48,12 +49,15 @@ export function pairAction(
   index: JdIndex,
   settings: { jdexFolder: string; systemRoot: string },
 ): PairAction {
+  const oldRelative = relativeTo(ev.isFolder ? settings.systemRoot : settings.jdexFolder, ev.oldPath);
+  if (oldRelative === null || (!ev.isFolder && oldRelative.includes("/"))) return { type: "none" };
+  if (ev.isFolder && oldRelative.split("/").length !== (baseName(ev.oldPath).startsWith("+ ") ? 4 : 3)) return { type: "none" };
   const oldParsed = renamePrefix(ev.oldPath, ev.isFolder);
   const newParsed = renamePrefix(ev.newPath, ev.isFolder);
   if (!oldParsed || oldParsed.number.kind !== "id") return { type: "none" };
-  if (!newParsed || newParsed.number.kind !== "id") return { type: "none" };
-  const oldId = oldParsed.number.id + (oldParsed.number.extension ?? "");
-  const newId = newParsed.number.id + (newParsed.number.extension ?? "");
+  const oldId = systemKey(oldParsed.number.id + (oldParsed.number.extension ?? ""), oldParsed.number.system);
+  if (!newParsed || newParsed.number.kind !== "id") return { type: "unnumbered", oldId };
+  const newId = systemKey(newParsed.number.id + (newParsed.number.extension ?? ""), newParsed.number.system);
   if (oldId !== newId) return { type: "renumbered", oldId, newId };
 
   if (ev.isFolder) {
@@ -73,14 +77,14 @@ export function pairAction(
   if (titleForCompare(oldParsed.title) === titleForCompare(newParsed.title)) return { type: "none" };
 
   // Before or after the rename, the unchanged partner still has the old child title.
-  const entry = index.ids.find((e) => e.id === oldId && (!oldId.endsWith("+") || titleForCompare(e.title) === titleForCompare(oldParsed.title)));
+  const entry = index.ids.find((e) => e.id === (oldParsed.number.kind === "id" ? oldParsed.number.id + (oldParsed.number.extension ?? "") : "") && sameSystem(e, oldParsed.number) && (!oldId.endsWith("+") || titleForCompare(e.title) === titleForCompare(oldParsed.title)));
   if (!entry) return { type: "none" };
   if (ev.isFolder) {
     if (!entry.notePath) return { type: "none" };
     const notePrefix = extractJdPrefix(baseName(entry.notePath));
     const noteTitle = notePrefix?.title ?? "";
     const tags = noteTitle.slice(titleForCompare(noteTitle).length);
-    const newName = jdexNoteName(newId, `${titleForCompare(newParsed.title)}${tags}`, notePrefix?.number.system);
+    const newName = jdexNoteName(newParsed.number.id + (newParsed.number.extension ?? ""), `${titleForCompare(newParsed.title)}${tags}`, notePrefix?.number.system);
     const newPartnerPath = `${parentOf(entry.notePath)}/${newName}.md`;
     if (newPartnerPath === entry.notePath) return { type: "none" };
     return { type: "rename-partner", id: newId, partnerPath: entry.notePath, newPartnerPath };
@@ -88,7 +92,7 @@ export function pairAction(
   if (!entry.folderPath) return { type: "none" };
   const nestedChild = baseName(entry.folderPath).startsWith("+ ");
   const folderPrefix = extractJdPrefix(baseName(entry.folderPath));
-  const newName = nestedChild ? `+ ${titleForCompare(newParsed.title)}` : jdexNoteName(newId, titleForCompare(newParsed.title), folderPrefix?.number.system);
+  const newName = nestedChild ? `+ ${titleForCompare(newParsed.title)}` : jdexNoteName(newParsed.number.id + (newParsed.number.extension ?? ""), titleForCompare(newParsed.title), folderPrefix?.number.system);
   const newPartnerPath = `${parentOf(entry.folderPath)}/${newName}`;
   if (newPartnerPath === entry.folderPath) return { type: "none" };
   return { type: "rename-partner", id: newId, partnerPath: entry.folderPath, newPartnerPath };

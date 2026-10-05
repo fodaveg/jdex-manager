@@ -152,3 +152,15 @@ describe('jdexRenameWarning', () => {
     expect(warning).toBeNull();
   });
 });
+
+it('advierte al quitar el número de una nota o carpeta, conservando el ID anterior', () => {
+  const { index, walk } = fixture();
+  for (const event of [
+    { kind: 'note-rename' as const, noteId: 'n-2111', newTitle: 'Hebra' },
+    { kind: 'folder-rename' as const, folderId: 'f-2111', newName: 'Hebra' }
+  ]) {
+    const warning = jdexRenameWarning(event, walk, index, SETTINGS);
+    expect(warning).toEqual({ type: 'unnumbered', oldId: '21.11' });
+    expect(jdexRenameWarningMessage(warning!)).toContain('perdería su número');
+  }
+});

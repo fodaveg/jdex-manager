@@ -22,9 +22,9 @@ describe("parseJdNumber", () => {
     expect(parseJdNumber("10")).toEqual({ kind: "category", category: "10" });
   });
 
-  it("parses ids and normalises one-digit ids", () => {
+  it("requires two digits after the dot", () => {
     expect(parseJdNumber("11.11")).toEqual({ kind: "id", category: "11", id: "11.11" });
-    expect(parseJdNumber("11.1")).toEqual({ kind: "id", category: "11", id: "11.01" });
+    expect(parseJdNumber("11.1")).toBeNull();
     expect(parseJdNumber(" 21.22 ")).toEqual({ kind: "id", category: "21", id: "21.22" });
   });
 
@@ -91,10 +91,10 @@ describe("isReserved", () => {
 });
 
 describe("isHeader", () => {
-  it("recognises ids ending in 0 and black-square titles", () => {
+  it("requires a header number even when a black square is present", () => {
     expect(isHeader("14.10 ■ Computers")).toBe(true);
     expect(isHeader("14.20 Devices")).toBe(true);
-    expect(isHeader("14.11 ■ Odd but explicit")).toBe(true);
+    expect(isHeader("14.11 ■ Odd but explicit")).toBe(false);
     expect(isHeader("14.11 My computers")).toBe(false);
     expect(isHeader("11.00 JDex for 11")).toBe(false);
     expect(isHeader("11 Money")).toBe(false);

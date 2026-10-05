@@ -10,7 +10,7 @@ export async function updateHeaders(app: App, index: JdIndex, onlyCategory?: str
     const file = app.vault.getAbstractFileByPath(header.notePath!);
     if (!(file instanceof TFile)) continue;
     const content = await app.vault.read(file);
-    const next = replaceChildrenBlock(content, renderChildren(childrenOf(index, header.id)));
+    const next = replaceChildrenBlock(content, renderChildren(childrenOf(index, header.id, header.system)));
     if (next === null || next === content) continue;
     await app.vault.modify(file, next);
     changed += 1;

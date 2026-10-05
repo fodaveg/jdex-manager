@@ -1,6 +1,6 @@
 import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { describe, expect, it } from 'vitest';
-import { buildIndex, DEFAULT_SETTINGS, type IndexInput, type JdexManagerSettings } from '../../src/hebra/engine';
+import { buildIndex, selectCreationSystem, DEFAULT_SETTINGS, type IndexInput, type JdexManagerSettings } from '../../src/hebra/engine';
 import {
   createJdexArea,
   createJdexCategory,
@@ -352,4 +352,38 @@ describe('createJdexChild', () => {
     expect(outcome.note.title).toBe('21.11+ Extensión');
     expect(outcome.note.body).toContain('[[21.11 Hebra]]');
   });
+});
+
+
+describe('última comprobación de número en la biblioteca viva', () => {
+  it.each(['id', 'header', 'child'] as const)('rechaza %s llegado tras el snapshot aunque su título sea distinto', async (kind) => {
+    const { walk, index } = buildWalkAndIndex();
+    const library = new FakeJdexVault();
+    library.seedFolder({ id: 'f-jdex', parentId: null, name: JDEX_FOLDER_PATH, createdAt: 0, updatedAt: 0 });
+    const category = index.categories.find((entry) => entry.number === '21')!;
+    const parent = index.ids.find((entry) => entry.id === '21.11')!;
+    const occupied = kind === 'id' ? '21.23 Other' : kind === 'header' ? '21.20 ■ Other' : '21.11+ Child #tag';
+    await library.noteCreate({ folderId: 'f-jdex', body: `# ${occupied}` });
+    const create = (free: boolean) => kind === 'id'
+      ? createJdexId(library, markdown, walk, baseSettings(), index, { category, id: free ? '21.24' : '21.23', title: 'Mine', createFolder: false })
+      : kind === 'header'
+        ? createJdexHeader(library, markdown, walk, baseSettings(), index, { category, id: free ? '21.30' : '21.20', title: 'Mine', emoji: '' })
+        : createJdexChild(library, markdown, walk, baseSettings(), index, { parent, title: free ? 'Sibling' : 'Child', createFolder: false });
+    await expect(create(false)).rejects.toThrow(/Ya lo usa|Ya hay un hijo/);
+    expect((await library.notesPage(null, 200, { kind: 'folder', folderId: 'f-jdex' })).items).toHaveLength(1);
+    await create(true);
+    expect((await library.notesPage(null, 200, { kind: 'folder', folderId: 'f-jdex' })).items).toHaveLength(2);
+  });
+});
+
+
+it('crea D01 en andamiaje físico default conservando las etiquetas del área y categoría', async () => {
+  const { walk, index } = buildWalkAndIndex();
+  const library = new FakeJdexVault();
+  library.seedFolder({ id: 'f-jdex', parentId: null, name: JDEX_FOLDER_PATH, createdAt: 0, updatedAt: 0 });
+  const category = selectCreationSystem(index, 'D01').categories.find((entry) => entry.number === '21')!;
+  const outcome = await createJdexId(library, markdown, walk, baseSettings({ systemId: 'D01', prefixNamesWithSystem: true }), index, { category, id: '21.11', title: 'Own ID', createFolder: false });
+  expect(outcome.note.title).toBe('D01.21.11 Own ID');
+  expect(outcome.note.body).toContain('area: "20-29 Productos"');
+  expect(outcome.note.body).toContain('categoria: "21 Productos de software"');
 });

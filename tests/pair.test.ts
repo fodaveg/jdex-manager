@@ -36,7 +36,7 @@ describe("pairAction", () => {
   });
 
   it.each([
-    ["", ""], ["D01.", ""], ["", "D01."], ["D01.", "D01."],
+    ["", ""], ["D01.", "D01."],
   ])("keeps each regular partner's existing system prefix (note=%s, folder=%s)", (notePrefix, folderPrefix) => {
     const folderPath = `${CAT}/${folderPrefix}21.22 Antes`;
     const oldNote = `${JDEX}/${notePrefix}21.22 Antes #ayuda.md`;

@@ -33,7 +33,7 @@ import {
   type DecorationSet,
   type ViewUpdate
 } from '@codemirror/view';
-import { findJdNumbers, type IdEntry } from './engine';
+import { findJdNumbers, systemKey, type IdEntry } from './engine';
 
 export interface JdexEditorExtensionContext {
   /** Todos los IDs vivos ahora mismo. */
@@ -45,13 +45,13 @@ export interface JdexEditorExtensionContext {
 const JDEX_NUMBER_CLASS = 'cm-hebra-jdex-number';
 
 function idIndex(ctx: JdexEditorExtensionContext): Map<string, IdEntry> {
-  return new Map(ctx.ids().map((entry) => [entry.id, entry]));
+  return new Map(ctx.ids().map((entry) => [systemKey(entry.id, entry.system), entry]));
 }
 
 function buildDecorations(view: EditorView, ctx: JdexEditorExtensionContext): DecorationSet {
   const byId = idIndex(ctx);
   if (byId.size === 0) return Decoration.none;
-  const exists = (id: string): boolean => byId.has(id);
+  const exists = (id: string, system?: string): boolean => byId.has(systemKey(id, system));
   const builder = new RangeSetBuilder<Decoration>();
   for (const { from, to } of view.visibleRanges) {
     const text = view.state.doc.sliceString(from, to);
@@ -104,13 +104,13 @@ function jdexClickExtension(ctx: JdexEditorExtensionContext): Extension {
         return false;
       }
       const byId = idIndex(ctx);
-      const exists = (id: string): boolean => byId.has(id);
+      const exists = (id: string, system?: string): boolean => byId.has(systemKey(id, system));
       const text = editor.state.doc.toString();
       const match = findJdNumbers(text, exists).find(
         (candidate) => position >= candidate.start && position <= candidate.end
       );
       if (!match) return false;
-      const entry = byId.get(match.id);
+      const entry = byId.get(systemKey(match.id, match.system));
       if (!entry) return false;
       event.preventDefault();
       ctx.onNavigate(entry);
@@ -123,7 +123,7 @@ function jdexClickExtension(ctx: JdexEditorExtensionContext): Extension {
  *  medio escribir («21» o «21.1»). Sin punto todavía no distingue de un número
  *  cualquiera, pero como fuente de autocompletado (nunca valida por su cuenta) eso es
  *  aceptable: sin coincidencias no aparece menú. */
-const JD_NUMBER_PARTIAL = /\d{1,2}(?:\.\d{0,2})?$/;
+const JD_NUMBER_PARTIAL = /(?:[A-Z]\d{2}\.)?\d{1,2}(?:\.\d{0,2})?$/;
 /** Máximo de sugerencias por tecleo (como el buscador de «ir a un ID»). */
 const JD_COMPLETION_LIMIT = 50;
 
@@ -133,17 +133,19 @@ const JD_COMPLETION_LIMIT = 50;
  *  medido, no estilo — con `matchBefore` la fuente SÍ se invocaba y SÍ devolvía
  *  opciones (confirmado con un `console.log` dentro, en un navegador real), pero el
  *  desplegable nunca llegaba a pintarse: ni con el disparo automático al teclear ni
- *  forzado con Ctrl+Espacio. Ventana corta (10 caracteres): un número JD nunca es
- *  más largo. */
+ *  forzado con Ctrl+Espacio. Ventana corta (12 caracteres), incluido el prefijo de sistema; se comprueba
+ *  además el carácter anterior para no completar un sufijo de otro número. */
 function jdNumberCompletionTarget(
   text: string,
   pos: number
 ): { from: number; query: string } | null {
-  const from = Math.max(0, pos - 10);
+  const from = Math.max(0, pos - 12);
   const before = text.slice(from, pos);
   const match = JD_NUMBER_PARTIAL.exec(before);
   if (!match) return null;
-  return { from: pos - match[0].length, query: match[0] };
+  const start = pos - match[0].length;
+  if (start > 0 && /[\p{L}\p{N}_.]/u.test(text[start - 1])) return null;
+  return { from: start, query: match[0] };
 }
 
 function jdexIdCompletionSource(
@@ -154,9 +156,9 @@ function jdexIdCompletionSource(
     if (!target) return null;
     const options: Completion[] = ctx
       .ids()
-      .filter((entry) => entry.id.startsWith(target.query))
+      .filter((entry) => systemKey(entry.id, entry.system).startsWith(target.query))
       .slice(0, JD_COMPLETION_LIMIT) // slice-seguro: array de IDs, no texto.
-      .map((entry) => ({ label: entry.id, detail: entry.title, apply: entry.id }));
+      .map((entry) => ({ label: systemKey(entry.id, entry.system), detail: entry.title, apply: systemKey(entry.id, entry.system) }));
     if (options.length === 0) return null;
     return { from: target.from, options, filter: false };
   };

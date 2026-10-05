@@ -98,6 +98,22 @@ describe('jdexEditorExtension — autocompletado', () => {
     view.destroy();
   });
 
+  it.each(['', 'D01.', 'D02.'])('completa solo el sistema escrito (%s), sin tomar el sufijo local', (prefix) => {
+    const ids = [entry(), entry({ system: 'D01' }), entry({ system: 'D02' })];
+    const text = `Ver ${prefix}21.1`;
+    const view = editor(text, { ids: () => ids, onNavigate: vi.fn() });
+    const result = source(view)(new CompletionContext(view.state, view.state.doc.length, false)) as { from: number; options: { label: string }[] };
+    expect(result.options.map((option) => option.label)).toEqual([`${prefix}21.11`]);
+    expect(result.from).toBe(4);
+    view.destroy();
+  });
+
+  it.each(['xD01.21.1', 'abc21.1', '21.21.1', '12321.1'])('no completa un sufijo dentro de %s', (text) => {
+    const view = editor(text, { ids: () => [entry(), entry({ system: 'D01' })], onNavigate: vi.fn() });
+    expect(source(view)(new CompletionContext(view.state, view.state.doc.length, false))).toBeNull();
+    view.destroy();
+  });
+
   it('sin ninguna coincidencia, no hay menú', () => {
     const view = editor('99.9', { ids: () => [entry()], onNavigate: vi.fn() });
     const context = new CompletionContext(view.state, view.state.doc.length, false);

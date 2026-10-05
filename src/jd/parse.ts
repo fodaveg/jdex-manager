@@ -23,7 +23,7 @@ export interface ParsedPrefix {
 
 const AREA_RANGE = /^(\d)0-(\d)9$/;
 const CATEGORY = /^(\d{2})$/;
-const ID = /^(\d{2})\.(\d{1,2})(\+?)$/;
+const ID = /^(\d{2})\.(\d{2})(\+?)$/;
 const SYSTEM = /^([A-Z]\d{2})\.(.+)$/;
 
 export function parseJdNumber(input: string): JdNumber | null {
@@ -57,7 +57,7 @@ export function parseJdNumber(input: string): JdNumber | null {
 }
 
 /** Prefix at the start of a file or folder name: `10-19`, `11`, `11.11`, `11.11+` (optionally `D01.` in front), followed by a separator or the end. */
-const PREFIX = /^((?:[A-Z]\d{2}\.)?(?:\d0-\d9|\d{2}\.\d{1,2}\+?|\d{2}))(?:[\s_-]+|$)/;
+const PREFIX = /^((?:[A-Z]\d{2}\.)?(?:\d0-\d9|\d{2}\.\d{2}\+?|\d{2}))(?:[\s_-]+|$)/;
 
 export function extractJdPrefix(name: string): ParsedPrefix | null {
   const base = name.endsWith(".md") ? name.slice(0, -3) : name;
@@ -80,12 +80,12 @@ export function isReserved(n: JdNumber): boolean {
   }
 }
 
-/** Header IDs end in 0 or carry a black square in the title. */
+/** Header IDs end in 0; a square alone never turns a content ID into a header. */
 export function isHeader(name: string): boolean {
   const p = extractJdPrefix(name);
   if (!p || p.number.kind !== "id") return false;
   const n = idPart(p.number.id);
-  return (n > 0 && n % 10 === 0) || p.title.startsWith("■");
+  return !p.number.extension && n > 0 && n % 10 === 0;
 }
 
 function idPart(id: string): number {
@@ -96,11 +96,11 @@ function idPart(id: string): number {
  * Next free content ID in a category, given the IDs already in use.
  * Starts at .11, takes the highest in use plus one, and skips numbers ending in 0 (headers).
  */
-export function nextFreeId(category: string, existingIds: string[]): string | null {
+export function nextFreeId(category: string, existingIds: string[], system = ""): string | null {
   let max = 10;
   for (const raw of existingIds) {
     const n = parseJdNumber(raw);
-    if (!n || n.kind !== "id" || n.category !== category) continue;
+    if (!n || n.kind !== "id" || n.category !== category || (n.system ?? "") !== system) continue;
     max = Math.max(max, idPart(n.id));
   }
   let next = max + 1;
@@ -110,11 +110,11 @@ export function nextFreeId(category: string, existingIds: string[]): string | nu
 }
 
 /** Next free category in an area, given the categories already in use. Starts at A1. */
-export function nextFreeCategory(area: number, existingCategories: string[]): string | null {
+export function nextFreeCategory(area: number, existingCategories: string[], system = ""): string | null {
   let max = area;
   for (const raw of existingCategories) {
     const n = parseJdNumber(raw);
-    if (!n || n.kind !== "category") continue;
+    if (!n || n.kind !== "category" || (n.system ?? "") !== system) continue;
     const value = Number(n.category);
     if (value < area || value > area + 9) continue;
     max = Math.max(max, value);

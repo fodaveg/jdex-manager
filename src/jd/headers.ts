@@ -19,12 +19,13 @@ export function headerRange(headerId: string): { category: string; from: number;
 }
 
 /** The IDs of the index that fall under a header, ordered by number. Extensions (`+`) are skipped. */
-export function childrenOf(index: JdIndex, headerId: string): IdEntry[] {
+export function childrenOf(index: JdIndex, headerId: string, system = index.system ?? ""): IdEntry[] {
   const range = headerRange(headerId);
+  const ownerSystem = parseJdNumber(headerId)?.system ?? system;
   if (!range) return [];
   return index.ids
     .filter((e) => {
-      if (e.id.endsWith("+") || e.category !== range.category) return false;
+      if ((e.system ?? "") !== ownerSystem || e.id.endsWith("+") || e.category !== range.category) return false;
       const last = Number(e.id.split(".")[1]);
       return last >= range.from && last <= range.to;
     })

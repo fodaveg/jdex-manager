@@ -1,11 +1,12 @@
 import { type App, Modal, Notice, normalizePath, Setting, SuggestModal, TFile, TFolder } from "obsidian";
-import { areaCode, areaOfCategory, type CategoryEntry, categoryUsage, findId, type JdIndex, knownIds } from "../jd/index";
+import { areaCode, areaOfCategory, type CategoryEntry, categoryUsage, findId, selectCreationSystem, type JdIndex, knownIds } from "../jd/index";
 import { isReserved, jdexNoteName, nextFreeId, parseJdNumber } from "../jd/parse";
 import { renderTemplate, todayIso } from "../jd/template";
 import { type JdexManagerSettings, namePrefix } from "../settings";
 import { resolveTemplate } from "../vault/templates";
 import { patternFor } from "../jd/patterns";
 import { ensureFolder } from "../vault/create";
+import { scanVault } from "../vault/scan";
 import type { Effect } from "../jd/journal";
 
 /** Picks a category from the index, ordered by number. */
@@ -30,7 +31,7 @@ export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
 
   renderSuggestion(category: CategoryEntry, el: HTMLElement): void {
     el.createDiv({ text: category.label });
-    const usage = categoryUsage(this.index, category.number);
+    const usage = categoryUsage(this.index, category.number, category.system);
     const next = usage.next ? ` · next ${usage.next}` : " · full";
     el.createDiv({ text: `${areaCode(category.areaNumber)} · ${usage.used} of ${usage.total} used${next}`, cls: "jdex-suggestion-note" });
   }
@@ -48,21 +49,22 @@ export interface CreateIdRequest {
 }
 
 /** Why an ID typed by the user cannot be used, or null when it can. */
-export function validateNewId(index: JdIndex, category: string, raw: string): string | null {
+export function validateNewId(index: JdIndex, category: string, raw: string, system = index.system ?? ""): string | null {
   const n = parseJdNumber(raw);
   if (!n || n.kind !== "id") return "Type an ID like 21.23.";
+  if (n.system && n.system !== system) return "The prefix must match the category system.";
   if (n.extension) return "Extensions (+) are created from their parent ID.";
   if (n.category !== category) return `The ID must belong to category ${category}.`;
   if (isReserved(n)) return ".00 to .09 are reserved for managing the category.";
   if (Number(n.id.split(".")[1]) % 10 === 0) return "IDs ending in 0 are headers.";
-  const used = findId(index, n.id);
+  const used = findId(index, n.id, system);
   if (used) return `Already used by ${used.label}.`;
   return null;
 }
 
 /** Asks for number, title and whether to create the folder, then calls `onSubmit`. */
 export class CreateIdModal extends Modal {
-  private readonly index: JdIndex;
+  private index: JdIndex;
   private readonly category: CategoryEntry;
   private readonly settings: JdexManagerSettings;
   private readonly onSubmit: (request: CreateIdRequest) => Promise<void>;
@@ -86,7 +88,7 @@ export class CreateIdModal extends Modal {
     this.category = category;
     this.settings = settings;
     this.onSubmit = onSubmit;
-    this.id = nextFreeId(category.number, knownIds(index)) ?? "";
+    this.id = nextFreeId(category.number, knownIds(index, category.system)) ?? "";
     this.createFolder = settings.createFolderByDefault;
     this.createPattern = settings.createPatternByDefault;
   }
@@ -150,7 +152,7 @@ export class CreateIdModal extends Modal {
   }
 
   private currentError(): string | null {
-    const idError = validateNewId(this.index, this.category.number, this.id);
+    const idError = validateNewId(this.index, this.category.number, this.id, this.category.system);
     if (idError) return idError;
     if (jdexNoteName(this.id, this.title) === this.id) return "Give the ID a title.";
     return null;
@@ -163,7 +165,16 @@ export class CreateIdModal extends Modal {
   }
 
   private async submit(): Promise<void> {
-    if (this.currentError() !== null) return;
+    this.index = selectCreationSystem(scanVault(this.app, this.settings), this.category.system ?? namePrefix(this.settings));
+    const conflict = this.currentError();
+    if (conflict !== null) {
+      this.id = nextFreeId(this.category.number, knownIds(this.index)) ?? "";
+      const input = this.contentEl.querySelector<HTMLInputElement>(".jdex-id-input");
+      if (input) input.value = this.id;
+      this.refreshValidation();
+      this.errorEl?.setText(`${conflict} Next free: ${this.id || "none"}.`);
+      return;
+    }
     const parsed = parseJdNumber(this.id);
     if (!parsed || parsed.kind !== "id") return;
     this.settings.createFolderByDefault = this.createFolder;
@@ -185,9 +196,13 @@ export async function createId(
   request: CreateIdRequest,
   effects: Effect[] = [],
 ): Promise<TFile> {
-  const name = jdexNoteName(request.id, request.title, namePrefix(settings));
+  const system = category.system ?? namePrefix(settings);
+  index = selectCreationSystem(scanVault(app, settings), system);
+  const error = validateNewId(index, category.number, request.id, system);
+  if (error) throw new Error(error);
+  const name = jdexNoteName(request.id, request.title, system);
   const notePath = normalizePath(`${settings.jdexFolder}/${name}.md`);
-  const existing = findId(index, request.id);
+  const existing = findId(index, request.id, system);
   if (existing) throw new Error(`${request.id} is already used by ${existing.label}.`);
   if (app.vault.getAbstractFileByPath(notePath)) throw new Error(`${notePath} already exists.`);
 
@@ -203,6 +218,8 @@ export async function createId(
     date: todayIso(),
   });
 
+  const taken = findId(scanVault(app, settings), request.id, system);
+  if (taken) throw new Error(`${request.id} is already used by ${taken.label}.`);
   const note = await app.vault.create(notePath, content);
   effects.push({ kind: "created-note", path: notePath, content });
 

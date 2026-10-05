@@ -52,6 +52,9 @@ import type {
 import {
   auditSystem,
   buildIndex,
+  selectCreationSystem,
+  systemKey,
+  namePrefix,
   countProblems,
   headerEntries,
   locate,
@@ -365,13 +368,17 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentWalk = walk;
-    const currentIndex = index;
+    const currentIndex = selectCreationSystem(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
         mountCreateIdDialog(el, {
           index: currentIndex,
+          refreshIndex: async () => {
+            await rebuild();
+            if (!index) throw new Error('No se pudo actualizar el índice.');
+            return selectCreationSystem(index, namePrefix(settings));
+          },
           categories: currentIndex.categories,
           createFolderDefault: settings.createFolderByDefault,
           onSubmit: async (request) => {
@@ -379,9 +386,9 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
               const outcome = await createJdexId(
                 api.vault,
                 api.markdown,
-                currentWalk,
+                walk!,
                 settings,
-                currentIndex,
+                index!,
                 request
               );
               handle?.close();
@@ -404,7 +411,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       return;
     }
     const currentWalk = walk;
-    const currentIndex = index;
+    const currentIndex = selectCreationSystem(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
@@ -438,7 +445,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   function openCreateAreaDialog(): void {
     if (!walk || !index) return;
     const currentWalk = walk;
-    const currentIndex = index;
+    const currentIndex = selectCreationSystem(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
@@ -473,22 +480,26 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentWalk = walk;
-    const currentIndex = index;
+    const currentIndex = selectCreationSystem(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
         mountCreateHeaderDialog(el, {
           index: currentIndex,
+          refreshIndex: async () => {
+            await rebuild();
+            if (!index) throw new Error('No se pudo actualizar el índice.');
+            return selectCreationSystem(index, namePrefix(settings));
+          },
           categories: currentIndex.categories,
           onSubmit: async (request) => {
             try {
               const outcome = await createJdexHeader(
                 api.vault,
                 api.markdown,
-                currentWalk,
+                walk!,
                 settings,
-                currentIndex,
+                index!,
                 request
               );
               handle?.close();
@@ -511,13 +522,17 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('Abre la nota JDex de un ID para crearle un hijo (+).');
       return;
     }
-    const currentWalk = walk;
     const currentIndex = index;
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
         mountCreateChildDialog(el, {
           index: currentIndex,
+          refreshIndex: async () => {
+            await rebuild();
+            if (!index) throw new Error('No se pudo actualizar el índice.');
+            return index;
+          },
           parent,
           createFolderDefault: settings.createFolderByDefault,
           onSubmit: async (request) => {
@@ -525,9 +540,9 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
               const outcome = await createJdexChild(
                 api.vault,
                 api.markdown,
-                currentWalk,
+                walk!,
                 settings,
-                currentIndex,
+                index!,
                 request
               );
               handle?.close();
@@ -829,7 +844,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           },
           onCopyId: (entry) => {
             handle?.close();
-            void copyToClipboard(entry.id, 'ID copiado.');
+            void copyToClipboard(systemKey(entry.id, entry.system), 'ID copiado.');
           },
           onCopyPath: (entry) => {
             handle?.close();

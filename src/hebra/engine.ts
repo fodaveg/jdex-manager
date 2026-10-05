@@ -11,6 +11,11 @@
 export {
   // index.ts — el índice del sistema a partir de rutas de carpetas y notas.
   buildIndex,
+  selectSystem,
+  selectCreationSystem,
+  sameSystem,
+  systemKey,
+  titleForCompare,
   areaCode,
   areaOfCategory,
   knownIds,

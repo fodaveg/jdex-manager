@@ -782,3 +782,16 @@ describe('applyJdexNoteChanges: igual a una reconstrucción completa (vault en m
     expect(step.used.noteRead).toBe(1);
   });
 });
+
+describe('títulos seguros para las pseudorrutas', () => {
+  it('una barra no oculta la nota JDex como falsa subcarpeta y conserva el título visible', async () => {
+    const jdex = folder('JDex', ROOT_FOLDER_ID);
+    const rows = [noteRow('slash', jdex.id, '21.11 Uno/Dos'), noteRow('plain', jdex.id, '21.12 Normal')];
+    const library = fakeLibrary(new Map([[jdex.id, rows]]));
+    const walk = await walkJdexLibrary(library, [jdex], '', ROOT_FOLDER_ID);
+    expect(walk.systemNotes.find((n) => n.id === 'slash')).toMatchObject({ title: '21.11 Uno/Dos', path: 'JDex/21.11 Uno–Dos.md' });
+    const index = buildIndex(buildJdexIndexInput(walk, { systemRoot: '', jdexFolder: 'JDex' }));
+    expect(index.ids.map((e) => e.id)).toEqual(['21.11', '21.12']);
+    expect(jdexNotePath(walk.folderPaths, { folderId: jdex.id, title: '21.11 Uno/Dos' })).toBe('JDex/21.11 Uno–Dos.md');
+  });
+});

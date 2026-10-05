@@ -6,7 +6,7 @@
  * Deliberately NOT a finding: sub-folders more than one level deep inside an ID. Projects use them.
  */
 
-import { areaCode, areaOfCategory, type IdEntry, type JdIndex } from "./index";
+import { areaCode, areaOfCategory, sameSystem, systemKey, type IdEntry, type JdIndex } from "./index";
 import { firstSentence } from "./description";
 import { missingPatternFolders } from "./patterns";
 import { extractJdPrefix, isHeader, isReserved, jdexNoteName, parseJdNumber } from "./parse";
@@ -22,6 +22,8 @@ export type FindingKind =
   | "reserved-used-as-content"
   | "header-with-files"
   | "out-of-parent"
+  | "misplaced-number"
+  | "malformed-number"
   | "missing-description"
   | "structure-without-note"
   | "pattern-missing";
@@ -34,6 +36,8 @@ export const FINDING_KINDS: FindingKind[] = [
   "reserved-used-as-content",
   "header-with-files",
   "out-of-parent",
+  "misplaced-number",
+  "malformed-number",
   "missing-description",
   "structure-without-note",
   "pattern-missing",
@@ -225,7 +229,8 @@ export function auditSystem(input: AuditInput): Finding[] {
     const byId = new Map<string, string[]>();
     for (const r of raw) {
       if (r.id.endsWith("+")) continue; // several + children of one ID are expected
-      byId.set(r.id, [...(byId.get(r.id) ?? []), r.path]);
+      const key = systemKey(r.id, r.system);
+      byId.set(key, [...(byId.get(key) ?? []), r.path]);
     }
     for (const [id, paths] of byId) {
       if (paths.length < 2) continue;
@@ -316,11 +321,15 @@ export function auditSystem(input: AuditInput): Finding[] {
   // 8: numbers outside their parent.
   for (const m of index.misplaced) {
     findings.push({
-      kind: "out-of-parent",
+      kind: m.wrongDepth ? "misplaced-number" : "out-of-parent",
       number: m.number,
       paths: [m.path],
       message: `${m.label} está dentro de ${m.parent}, que no es su padre.`,
     });
+  }
+
+  for (const entry of index.malformed ?? []) {
+    findings.push({ kind: "malformed-number", paths: [entry.path], message: entry.message });
   }
 
   return findings;
@@ -340,7 +349,7 @@ export function expectedFrontmatter(
   if (number.kind === "area") {
     return { jd: areaCode(number.area), tipo: "area" };
   }
-  const areaLabel = (n: number): string | undefined => index.areas.find((a) => a.number === n)?.label;
+  const areaLabel = (n: number): string | undefined => index.areas.find((a) => a.number === n && sameSystem(a, number))?.label;
   if (number.kind === "category") {
     const out: Record<string, string> = { jd: number.category, tipo: "categoria" };
     const area = areaLabel(areaOfCategory(number.category));
@@ -353,7 +362,7 @@ export function expectedFrontmatter(
   };
   const area = areaLabel(areaOfCategory(number.category));
   if (area) out.area = area;
-  const category = index.categories.find((c) => c.number === number.category)?.label;
+  const category = index.categories.find((c) => c.number === number.category && sameSystem(c, number))?.label;
   if (category) out.categoria = category;
   return out;
 }

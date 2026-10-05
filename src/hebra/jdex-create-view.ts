@@ -14,6 +14,7 @@ import {
   nextFreeHeader,
   nextFreeId,
   knownIds,
+  systemKey,
   type AreaEntry,
   type CategoryEntry,
   type IdEntry,
@@ -51,6 +52,7 @@ function focusFirst(container: HTMLElement): void {
 // ---- Crear ID ---------------------------------------------------------------------
 
 export interface CreateIdDialogOptions {
+  refreshIndex?(): Promise<JdIndex>;
   index: JdIndex;
   categories: readonly CategoryEntry[];
   createFolderDefault: boolean;
@@ -61,19 +63,19 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
   const heading = document.createElement('p');
   el.append(heading);
   let category = options.categories[0];
-  let id = category ? (nextFreeId(category.number, knownIds(options.index)) ?? '') : '';
+  let id = category ? (nextFreeId(category.number, knownIds(options.index, category?.system)) ?? '') : '';
   let title = '';
   let createFolder = options.createFolderDefault;
 
   const categoryField = selectField(
     'Categoría',
-    options.categories.map((c) => ({ value: c.number, label: c.label })),
-    category?.number ?? '',
+    options.categories.map((c) => ({ value: systemKey(c.number, c.system), label: c.label })),
+    category ? systemKey(category.number, category.system) : '',
     (value) => {
-      const next = options.categories.find((c) => c.number === value);
+      const next = options.categories.find((c) => systemKey(c.number, c.system) === value);
       if (!next) return;
       category = next;
-      id = nextFreeId(category.number, knownIds(options.index)) ?? '';
+      id = nextFreeId(category.number, knownIds(options.index, category?.system)) ?? '';
       idField.input.value = id;
       refresh();
     }
@@ -105,7 +107,7 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
 
   function currentError(): string | null {
     if (!category) return 'No hay ninguna categoría en el sistema.';
-    const idError = validateNewId(options.index, category.number, id);
+    const idError = validateNewId(options.index, category.number, id, category.system);
     if (idError) return idError;
     return requireTitle(title);
   }
@@ -118,6 +120,24 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
 
   async function trySubmit(): Promise<void> {
     if (currentError() !== null || !category) return;
+    if (options.refreshIndex) {
+      submit.disabled = true;
+      try {
+        options.index = await options.refreshIndex();
+      } catch (cause) {
+        error.textContent = cause instanceof Error ? cause.message : String(cause);
+        submit.disabled = false;
+        return;
+      }
+      const conflict = currentError();
+      if (conflict) {
+        id = nextFreeId(category.number, knownIds(options.index, category.system)) ?? '';
+        idField.input.value = id;
+        refresh();
+        error.textContent = `${conflict} Siguiente libre: ${id || 'ninguno'}.`;
+        return;
+      }
+    }
     await options.onSubmit({ category, id, title, createFolder });
   }
 
@@ -335,6 +355,7 @@ export function mountCreateAreaDialog(el: HTMLElement, options: CreateAreaDialog
 // ---- Crear cabecera -------------------------------------------------------------------
 
 export interface CreateHeaderDialogOptions {
+  refreshIndex?(): Promise<JdIndex>;
   index: JdIndex;
   categories: readonly CategoryEntry[];
   onSubmit(request: CreateHeaderRequest): Promise<void>;
@@ -342,19 +363,19 @@ export interface CreateHeaderDialogOptions {
 
 export function mountCreateHeaderDialog(el: HTMLElement, options: CreateHeaderDialogOptions): void {
   let category = options.categories[0];
-  let id = category ? (nextFreeHeader(options.index, category.number) ?? '') : '';
+  let id = category ? (nextFreeHeader(options.index, category.number, category.system) ?? '') : '';
   let title = '';
   let emoji = '';
 
   const categoryField = selectField(
     'Categoría',
-    options.categories.map((c) => ({ value: c.number, label: c.label })),
-    category?.number ?? '',
+    options.categories.map((c) => ({ value: systemKey(c.number, c.system), label: c.label })),
+    category ? systemKey(category.number, category.system) : '',
     (value) => {
-      const next = options.categories.find((c) => c.number === value);
+      const next = options.categories.find((c) => systemKey(c.number, c.system) === value);
       if (!next) return;
       category = next;
-      id = nextFreeHeader(options.index, category.number) ?? '';
+      id = nextFreeHeader(options.index, category.number, category.system) ?? '';
       idField.input.value = id;
       refresh();
     }
@@ -383,7 +404,7 @@ export function mountCreateHeaderDialog(el: HTMLElement, options: CreateHeaderDi
 
   function currentError(): string | null {
     if (!category) return 'No hay ninguna categoría en el sistema.';
-    const idError = validateNewHeader(options.index, category.number, id);
+    const idError = validateNewHeader(options.index, category.number, id, category.system);
     if (idError) return idError;
     return requireTitle(title);
   }
@@ -396,6 +417,24 @@ export function mountCreateHeaderDialog(el: HTMLElement, options: CreateHeaderDi
 
   async function trySubmit(): Promise<void> {
     if (currentError() !== null || !category) return;
+    if (options.refreshIndex) {
+      submit.disabled = true;
+      try {
+        options.index = await options.refreshIndex();
+      } catch (cause) {
+        error.textContent = cause instanceof Error ? cause.message : String(cause);
+        submit.disabled = false;
+        return;
+      }
+      const conflict = currentError();
+      if (conflict) {
+        id = nextFreeHeader(options.index, category.number, category.system) ?? '';
+        idField.input.value = id;
+        refresh();
+        error.textContent = `${conflict} Siguiente libre: ${id || 'ninguno'}.`;
+        return;
+      }
+    }
     await options.onSubmit({ category, id, title, emoji });
   }
 
@@ -405,6 +444,7 @@ export function mountCreateHeaderDialog(el: HTMLElement, options: CreateHeaderDi
 // ---- Crear hijo (+) -------------------------------------------------------------------
 
 export interface CreateChildDialogOptions {
+  refreshIndex?(): Promise<JdIndex>;
   index: JdIndex;
   parent: IdEntry;
   createFolderDefault: boolean;
@@ -447,6 +487,18 @@ export function mountCreateChildDialog(el: HTMLElement, options: CreateChildDial
 
   async function trySubmit(): Promise<void> {
     if (validateNewChildTitle(options.index, options.parent, title) !== null) return;
+    if (options.refreshIndex) {
+      submit.disabled = true;
+      try {
+        options.index = await options.refreshIndex();
+      } catch (cause) {
+        error.textContent = cause instanceof Error ? cause.message : String(cause);
+        submit.disabled = false;
+        return;
+      }
+      refresh();
+      if (validateNewChildTitle(options.index, options.parent, title) !== null) return;
+    }
     await options.onSubmit({ parent: options.parent, title, createFolder });
   }
 

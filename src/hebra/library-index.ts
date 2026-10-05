@@ -21,6 +21,7 @@ import type {
 } from 'hebra-plugin-api';
 import {
   inboxFolders,
+  buildIndex,
   relativeTo,
   type AuditInput,
   type IdEntry,
@@ -33,6 +34,25 @@ import {
   readJdexFrontmatter,
   type JdexFrontmatterMarkdown
 } from './frontmatter';
+
+/** Same filename stem rules as Hebra's sanitizeNoteFileStem; never let a title
+ * introduce a pseudo-directory into the pure engine's paths. */
+export function jdexNoteFileStem(title: string): string {
+  // eslint-disable-next-line no-control-regex -- matches Hebra's filename sanitizer.
+  let cleaned = title.normalize('NFC').replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '–').replace(/[ .]+$/gu, '').trim();
+  if (!cleaned) cleaned = 'Nota sin título';
+  if (cleaned.startsWith('.')) cleaned = `_${cleaned}`;
+  // Hebra reserves 34 characters for the collision suffix and 3 for `.md`.
+  let stem = '';
+  let bytes = 0;
+  for (const point of cleaned) {
+    const size = new TextEncoder().encode(point).length;
+    if (bytes + size > 218 || stem.length + point.length > 218) break;
+    stem += point;
+    bytes += size;
+  }
+  return stem;
+}
 
 const NOTES_PAGE_SIZE = 200;
 
@@ -109,7 +129,7 @@ export interface JdexNoteRef {
 /** Notas DIRECTAS de `folderId` (nunca subcarpetas: cada carpeta se recorre una vez en
  *  `walkJdexLibrary`), con su ruta completa. Pagina hasta agotar el cursor. */
 async function directNotesOf(
-  library: JdexLibraryPort,
+  library: Pick<JdexLibraryPort, 'notesPage'>,
   folderId: string,
   folderPath: string
 ): Promise<JdexNoteRef[]> {
@@ -123,7 +143,7 @@ async function directNotesOf(
         id: item.id,
         folderId,
         title,
-        path: folderPath ? `${folderPath}/${title}.md` : `${title}.md`
+        path: folderPath ? `${folderPath}/${jdexNoteFileStem(title)}.md` : `${jdexNoteFileStem(title)}.md`
       });
     }
     cursor = page.nextCursor;
@@ -140,6 +160,21 @@ export interface JdexLibraryWalk {
   readonly systemFolderPaths: readonly string[];
   /** Notas directas de cada carpeta bajo `systemRoot`, raíz de la biblioteca incluida. */
   readonly systemNotes: readonly JdexNoteRef[];
+}
+
+/** Live number check immediately before creating: all folders and just the JDex
+ * note titles, so it does not load every body or rely on an open dialog's snapshot. */
+export async function readJdexCreationIndex(
+  library: Pick<PluginVault, 'foldersList' | 'rootFolderId' | 'notesPage'>,
+  settings: { systemRoot: string; jdexFolder: string }
+): Promise<JdIndex> {
+  const rootFolderId = library.rootFolderId();
+  const paths = jdexFolderPaths(await library.foldersList(), rootFolderId);
+  const folderId = jdexResolveFolderId({ rootFolderId, folderPaths: paths }, settings.jdexFolder);
+  if (!settings.jdexFolder || folderId === null) throw new Error('La carpeta JDex ya no existe.');
+  const notes = await directNotesOf(library, folderId, settings.jdexFolder);
+  return buildIndex({ systemRoot: settings.systemRoot, jdexFolder: settings.jdexFolder,
+    folderPaths: [...paths.values()], notePaths: notes.map((note) => note.path) });
 }
 
 /**
@@ -351,7 +386,7 @@ export async function applyJdexNoteChanges(
           id,
           folderId,
           title,
-          path: folderPath ? `${folderPath}/${title}.md` : `${title}.md`
+          path: folderPath ? `${folderPath}/${jdexNoteFileStem(title)}.md` : `${jdexNoteFileStem(title)}.md`
         };
       }
     }
@@ -462,5 +497,5 @@ export function jdexNotePath(
   const folderPath = folderPaths.get(note.folderId);
   if (folderPath === undefined) return null;
   const title = note.title.normalize('NFC');
-  return folderPath ? `${folderPath}/${title}.md` : `${title}.md`;
+  return folderPath ? `${folderPath}/${jdexNoteFileStem(title)}.md` : `${jdexNoteFileStem(title)}.md`;
 }

@@ -4,7 +4,7 @@
  */
 
 import { headerRange } from "./headers";
-import type { IdEntry, JdIndex } from "./index";
+import { sameSystem, type IdEntry, type JdIndex } from "./index";
 
 export const INDEX_START = "<!-- jdex:indice -->";
 export const INDEX_END = "<!-- /jdex:indice -->";
@@ -24,14 +24,14 @@ export function renderSystemIndex(index: JdIndex, descriptions: Map<string, stri
   const desc = (p?: string): string | undefined => (p ? descriptions.get(p) : undefined);
   for (const area of index.areas) {
     lines.push(`- ${item(area.label, area.notePath, desc(area.notePath))}`);
-    for (const category of index.categories.filter((c) => c.areaNumber === area.number)) {
+    for (const category of index.categories.filter((c) => c.areaNumber === area.number && sameSystem(c, area))) {
       lines.push(`  - ${item(category.label, category.notePath, desc(category.notePath))}`);
-      const ids = index.ids.filter((e) => e.category === category.number && !e.id.endsWith("+"));
+      const ids = index.ids.filter((e) => e.category === category.number && sameSystem(e, category) && !e.id.endsWith("+"));
       const headers = ids.filter((e) => headerRange(e.id) !== null);
       const placed = new Set<string>();
       const idLine = (e: IdEntry, indent: string): string => {
         placed.add(e.id);
-        const children = index.ids.filter((c) => c.id === `${e.id}+`);
+        const children = index.ids.filter((c) => c.id === `${e.id}+` && sameSystem(c, e));
         const out = [`${indent}- ${item(e.label, e.notePath, desc(e.notePath))}`];
         for (const c of children) out.push(`${indent}  - ${item(c.label, c.notePath, desc(c.notePath))}`);
         return out.join("\n");

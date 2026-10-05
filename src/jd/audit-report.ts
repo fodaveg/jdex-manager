@@ -12,6 +12,8 @@ export const KIND_TITLES: Record<FindingKind, string> = {
   "duplicate-id": "IDs duplicados",
   "reserved-used-as-content": "Números de gestión (.00 a .08) con contenido",
   "header-with-files": "Cabeceras con ficheros dentro",
+  "misplaced-number": "Números en un nivel incorrecto",
+  "malformed-number": "Numeración JD mal formada",
   "out-of-parent": "Números fuera de su padre",
   "missing-description": "Notas sin descripción",
   "structure-without-note": "Áreas y categorías sin nota en el JDex",

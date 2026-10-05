@@ -19,7 +19,7 @@ describe("auditSystem", () => {
     };
     const before = JSON.stringify(input);
     const out = auditSystem(input).filter((f) => f.kind === "note-without-folder");
-    expect(out.map((f) => f.number)).toEqual(["11.23"]);
+    expect(out.map((f) => f.number)).toEqual(["11.22", "11.23"]);
     expect(out[0].informative).toBe(!strict);
     expect(JSON.stringify(input)).toBe(before);
   });
@@ -102,7 +102,8 @@ describe("auditSystem", () => {
         index: buildIndex({ systemRoot: "", jdexFolder: "JDex", notePaths: [notePath], folderPaths: [`${parent}/${prefix}21.22 Y`] }),
         notes: [], filePaths: [notePath],
       }).find((f) => f.kind === "name-mismatch");
-      expect(out?.fix).toMatchObject({ type: "rename", to: `${parent}/${prefix}21.22 X` });
+      if (prefix) expect(out?.fix).toMatchObject({ type: "rename", to: `${parent}/${prefix}21.22 X` });
+      else expect(out).toBeUndefined();
     }
   });
 

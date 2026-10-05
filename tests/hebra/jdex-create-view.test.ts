@@ -182,3 +182,61 @@ describe('mountCreateChildDialog', () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ parent, title: 'Extensión' }));
   });
 });
+
+describe('confirmación contra índice vivo', () => {
+  it.each(['id', 'header'] as const)('refresca %s, rechaza el número ocupado con otro título y propone el siguiente', async (kind) => {
+    const index = fixtureIndex();
+    const occupied = kind === 'id' ? '21.21' : '21.10';
+    const next = kind === 'id' ? '21.22' : '21.30';
+    const fresh = { ...index, ids: [...index.ids, { id: occupied, category: '21', title: 'Otro título', label: `${occupied} Otro título` }] };
+    const el = document.createElement('div');
+    const onSubmit = vi.fn(async () => {});
+    const refreshIndex = vi.fn(async () => fresh);
+    const mount = kind === 'id' ? mountCreateIdDialog : mountCreateHeaderDialog;
+    mount(el, { index, categories: index.categories, createFolderDefault: false, onSubmit, refreshIndex });
+    const inputs = textInputs(el);
+    const title = inputs[kind === 'id' ? 1 : 2];
+    title.value = 'Mi título';
+    title.dispatchEvent(new Event('input'));
+    const submit = el.querySelector('button')!;
+    submit.click();
+    await vi.waitFor(() => expect(refreshIndex).toHaveBeenCalledOnce());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(inputs[0].value).toBe(next);
+    expect(el.querySelector('.hebra-jdex-dialog-error')?.textContent).toContain('Siguiente libre');
+    submit.click();
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(onSubmit.mock.calls[0]).toEqual([expect.objectContaining({ id: next })]);
+  });
+
+  it('rechaza el hijo aparecido desde abrir el diálogo, pero deja crear otro hermano', async () => {
+    const index = fixtureIndex();
+    const parent = index.ids.find((e) => e.id === '21.11')!;
+    const fresh = { ...index, ids: [...index.ids, { id: '21.11+', category: '21', title: 'Hijo #tag', label: '21.11+ Hijo #tag' }] };
+    const el = document.createElement('div');
+    const onSubmit = vi.fn(async () => {});
+    mountCreateChildDialog(el, { index, parent, createFolderDefault: false, onSubmit, refreshIndex: async () => fresh });
+    const [title] = textInputs(el);
+    title.value = 'Hijo'; title.dispatchEvent(new Event('input'));
+    el.querySelector('button')!.click();
+    await vi.waitFor(() => expect(el.textContent).toContain('Ya hay un hijo'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    title.value = 'Otro hijo'; title.dispatchEvent(new Event('input'));
+    el.querySelector('button')!.click();
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+  });
+
+  it('rechaza / en el título sin escribir y acepta un título normal', () => {
+    const index = fixtureIndex();
+    const el = document.createElement('div');
+    const onSubmit = vi.fn();
+    mountCreateIdDialog(el, { index, categories: index.categories, createFolderDefault: false, onSubmit });
+    const [, title] = textInputs(el);
+    title.value = 'Con/barra'; title.dispatchEvent(new Event('input'));
+    expect(el.querySelector('button')!.disabled).toBe(true);
+    expect(el.textContent).toContain('no puede contener /');
+    expect(onSubmit).not.toHaveBeenCalled();
+    title.value = 'Sin barra'; title.dispatchEvent(new Event('input'));
+    expect(el.querySelector('button')!.disabled).toBe(false);
+  });
+});

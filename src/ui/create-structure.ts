@@ -1,8 +1,10 @@
 import { type App, Modal, Notice, normalizePath, Setting, SuggestModal, type TFile } from "obsidian";
-import { areaCode, type AreaEntry, type CategoryEntry, findId, type IdEntry, type JdIndex } from "../jd/index";
+import { areaCode, type AreaEntry, type CategoryEntry, findId, selectCreationSystem, sameSystem, type IdEntry, type JdIndex } from "../jd/index";
 import { jdexNoteName, nextFreeCategory, parseJdNumber } from "../jd/parse";
 import { managementCategoryName, nextFreeArea, nextFreeHeader, parseNewArea, standardZeroNames, validateNewCategory } from "../jd/structure";
 import { type JdexManagerSettings, namePrefix } from "../settings";
+import { titleForCompare } from "../jd/title";
+import { scanVault } from "../vault/scan";
 import { createJdexNote, ensureFolder } from "../vault/create";
 
 export class AreaSuggestModal extends SuggestModal<AreaEntry> {
@@ -42,6 +44,8 @@ abstract class StructureModal extends Modal {
   protected abstract numberDesc(): string;
   protected abstract validate(): string | null;
   protected abstract toggleDefs(): { key: string; name: string; desc: string; initial: boolean }[];
+  protected prepareSubmit(): void {}
+
   protected abstract perform(): Promise<TFile | null>;
 
   onOpen(): void {
@@ -95,7 +99,12 @@ abstract class StructureModal extends Modal {
   }
 
   private async submit(): Promise<void> {
-    if (this.currentError()) return;
+    try { this.prepareSubmit(); } catch (error) {
+      this.refresh();
+      this.errorEl?.setText(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (this.currentError()) { this.refresh(); return; }
     this.close();
     try {
       const file = await this.perform();
@@ -109,7 +118,7 @@ abstract class StructureModal extends Modal {
 export class CreateCategoryModal extends StructureModal {
   constructor(
     app: App,
-    private readonly index: JdIndex,
+    private index: JdIndex,
     private readonly area: AreaEntry,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
@@ -166,7 +175,7 @@ export class CreateCategoryModal extends StructureModal {
 export class CreateAreaModal extends StructureModal {
   constructor(
     app: App,
-    private readonly index: JdIndex,
+    private index: JdIndex,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
   ) {
@@ -217,13 +226,22 @@ export class CreateHeaderModal extends StructureModal {
   private emoji = "";
   constructor(
     app: App,
-    private readonly index: JdIndex,
+    private index: JdIndex,
     private readonly category: CategoryEntry,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
   ) {
     super(app);
-    this.number = nextFreeHeader(index, category.number) ?? "";
+    this.number = nextFreeHeader(index, category.number, category.system) ?? "";
+  }
+  protected prepareSubmit(): void {
+    this.index = selectCreationSystem(scanVault(this.app, this.settings), this.category.system ?? namePrefix(this.settings));
+    if (findId(this.index, this.number)) {
+      this.number = nextFreeHeader(this.index, this.category.number) ?? "";
+      const input = this.contentEl.querySelector<HTMLInputElement>("input");
+      if (input) input.value = this.number;
+      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+    }
   }
   protected heading(): string {
     return `New header in ${this.category.label}`;
@@ -241,10 +259,11 @@ export class CreateHeaderModal extends StructureModal {
   protected validate(): string | null {
     const n = parseJdNumber(this.number);
     if (!n || n.kind !== "id" || n.extension) return "Type a header number like 14.20.";
+    if (n.system && n.system !== (this.category.system ?? "")) return "The prefix must match the category system.";
     if (n.category !== this.category.number) return `The header must belong to category ${this.category.number}.`;
     const last = Number(n.id.split(".")[1]);
     if (last === 0 || last % 10 !== 0) return "A header ends in 0 (X0), from .10 to .90.";
-    const used = findId(this.index, n.id);
+    const used = findId(this.index, n.id, this.category.system);
     if (used) return `Already used by ${used.label}.`;
     return null;
   }
@@ -255,7 +274,7 @@ export class CreateHeaderModal extends StructureModal {
     const n = parseJdNumber(this.number);
     const id = n && n.kind === "id" ? n.id : this.number;
     const title = `${this.emoji ? this.emoji + " " : ""}${this.title.trim()}`;
-    const name = jdexNoteName(id, `■ ${title}`, namePrefix(this.settings));
+    const name = jdexNoteName(id, `■ ${title}`, this.category.system ?? namePrefix(this.settings));
     const area = this.index.areas.find((a) => a.number === this.category.areaNumber);
     const note = await createJdexNote(this.app, this.settings, "cabecera", name, {
       id,
@@ -273,13 +292,16 @@ export class CreateHeaderModal extends StructureModal {
 export class CreateChildModal extends StructureModal {
   constructor(
     app: App,
-    private readonly index: JdIndex,
+    private index: JdIndex,
     private readonly parent: IdEntry,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
   ) {
     super(app);
     this.number = `${parent.id}+`;
+  }
+  protected prepareSubmit(): void {
+    this.index = selectCreationSystem(scanVault(this.app, this.settings), this.parent.system ?? "");
   }
   protected heading(): string {
     return `New child of ${this.parent.label}`;
@@ -289,7 +311,7 @@ export class CreateChildModal extends StructureModal {
   }
   protected validate(): string | null {
     if (this.number !== `${this.parent.id}+`) return `The number is fixed: ${this.parent.id}+.`;
-    const taken = this.index.ids.some((e) => e.id === this.number && e.title === this.title.trim());
+    const taken = this.index.ids.some((e) => e.id === this.number && sameSystem(e, this.parent) && titleForCompare(e.title) === titleForCompare(jdexNoteName("", this.title).trim()));
     if (taken) return "A child with that title exists already.";
     return null;
   }
@@ -305,7 +327,7 @@ export class CreateChildModal extends StructureModal {
   }
   protected async perform(): Promise<TFile | null> {
     const title = this.title.trim();
-    const name = jdexNoteName(this.number, title, namePrefix(this.settings));
+    const name = jdexNoteName(this.number, title, this.parent.system ?? "");
     const category = this.index.categories.find((c) => c.number === this.parent.category);
     const area = category ? this.index.areas.find((a) => a.number === category.areaNumber) : undefined;
     const parentNote = this.parent.notePath ? this.parent.notePath.slice(this.parent.notePath.lastIndexOf("/") + 1, -3) : this.parent.label;

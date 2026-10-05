@@ -31,7 +31,7 @@ function glued(text: string, at: number, dir: -1 | 1): boolean {
   return ch === "." && isWordChar(text[at + dir]);
 }
 
-export function findJdNumbers(text: string, exists: (id: string) => boolean): NumberMatch[] {
+export function findJdNumbers(text: string, exists: (id: string, system?: string) => boolean): NumberMatch[] {
   const out: NumberMatch[] = [];
   NUMBER.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -40,7 +40,7 @@ export function findJdNumbers(text: string, exists: (id: string) => boolean): Nu
     const end = start + m[0].length;
     const id = m[2];
     if (glued(text, start - 1, -1) || glued(text, end, 1)) continue;
-    if (!exists(id)) continue;
+    if (!exists(id, m[1])) continue;
     out.push(m[1] ? { start, end, id, system: m[1] } : { start, end, id });
   }
   return out;

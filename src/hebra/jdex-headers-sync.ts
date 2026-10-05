@@ -42,7 +42,7 @@ export async function refreshJdexHeaders(
   return rewriteJdexNotes(library, [...byId.keys()], (current) => {
     const header = byId.get(current.id);
     if (!header) return null;
-    return replaceChildrenBlock(current.body, renderChildren(childrenOf(index, header.id)));
+    return replaceChildrenBlock(current.body, renderChildren(childrenOf(index, header.id, header.system)));
   });
 }
 

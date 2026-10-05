@@ -7,15 +7,15 @@ import { areaCode, type JdIndex } from "./index";
 import { parseJdNumber } from "./parse";
 
 /** First area number (10, 20 …) not in use. 00-09 is the system area and is never proposed. Null when full. */
-export function nextFreeArea(index: JdIndex): number | null {
-  const used = new Set(index.areas.map((a) => a.number));
+export function nextFreeArea(index: JdIndex, system = index.system ?? ""): number | null {
+  const used = new Set(index.areas.filter((a) => (a.system ?? "") === system).map((a) => a.number));
   for (let a = 10; a <= 90; a += 10) if (!used.has(a)) return a;
   return null;
 }
 
 /** First header number (AC.10, AC.20 … AC.90) of a category with no note or folder. Null when all nine exist. */
-export function nextFreeHeader(index: JdIndex, category: string): string | null {
-  const used = new Set(index.ids.filter((e) => e.category === category).map((e) => e.id));
+export function nextFreeHeader(index: JdIndex, category: string, system = index.system ?? ""): string | null {
+  const used = new Set(index.ids.filter((e) => e.category === category && (e.system ?? "") === system).map((e) => e.id));
   for (let x = 10; x <= 90; x += 10) {
     const id = `${category}.${x}`;
     if (!used.has(id)) return id;
@@ -44,7 +44,7 @@ export function validateNewCategory(index: JdIndex, area: number, raw: string): 
   const value = Number(n.category);
   if (value < area || value > area + 9) return `The category must be inside ${areaCode(area)}.`;
   if (value === area) return `${n.category} is the management category of the area.`;
-  if (index.categories.some((c) => c.number === n.category)) return `${n.category} already exists.`;
+  if (index.categories.some((c) => c.number === n.category && (c.system ?? "") === (n.system ?? index.system ?? ""))) return `${n.category} already exists.`;
   return null;
 }
 
@@ -57,6 +57,6 @@ export function parseNewArea(index: JdIndex, raw: string): { area: number } | { 
   else if (/^\d0$/.test(s)) area = Number(s);
   if (area === null) return { error: "Type an area like 20-29." };
   if (area === 0) return { error: "00-09 is the system area." };
-  if (index.areas.some((a) => a.number === area)) return { error: `${areaCode(area)} already exists.` };
+  if (index.areas.some((a) => a.number === area && (a.system ?? "") === (n?.system ?? index.system ?? ""))) return { error: `${areaCode(area)} already exists.` };
   return { area };
 }

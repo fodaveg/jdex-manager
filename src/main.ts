@@ -5,10 +5,11 @@ import { ensureFolder } from "./vault/create";
 import { openGlobalSearch, pathQuery } from "./vault/search";
 import { describeUndo, type Effect, type Operation, type OperationKind, pushOperation } from "./jd/journal";
 import { undoOperation } from "./vault/journal";
-import { type JdexManagerSettings, type JdexNoteType, mergeSettings } from "./settings";
+import { type JdexManagerSettings, type JdexNoteType, mergeSettings, namePrefix } from "./settings";
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
 import type { IdEntry } from "./jd/index";
+import { selectCreationSystem, sameSystem, systemKey } from "./jd/index";
 import { pairAction } from "./jd/pair";
 import { extractJdPrefix, normalizeSystemId } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
@@ -19,7 +20,7 @@ import { ProcessInboxModal } from "./ui/inbox";
 import { IdEditorSuggest } from "./ui/autocomplete";
 import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
-import { categoryOfPath, isDatable, locate, zeroOf } from "./jd/files";
+import { categoryOfPath, idFolderOfPath, isDatable, locate, zeroOf } from "./jd/files";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
@@ -383,7 +384,13 @@ export default class JdexManagerPlugin extends Plugin {
     const ok = await confirm(this.app, `Undo "${op.label}"?`, [...describeUndo(op), "Nothing is deleted outright: notes and folders go to the trash."], "Undo");
     if (!ok) return;
     try {
-      const done = await undoOperation(this.app, op);
+      this.renaming = true;
+      let done: string[];
+      try {
+        done = await undoOperation(this.app, op);
+      } finally {
+        this.renaming = false;
+      }
       this.journal = this.journal.slice(0, -1);
       await this.saveSettings();
       new Notice(done.join(" · "), 10000);
@@ -527,8 +534,12 @@ export default class JdexManagerPlugin extends Plugin {
     if (this.renaming || this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
     const action = pairAction({ oldPath, newPath: file.path, isFolder: file instanceof TFolder }, index, this.settings);
-    if (action.type === "renumbered") {
-      new Notice(`${action.oldId} → ${action.newId}: an ID is never renumbered. Create a new ID and archive the old one instead.`, 10000);
+    if (action.type === "unnumbered" || action.type === "renumbered") {
+      const message = action.type === "unnumbered"
+        ? `«${action.oldId}» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.`
+        : `«${action.oldId}» ha pasado a «${action.newId}»: un ID nunca se renumera (johnnydecimal.com). Deshacer.`;
+      new Notice(message, 10000);
+      await this.record("move", message, [{ kind: "moved", from: oldPath, to: file.path }]);
       return;
     }
     if (action.type === "moved") {
@@ -573,10 +584,11 @@ export default class JdexManagerPlugin extends Plugin {
   /** Moves the file to the `.01` or `.09` of its category (00 when it lives outside the system). */
   async sendToZero(file: TFile, zero: "01" | "09"): Promise<void> {
     const index = scanVault(this.app, this.settings);
-    let category = categoryOfPath(this.settings.systemRoot, file.path);
+    const owner = idFolderOfPath(index, file.path);
+    let category = owner ? systemKey(owner.category, owner.system) : categoryOfPath(this.settings.systemRoot, file.path);
     if (category === null) {
       const pick = await new Promise<string | null>((resolve) => {
-        const modal = new CategorySuggestModal(this.app, index, (c) => resolve(c.number));
+        const modal = new CategorySuggestModal(this.app, index, (c) => resolve(systemKey(c.number, c.system)));
         modal.onClose = () => resolve(null);
         modal.open();
       });
@@ -844,7 +856,7 @@ export default class JdexManagerPlugin extends Plugin {
 
   async createCategoryFlow(): Promise<void> {
     if (!this.ready()) return;
-    const index = scanVault(this.app, this.settings);
+    const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
     if (index.areas.length === 0) {
       new Notice("No areas found. Create an area first.");
       return;
@@ -856,13 +868,13 @@ export default class JdexManagerPlugin extends Plugin {
 
   async createAreaFlow(): Promise<void> {
     if (!this.ready()) return;
-    const index = scanVault(this.app, this.settings);
+    const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
     new CreateAreaModal(this.app, index, this.settings, async () => {}).open();
   }
 
   async createHeaderFlow(): Promise<void> {
     if (!this.ready()) return;
-    const index = scanVault(this.app, this.settings);
+    const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
     if (index.categories.length === 0) {
       // eslint-disable-next-line obsidianmd/ui/sentence-case
       new Notice("No categories found. Check the system root and the JDex folder.");
@@ -873,10 +885,10 @@ export default class JdexManagerPlugin extends Plugin {
     }).open();
   }
 
-  async retireFlow(parent: { id: string }): Promise<void> {
+  async retireFlow(parent: { id: string; system?: string }): Promise<void> {
     if (!this.ready()) return;
     const index = scanVault(this.app, this.settings);
-    const entry = index.ids.find((e) => e.id === parent.id);
+    const entry = index.ids.find((e) => e.id === parent.id && sameSystem(e, parent));
     if (!entry) return;
     const lines = [
       `${entry.label} keeps its number forever: the JDex note stays, marked tipo: archivado, with a line saying when and where.`,
@@ -896,10 +908,10 @@ export default class JdexManagerPlugin extends Plugin {
     }
   }
 
-  async createChildFlow(parent: { id: string }): Promise<void> {
+  async createChildFlow(parent: { id: string; system?: string }): Promise<void> {
     if (!this.ready()) return;
     const index = scanVault(this.app, this.settings);
-    const entry = index.ids.find((e) => e.id === parent.id);
+    const entry = index.ids.find((e) => e.id === parent.id && sameSystem(e, parent));
     if (!entry) return;
     new CreateChildModal(this.app, index, entry, this.settings, async () => {}).open();
   }
@@ -922,7 +934,7 @@ export default class JdexManagerPlugin extends Plugin {
       new Notice("Set the JDex folder in the plugin settings first.");
       return;
     }
-    const index = scanVault(this.app, this.settings);
+    const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
     if (index.categories.length === 0) {
       // eslint-disable-next-line obsidianmd/ui/sentence-case
       new Notice("No categories found. Check the system root and the JDex folder.");

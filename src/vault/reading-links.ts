@@ -1,5 +1,5 @@
 import type { Plugin } from "obsidian";
-import type { JdIndex } from "../jd/index";
+import { systemKey, type JdIndex } from "../jd/index";
 import { findJdNumbers } from "../jd/reading-links";
 
 /** Ancestors whose text is never touched: real links, code, embeds, math and the properties block. */
@@ -21,8 +21,8 @@ export function registerReadingLinks(plugin: Plugin, ctx: { index: () => JdIndex
     const index = ctx.index();
     if (index.ids.length === 0) return;
     const notes = new Map<string, string>();
-    for (const entry of index.ids) if (entry.notePath) notes.set(entry.id, noteName(entry.notePath));
-    const exists = (id: string): boolean => notes.has(id);
+    for (const entry of index.ids) if (entry.notePath) notes.set(systemKey(entry.id, entry.system), noteName(entry.notePath));
+    const exists = (id: string, system?: string): boolean => notes.has(systemKey(id, system));
 
     const doc = el.ownerDocument;
     const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -41,7 +41,7 @@ export function registerReadingLinks(plugin: Plugin, ctx: { index: () => JdIndex
       let cursor = 0;
       for (const m of matches) {
         if (m.start > cursor) frag.append(text.data.slice(cursor, m.start));
-        const name = notes.get(m.id);
+        const name = notes.get(systemKey(m.id, m.system));
         if (name === undefined) continue;
         const a = doc.createElement("a");
         a.className = "internal-link jdex-number-link";

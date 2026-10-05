@@ -53,7 +53,7 @@ export interface Health {
 export function measureHealth(index: JdIndex, filePaths: string[], options: HealthOptions = DEFAULT_HEALTH_OPTIONS): Health {
   const folderFiles = filesByFolder(filePaths);
   const categories: CategoryHealth[] = index.categories.map((c) => {
-    const usage = categoryUsage(index, c.number);
+    const usage = categoryUsage(index, c.number, c.system);
     return { number: c.number, label: c.label, used: usage.used, total: usage.total, next: usage.next, files: c.path ? (folderFiles.get(c.path)?.length ?? 0) : null };
   });
   const nearlyFull = categories.filter((c) => c.used > options.nearlyFull);

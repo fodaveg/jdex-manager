@@ -7,7 +7,7 @@ import {
   type EditorSuggestTriggerInfo,
   type TFile,
 } from "obsidian";
-import type { IdEntry, JdIndex } from "../jd/index";
+import { systemKey, type IdEntry, type JdIndex } from "../jd/index";
 
 export type InsertMode = "link" | "number";
 
@@ -31,7 +31,7 @@ export class IdEditorSuggest extends EditorSuggest<IdEntry> {
   onTrigger(cursor: EditorPosition, editor: Editor, _file: TFile | null): EditorSuggestTriggerInfo | null {
     if (!this.enabled()) return null;
     const before = editor.getLine(cursor.line).slice(0, cursor.ch);
-    const m = /(?:^|[\s([])(\[\[)?(\d{2}\.\d{0,2})$/.exec(before);
+    const m = /(?:^|[\s([])(\[\[)?((?:[A-Z]\d{2}\.)?\d{2}\.\d{0,2})$/.exec(before);
     if (!m) return null;
     const matched = (m[1] ?? "") + m[2];
     return { start: { line: cursor.line, ch: cursor.ch - matched.length }, end: cursor, query: m[2] };
@@ -40,7 +40,7 @@ export class IdEditorSuggest extends EditorSuggest<IdEntry> {
   getSuggestions(context: EditorSuggestContext): IdEntry[] {
     const q = context.query;
     return this.getIndex()
-      .ids.filter((e) => e.id.startsWith(q) && !e.id.endsWith("+"))
+      .ids.filter((e) => systemKey(e.id, e.system).startsWith(q) && !e.id.endsWith("+"))
       .slice(0, 30);
   }
 
@@ -55,7 +55,7 @@ export class IdEditorSuggest extends EditorSuggest<IdEntry> {
     const numberOnly = evt.shiftKey || this.getMode() === "number" || !entry.notePath;
     const name = entry.notePath ? entry.notePath.slice(entry.notePath.lastIndexOf("/") + 1, -3) : entry.label;
     const hadBrackets = ctx.editor.getRange(ctx.start, ctx.end).startsWith("[[");
-    const text = numberOnly ? (hadBrackets ? `[[${name}]]` : entry.id) : `[[${name}]]`;
+    const text = numberOnly ? (hadBrackets ? `[[${name}]]` : systemKey(entry.id, entry.system)) : `[[${name}]]`;
     ctx.editor.replaceRange(text, ctx.start, ctx.end);
     const pos = { line: ctx.start.line, ch: ctx.start.ch + text.length };
     ctx.editor.setCursor(pos);

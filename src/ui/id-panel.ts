@@ -1,7 +1,7 @@
 import { ItemView, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { formatDate, locate } from "../jd/files";
 import { childrenOf } from "../jd/headers";
-import { childrenPlus, type IdEntry, type JdIndex } from "../jd/index";
+import { childrenPlus, sameSystem, type IdEntry, type JdIndex } from "../jd/index";
 import { openEntry } from "./go-to-id";
 
 export const ID_PANEL_VIEW = "jdex-id-panel";
@@ -70,7 +70,7 @@ export class IdPanelView extends ItemView {
       const folder = this.app.vault.getAbstractFileByPath(entry.folderPath);
       if (folder instanceof TFolder) this.section(root, "Files", this.fileRows(folder));
     }
-    const plus = childrenPlus(index, entry.id);
+    const plus = childrenPlus(index, entry.id, entry.system);
     if (plus.length > 0) this.section(root, "Children (+)", plus.map((c) => this.entryRow(c)));
     const siblings = this.siblings(index, entry);
     if (siblings.entries.length > 0) this.section(root, siblings.title, siblings.entries.map((s) => this.entryRow(s, s.id === entry.id)));
@@ -124,8 +124,8 @@ export class IdPanelView extends ItemView {
     const tens = Math.floor(last / 10) * 10;
     if (tens === 0 || entry.id.endsWith("+")) return { title: "", entries: [] };
     const headerId = `${entry.category}.${tens}`;
-    const header = index.ids.find((e) => e.id === headerId);
-    const entries = childrenOf(index, headerId);
+    const header = index.ids.find((e) => e.id === headerId && sameSystem(e, entry));
+    const entries = childrenOf(index, headerId, entry.system);
     if (entries.length <= 1 && !header) return { title: "", entries: [] };
     return { title: header ? `Under ${header.label}` : `${headerId.slice(0, -1)}1 to ${headerId.slice(0, -1)}9`, entries };
   }

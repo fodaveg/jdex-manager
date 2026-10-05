@@ -10,14 +10,14 @@
  * índice DESPUÉS del rename» — aquí, con el índice de ANTES, porque preguntamos
  * antes de escribir, no después).
  *
- * Solo dos de los cuatro resultados de `pairAction` justifican preguntar:
- * «renumbered» (el número del ID cambiaría) y «moved» (el ID cambiaría de categoría
+ * Tres resultados de `pairAction` justifican preguntar:
+ * «unnumbered» (se pierde el número), «renumbered» (el número cambia) y «moved» (el ID cambiaría de categoría
  * o área). «rename-partner» es la sincronización de la pareja nota/carpeta — otra
  * tarea, no esta — y «none» no cambia nada del sistema JDex.
  */
 import type { PluginFolderRenameEvent } from 'hebra-plugin-api';
 import { pairAction, type JdIndex, type PairAction } from './engine';
-import type { JdexLibraryWalk } from './library-index';
+import { jdexNoteFileStem, type JdexLibraryWalk } from './library-index';
 
 /**
  * Lo que mira el aviso: los eventos de carpeta que da `workspace.onBeforeFolderRename`
@@ -38,11 +38,11 @@ function parentPath(path: string): string {
   return i === -1 ? '' : path.slice(0, i);
 }
 
-/** Los dos únicos resultados de `PairAction` que justifican preguntar (ver la
+/** Los resultados de `PairAction` que justifican preguntar (ver la
  *  cabecera del fichero). */
 export type JdexRenameWarningAction = Extract<
   PairAction,
-  { type: 'renumbered' } | { type: 'moved' }
+  { type: 'renumbered' } | { type: 'moved' } | { type: 'unnumbered' }
 >;
 
 /** `null` = sin aviso, deja pasar el renombrado o el movimiento. */
@@ -78,16 +78,19 @@ export function jdexRenameWarning(
     oldPath = note.path;
     const parent = parentPath(oldPath);
     const title = event.newTitle.normalize('NFC');
-    newPath = parent ? `${parent}/${title}.md` : `${title}.md`;
+    newPath = parent ? `${parent}/${jdexNoteFileStem(title)}.md` : `${jdexNoteFileStem(title)}.md`;
   }
 
   if (oldPath === newPath) return null;
   const action = pairAction({ oldPath, newPath, isFolder }, index, settings);
-  return action.type === 'renumbered' || action.type === 'moved' ? action : null;
+  return action.type === 'renumbered' || action.type === 'moved' || action.type === 'unnumbered' ? action : null;
 }
 
 /** El texto del aviso, uno por tipo de `PairAction`, con sus datos exactos. */
 export function jdexRenameWarningMessage(action: JdexRenameWarningAction): string {
+  if (action.type === 'unnumbered') {
+    return `«${action.oldId}» perdería su número: un ID nunca se renumera (johnnydecimal.com). ¿Seguro que quieres continuar?`;
+  }
   if (action.type === 'renumbered') {
     return (
       `«${action.oldId}» pasaría a «${action.newId}»: un ID nunca se renumera ` +
@@ -108,6 +111,9 @@ export function jdexRenameWarningMessage(action: JdexRenameWarningAction): strin
  * `event.undo()` en `jdex-runtime.ts`).
  */
 export function jdexRenameNoticeMessage(action: JdexRenameWarningAction): string {
+  if (action.type === 'unnumbered') {
+    return `«${action.oldId}» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.`;
+  }
   if (action.type === 'renumbered') {
     return (
       `«${action.oldId}» ha pasado a «${action.newId}»: un ID nunca se renumera ` +

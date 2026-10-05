@@ -12,6 +12,7 @@
 import type { PluginFolder, PluginMarkdown, PluginNote, PluginVault } from 'hebra-plugin-api';
 import {
   areaCode,
+  selectCreationSystem,
   findId,
   jdexNoteName,
   managementCategoryName,
@@ -30,13 +31,13 @@ import {
   type JdexNoteType,
   type TemplateScope
 } from './engine';
-import { validateNewChildTitle, validateNewHeader, validateNewId } from './jdex-create';
-import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
+import { requireTitle, validateNewChildTitle, validateNewHeader, validateNewId } from './jdex-create';
+import { jdexResolveFolderId, readJdexCreationIndex, type JdexLibraryWalk } from './library-index';
 
 /** Lo que usa este fichero del `vault` de la API. */
 export type JdexCreateLibrary = Pick<
   PluginVault,
-  'noteCreate' | 'noteRead' | 'folderCreate' | 'foldersList'
+  'noteCreate' | 'noteRead' | 'folderCreate' | 'foldersList' | 'notesPage' | 'rootFolderId'
 >;
 
 /** Lo que usa este fichero de `api.markdown`: fijar el título en el frontmatter. */
@@ -170,12 +171,14 @@ export async function createJdexId(
   index: JdIndex,
   request: CreateIdRequest
 ): Promise<JdexCreateOutcome> {
-  const error = validateNewId(index, request.category.number, request.id);
+  const system = request.category.system ?? namePrefix(settings);
+  index = selectCreationSystem(index, system);
+  const error = requireTitle(request.title) ?? validateNewId(index, request.category.number, request.id, system);
   if (error) throw new Error(error);
   const parsed = parseJdNumber(request.id);
   if (!parsed || parsed.kind !== 'id') throw new Error('Ese ID no se pudo interpretar.');
   const jdexFolderId = requireJdexFolder(walk, settings);
-  const name = jdexNoteName(parsed.id, request.title, namePrefix(settings));
+  const name = jdexNoteName(parsed.id, request.title, system);
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
 
   const area = index.areas.find((a) => a.number === request.category.areaNumber);
@@ -192,6 +195,9 @@ export async function createJdexId(
     categoryTitle: request.category.label,
     date: todayIso()
   });
+  const freshIndex = await readJdexCreationIndex(library, settings);
+  const conflict = validateNewId(freshIndex, request.category.number, request.id, system);
+  if (conflict) throw new Error(conflict);
   const note = await writeJdexNote(library, markdown, jdexFolderId, content, name);
 
   let folderPath: string | null = null;
@@ -382,14 +388,16 @@ export async function createJdexHeader(
   index: JdIndex,
   request: CreateHeaderRequest
 ): Promise<JdexCreateOutcome> {
-  const error = validateNewHeader(index, request.category.number, request.id);
+  const system = request.category.system ?? namePrefix(settings);
+  index = selectCreationSystem(index, system);
+  const error = requireTitle(request.title) ?? validateNewHeader(index, request.category.number, request.id, system);
   if (error) throw new Error(error);
   const parsed = parseJdNumber(request.id);
   if (!parsed || parsed.kind !== 'id')
     throw new Error('Ese número de cabecera no se pudo interpretar.');
   const jdexFolderId = requireJdexFolder(walk, settings);
   const title = `${request.emoji ? `${request.emoji.trim()} ` : ''}${request.title.trim()}`;
-  const name = jdexNoteName(parsed.id, `■ ${title}`, namePrefix(settings));
+  const name = jdexNoteName(parsed.id, `■ ${title}`, system);
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
 
   const area = index.areas.find((a) => a.number === request.category.areaNumber);
@@ -406,6 +414,9 @@ export async function createJdexHeader(
     categoryTitle: request.category.label,
     date: todayIso()
   });
+  const freshIndex = await readJdexCreationIndex(library, settings);
+  const conflict = validateNewHeader(freshIndex, request.category.number, request.id, system);
+  if (conflict) throw new Error(conflict);
   const note = await writeJdexNote(library, markdown, jdexFolderId, content, name);
   return { note, folderPath: null, folderNotice: null };
 }
@@ -426,12 +437,14 @@ export async function createJdexChild(
   index: JdIndex,
   request: CreateChildRequest
 ): Promise<JdexCreateOutcome> {
+  const system = request.parent.system ?? '';
+  index = selectCreationSystem(index, system);
   const error = validateNewChildTitle(index, request.parent, request.title);
   if (error) throw new Error(error);
   const jdexFolderId = requireJdexFolder(walk, settings);
   const number = `${request.parent.id}+`;
   const title = request.title.trim();
-  const name = jdexNoteName(number, title, namePrefix(settings));
+  const name = jdexNoteName(number, title, system);
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
 
   const category = index.categories.find((c) => c.number === request.parent.category);
@@ -453,6 +466,9 @@ export async function createJdexChild(
       categoryTitle: category?.label ?? '',
       date: todayIso()
     }) + `\n## Padre\n\n- [[${parentNoteName}]]\n`;
+  const freshIndex = await readJdexCreationIndex(library, settings);
+  const conflict = validateNewChildTitle(freshIndex, request.parent, request.title);
+  if (conflict) throw new Error(conflict);
   const note = await writeJdexNote(library, markdown, jdexFolderId, content, name);
 
   let folderPath: string | null = null;
