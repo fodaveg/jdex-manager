@@ -161,6 +161,7 @@ import { createJdexDebugLog } from './jdex-debug-log';
 import { createJdexHealthReport } from './jdex-health';
 import { applyJdexRepair } from './jdex-repair';
 import { createJdexSystemReport } from './jdex-system-report';
+import { createRebuildScheduler } from './rebuild-scheduler';
 
 export const JDEX_AUDIT_VIEW_ID = 'jdex:auditoria';
 export const JDEX_ID_SECTION_VIEW_ID = 'jdex:seccion-del-id';
@@ -187,15 +188,6 @@ export const JDEX_COMMAND_UNDO = 'jdex-deshacer-ultima-operacion';
 export const JDEX_COMMAND_HEALTH = 'jdex-informe-de-salud';
 export const JDEX_COMMAND_SYSTEM_REPORT = 'jdex-informe-del-sistema';
 export const JDEX_COMMAND_WRITE_TEMPLATES = 'jdex-escribir-plantillas-integradas';
-
-/** Reconstruir el índice tras un `library-changed` no en CADA aviso (una biblioteca que
- *  sincroniza muchas notas seguidas dispararía varias reconstrucciones completas). */
-const REBUILD_DEBOUNCE_MS = 800;
-/** Tras tantos fallos seguidos de la reconstrucción, el reintento automático para. */
-const MAX_REBUILD_FAILURES = 5;
-const MAX_REBUILD_DELAY_MS = 30_000;
-/** Longest a pending notice waits while new notices keep re-arming the debounce. */
-const MAX_BATCH_WAIT_MS = 3_000;
 
 /** The first rebuild of each activation, keyed by its cleanup (tests and diagnostics). */
 const activationSettled = new WeakMap<PluginCleanup, Promise<void>>();
@@ -348,21 +340,24 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   /** Ids de las notas del recorrido actual (para descartar un aviso que no puede
    *  tocar al índice sin preguntar nada a la biblioteca). */
   let walkNoteIds: ReadonlySet<string> = new Set();
-  /** Generación de la última reconstrucción COMPLETA pedida: una que termina cuando ya
-   *  hay otra más nueva no pisa el índice (su lectura es anterior a la de la nueva). */
-  let generation = 0;
-  let latestRebuild: Promise<void> = Promise.resolve();
-  /** Reconstrucciones y puestas al día en vuelo: mientras haya alguna, un guardado no se
-   *  descarta por no estar la nota en el recorrido (puede estar a punto de entrar). */
-  let busy = 0;
-  /** Every by-id refresh applies its result in this one queue (notice batches, own writes,
-   *  live headers and maintenance): each starts from the state the previous one left, so
-   *  two refreshes finishing in reverse order cannot drop each other's notes. The queue
-   *  never waits for the journal or for a batch, so a batch can await it without a cycle. */
-  let refreshTail: Promise<void> = Promise.resolve();
   /** Notes indexed at any point since activation: the at-rest `save` shortcut never
    *  discards one of these, even if an earlier refresh left it out of `walk`. */
   const everIndexed = new Set<string>();
+  /** WHEN to rebuild or refresh (debounce, generations, retries): `./rebuild-scheduler.ts`.
+   *  HOW is `runRebuild` and `refreshNotesNow` below. */
+  const scheduler = createRebuildScheduler({
+    fullRebuild: runRebuild,
+    refreshIds: refreshNotesNow,
+    syncDerived,
+    folderPaths: () => walk?.folderPaths ?? null,
+    isIndexed: (id) => walkNoteIds.has(id) || everIndexed.has(id),
+    isOwn: (id) => debugLog.isOwn(id),
+    report,
+    derivedFailed: (error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      host.notice(`JDex no pudo mantener las cabeceras, el índice o el frontmatter: ${reason} Lo reintentará con el próximo cambio.`);
+    }
+  });
 
   /** Índice, auditoría e inbox a partir de `walk` y `auditEntries` (puro, sin
    *  biblioteca) y lo que se pinta de ellos. */
@@ -406,16 +401,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
    *  escrituras del propio módulo; un cambio de notas se pone al día por ids
    *  (`refreshNotes`). */
   function rebuild(): Promise<void> {
-    const gen = ++generation;
-    busy += 1;
-    const run = runRebuild(gen).finally(() => {
-      busy -= 1;
-    });
-    latestRebuild = run;
-    return run;
+    return scheduler.rebuild();
   }
 
-  async function runRebuild(gen: number): Promise<void> {
+  async function runRebuild(isCurrent: () => boolean): Promise<'superseded' | void> {
     const rootFolderId = api.vault.rootFolderId();
     // La raíz no es una carpeta más: el recorrido la trata aparte (`walkJdexLibrary`).
     const folders = (await api.vault.foldersList()).filter((folder) => folder.id !== rootFolderId);
@@ -443,7 +432,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const nextWalk = await walkJdexLibrary(api.vault, folders, settings.systemRoot, rootFolderId, paths, settings.jdexFolder);
     // Con el módulo apagado mientras leía, nada de escribir estado ni de pintar.
     if (disposed) return;
-    if (gen !== generation) return latestRebuild;
+    if (!isCurrent()) return 'superseded';
     const nextEntries = await loadJdexAuditEntries(
       api.vault,
       api.markdown,
@@ -453,7 +442,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     );
     if (disposed) return;
     // Superada por otra más nueva mientras leía: lo suyo es anterior, no pisa nada.
-    if (gen !== generation) return latestRebuild;
+    if (!isCurrent()) return 'superseded';
     walk = nextWalk;
     auditEntries = nextEntries;
     derive();
@@ -466,24 +455,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     return walk?.noteIdByPath?.get(path) ?? walk?.systemNotes.find((note) => note.path === path)?.id ?? null;
   }
 
-  function sameFolderPaths(left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>): boolean {
-    return left.size === right.size && [...left].every(([id, path]) => right.get(id) === path);
-  }
-
-  /** A folder notice emitted by our own write needs no second walk after that write's
-   *  rebuild. A different snapshot remains queued for the next batch. */
-  function settleFolderChanges(): void {
-    if (walk && pendingFolderPaths && sameFolderPaths(walk.folderPaths, pendingFolderPaths)) {
-      pendingFolderPaths = null;
-      pendingFull = false;
-    }
-  }
-
   /** Una escritura propia recorre la biblioteca una vez; las cabeceras modificadas
    *  después se incorporan por ids, sin otra reconstrucción completa. */
   async function afterJdexWrite(syncHeaders: boolean, vault: PluginVault = api.vault): Promise<void> {
     await rebuild();
-    settleFolderChanges();
+    scheduler.settleFolderChanges();
     if (syncHeaders && walk && index) {
       const result = await refreshJdexHeadersAndIndex(vault, walk, index, settings.systemIndexNote);
       if (result.written.length > 0) await refreshNotes(result.written);
@@ -1146,228 +1122,51 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   // ---- PERF-07: lo que cambia se pone al día por ids, no recorriendo la biblioteca --
 
-  /** Lo acumulado en el lote: una reconstrucción completa pedida, o los ids de las
-   *  notas cuyo aviso llegó (el mismo temporizador de siempre). */
-  let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingFull = false;
-  let pendingFolderPaths: ReadonlyMap<string, string> | null = null;
   /** `true` tras apagar el módulo: ningún reintento ni lote vuelve a armarse. */
   let disposed = false;
-  /** Fallos seguidos de la reconstrucción (a 0 SOLO cuando una termina bien; un aviso
-   *  no lo reinicia, o con un fallo determinista y autoguardado continuo cada aviso
-   *  rearmaría el reintento a 800 ms sin fin): el reintento se espacia y se rinde tras
-   *  `MAX_REBUILD_FAILURES`. Pasado el tope, cada aviso da UN intento (un fallo más no
-   *  arma temporizador). */
-  let failures = 0;
-  const pendingIds = new Set<string>();
-  /** Las puestas al día por ids van de una en una (cada una parte del estado que dejó la
-   *  anterior). */
-  let notesTail: Promise<void> = Promise.resolve();
-
-  /** When the oldest unprocessed notice arrived: a steady stream of notices under the
-   *  debounce still flushes every `MAX_BATCH_WAIT_MS`. */
-  let batchSince: number | null = null;
-
-  function armBatchTimer(delayMs: number = REBUILD_DEBOUNCE_MS, capped = true): void {
-    if (disposed) return;
-    if (rebuildTimer !== null) clearTimeout(rebuildTimer);
-    if (capped) {
-      batchSince ??= Date.now();
-      delayMs = Math.max(0, Math.min(delayMs, MAX_BATCH_WAIT_MS - (Date.now() - batchSince)));
-    }
-    rebuildTimer = setTimeout(() => {
-      rebuildTimer = null;
-      batchSince = null;
-      void flushBatch();
-    }, delayMs);
-  }
-
-  /** Una reconstrucción o puesta al día falló: se pide una reconstrucción completa con
-   *  retroceso exponencial (800 ms, 1,6 s, 3,2 s…, tope de 30 s) y, tras
-   *  `MAX_REBUILD_FAILURES` seguidos, se para SIN temporizador: `pendingFull` queda a la
-   *  espera y el siguiente aviso de notas o de carpetas reconstruye entero. Con el
-   *  módulo apagado no hace nada (un puerto cerrado fallaría para siempre). */
-  function retryAfterFailure(): void {
-    if (disposed) return;
-    failures += 1;
-    pendingFull = true;
-    if (failures >= MAX_REBUILD_FAILURES) return;
-    armBatchTimer(Math.min(REBUILD_DEBOUNCE_MS * 2 ** (failures - 1), MAX_REBUILD_DELAY_MS), false);
-  }
-
-  /** `syncDerived` failed (a write the host rejects, a journal it cannot save): that is not
-   *  a stale index, so no full rebuild. One notice until a batch succeeds again; the next
-   *  real change retries the derived writes. */
-  let derivedFailureNotified = false;
-  function reportDerivedFailure(error: unknown): void {
-    report(error, 'mantener-derivados');
-    if (disposed || derivedFailureNotified) return;
-    derivedFailureNotified = true;
-    const reason = error instanceof Error ? error.message : String(error);
-    host.notice(`JDex no pudo mantener las cabeceras, el índice o el frontmatter: ${reason} Lo reintentará con el próximo cambio.`);
-  }
-
-  /** Un cambio de estructura de carpetas (o de ajustes): reconstrucción completa, con
-   *  retardo para no hacer una por aviso. */
-  function scheduleRebuild(): void {
-    pendingFull = true;
-    armBatchTimer();
-  }
-
-  async function flushBatch(): Promise<void> {
-    const full = pendingFull;
-    const ids = [...pendingIds];
-    pendingFull = false;
-    pendingIds.clear();
-    if (!full && ids.length === 0) return;
-    // Only a failed rebuild or refresh asks for another full rebuild; a failed derived
-    // write is reported once (`reportDerivedFailure`). `failures` resets only when the
-    // whole batch ends well. By-id batches go one after another (`notesTail`); a full one
-    // does not wait for them (a newer rebuild must be able to overtake a slow one).
-    const batch = async (): Promise<void> => {
-      try {
-        if (full) {
-          await rebuild();
-          settleFolderChanges();
-        } else {
-          await refreshNotes(ids);
-        }
-      } catch (error) {
-        report(error, full ? 'rebuild' : 'actualizar-notas');
-        // Sin esto un fallo dejaría `walk` viejo (o `null`), o una nota cuya lectura
-        // falló fuera del índice, hasta el próximo aviso.
-        retryAfterFailure();
-        return;
-      }
-      try {
-        await syncDerived();
-      } catch (error) {
-        reportDerivedFailure(error);
-        return;
-      }
-      failures = 0;
-      derivedFailureNotified = false;
-    };
-    busy += 1;
-    try {
-      if (full) {
-        await batch();
-        return;
-      }
-      notesTail = notesTail.then(batch);
-      await notesTail;
-    } finally {
-      busy -= 1;
-    }
-  }
 
   /** Pone al día solo las notas `ids` (`applyJdexNoteChanges`); el recorrido completo
-   *  se reserva para lo que no se puede resolver por ids. Serialised in `refreshTail`. */
+   *  se reserva para lo que no se puede resolver por ids. Serialised by the scheduler. */
   function refreshNotes(ids: readonly string[]): Promise<void> {
-    busy += 1;
-    const run = refreshTail.then(() => refreshNotesNow(ids));
-    refreshTail = run.catch(() => undefined);
-    return run.finally(() => {
-      busy -= 1;
-    });
+    return scheduler.refreshNotes(ids);
   }
 
-  async function refreshNotesNow(ids: readonly string[]): Promise<void> {
-    for (;;) {
-      // Una reconstrucción en vuelo deja su estado antes; si arranca otra mientras
-      // se espera, se espera también a esa.
-      let seen: number;
-      do {
-        seen = generation;
-        await latestRebuild.catch(() => undefined);
-      } while (seen !== generation);
-      if (disposed) return;
-      if (!walk) {
-        await rebuild();
-        return;
-      }
-      const gen = generation;
-      const base = walk;
-      const update = await applyJdexNoteChanges(
-        api.vault,
-        api.markdown,
-        { walk, entries: auditEntries },
-        ids,
-        settings
-      );
-      if (disposed) return;
-      // Arrancó una reconstrucción completa mientras tanto: lee el estado de después.
-      if (gen !== generation) return;
-      // Something else replaced `walk` meanwhile: apply the same ids to the new state.
-      if (walk !== base) continue;
-      if (update.kind === 'rebuild') {
-        await rebuild();
-      } else if (update.kind === 'updated') {
-        walk = update.state.walk;
-        auditEntries = update.state.entries;
-        derive();
-      }
-      return;
+  async function refreshNotesNow(ids: readonly string[], isCurrent: () => boolean): Promise<'retry' | 'rebuild' | void> {
+    if (!walk) return 'rebuild';
+    const base = walk;
+    const update = await applyJdexNoteChanges(
+      api.vault,
+      api.markdown,
+      { walk, entries: auditEntries },
+      ids,
+      settings
+    );
+    if (disposed) return;
+    // Arrancó una reconstrucción completa mientras tanto: lee el estado de después.
+    if (!isCurrent()) return;
+    // Something else replaced `walk` meanwhile: apply the same ids to the new state.
+    if (walk !== base) return 'retry';
+    if (update.kind === 'rebuild') return 'rebuild';
+    if (update.kind === 'updated') {
+      walk = update.state.walk;
+      auditEntries = update.state.entries;
+      derive();
     }
   }
-
-  /** Razones que no cambian nada de lo que JDex indexa (título, carpeta, estado,
-   *  frontmatter de la carpeta JDex): anclar y ocultar del listado general. */
-  const IRRELEVANT_REASONS: ReadonlySet<string> = new Set(['favorite', 'hide']);
-  /** Razones que se resuelven por ids, con el efecto de cada una:
-   *   - `save`: cuerpo, título y frontmatter (la nota no cambia de carpeta ni de estado);
-   *   - `create`: alta; `purge`: baja definitiva;
-   *   - `trash`, `restore`, `archive`: baja y alta de la pertenencia (viva, sin archivo);
-   *   - `move`: carpeta nueva, dentro o fuera del sistema o de la carpeta JDex;
-   *   - `resolve`: la copia de conflicto que se descarta o se adopta;
-   *   - `sync`: lo que trae otro dispositivo (pocos ids; más de una `note_summary`
-   *     reconstruye).
-   *  El resto (`import`: importación masiva, y cualquier razón que no se conozca)
-   *  reconstruye entero, como antes de PERF-07: un recorrido completo justificado. */
-  const INCREMENTAL_REASONS: ReadonlySet<string> = new Set([
-    'save',
-    'create',
-    'purge',
-    'trash',
-    'restore',
-    'archive',
-    'move',
-    'resolve',
-    'sync'
-  ]);
 
   function onNotesChanged(event: PluginNotesChange): void {
     // After an undo settles, a change to a note it restored lifts its protection.
     journal.observe(event.ids);
     // The debug log note is written by the plugin itself: never a reason to update the index.
-    if (IRRELEVANT_REASONS.has(event.reason) || debugLog.isOwnChange(event.ids)) return;
-    if (!INCREMENTAL_REASONS.has(event.reason)) {
-      scheduleRebuild();
-      return;
-    }
-    // Un guardado de una nota que no está en el recorrido no puede cambiar el índice
-    // (guardar no la mueve ni la saca de la papelera): sin consultar nada. Solo vale
-    // con todo en reposo; con algo en vuelo la nota podría estar a punto de entrar.
-    if (
-      event.reason === 'save' &&
-      walk !== null &&
-      !pendingFull &&
-      busy === 0 &&
-      rebuildTimer === null &&
-      event.ids.every((id) => !walkNoteIds.has(id) && !pendingIds.has(id) && !everIndexed.has(id))
-    ) {
-      return;
-    }
-    for (const id of event.ids) if (!debugLog.isOwn(id)) pendingIds.add(id);
-    armBatchTimer();
+    if (debugLog.isOwnChange(event.ids)) return;
+    scheduler.notesChanged(event.reason, event.ids);
   }
 
   // Los oyentes se registran ANTES de la reconstrucción inicial: lo que llegue mientras
   // recorre (la primera ronda de sync) queda pendiente y se aplica al terminar.
   const offFolders = api.workspace.onFoldersChange((folders) => {
     const paths = jdexFolderPaths(folders.filter((folder) => folder.id !== api.vault.rootFolderId()), api.vault.rootFolderId());
-    pendingFolderPaths = paths;
-    scheduleRebuild();
+    scheduler.foldersChanged(paths);
     folderRenameGuard.foldersChanged(folders);
   });
   const offNotes = api.workspace.onNotesChange(onNotesChanged);
@@ -1377,14 +1176,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     if (disposed) return;
     settings = jdexSettingsFromStored(value);
     journal.absorb(value);
-    scheduleRebuild();
+    scheduler.scheduleRebuild();
   });
 
   // Activation does not wait for the first walk (the host abandons a slow activation): the
   // bar shows «JD: …» until it lands. A failure enters the normal retry path.
   const initialRebuild = rebuild().catch((error: unknown) => {
     report(error, 'rebuild-inicial');
-    retryAfterFailure();
+    scheduler.retryAfterFailure();
   });
 
   const offActiveNote = api.workspace.onActiveNoteChange(() => refreshPathItem());
@@ -1802,8 +1601,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     modals.closeAll();
     debugSink = null;
     offSettingsChange();
-    if (rebuildTimer !== null) clearTimeout(rebuildTimer);
-    rebuildTimer = null;
+    scheduler.dispose();
     offActiveNote();
     offFolders();
     offNotes();
