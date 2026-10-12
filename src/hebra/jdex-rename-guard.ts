@@ -17,7 +17,7 @@
  * de la carpeta se ha completado) y «none» no cambia nada del sistema JDex.
  */
 import type { PluginFolderRenameEvent } from 'hebra-plugin-api';
-import { pairAction, type JdIndex, type PairAction } from './engine';
+import { pairAction, renumberMessage, type JdIndex, type PairAction } from './engine';
 import { jdexNoteFileStem, type JdexLibraryWalk } from './library-index';
 
 /**
@@ -119,19 +119,8 @@ export function jdexPairNoticeMessage(partner: 'folder' | 'note', oldName: strin
 
 /** El texto del aviso, uno por tipo de `PairAction`, con sus datos exactos. */
 export function jdexRenameWarningMessage(action: JdexRenameWarningAction): string {
-  if (action.type === 'unnumbered') {
-    return `«${action.oldId}» perdería su número: un ID nunca se renumera (johnnydecimal.com). ¿Seguro que quieres continuar?`;
-  }
-  if (action.type === 'renumbered') {
-    return (
-      `«${action.oldId}» pasaría a «${action.newId}»: un ID nunca se renumera ` +
-      `(johnnydecimal.com). ¿Seguro que quieres continuar?`
-    );
-  }
-  return (
-    `«${action.id}» cambiaría de categoría o área, de «${action.from}» a «${action.to}». ` +
-    `¿Seguro que quieres continuar?`
-  );
+  // The wording is shared with Obsidian (`renumberMessage`, `src/jd/pair.ts`); only the question is Hebra's.
+  return `${renumberMessage(action, 'would')} ¿Seguro que quieres continuar?`;
 }
 
 /**
@@ -142,17 +131,6 @@ export function jdexRenameWarningMessage(action: JdexRenameWarningAction): strin
  * `event.undo()` en `jdex-runtime.ts`).
  */
 export function jdexRenameNoticeMessage(action: JdexRenameWarningAction): string {
-  if (action.type === 'unnumbered') {
-    return `«${action.oldId}» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.`;
-  }
-  if (action.type === 'renumbered') {
-    return (
-      `«${action.oldId}» ha pasado a «${action.newId}»: un ID nunca se renumera ` +
-      `(johnnydecimal.com). Deshacer.`
-    );
-  }
-  return (
-    `«${action.id}» ha cambiado de categoría o área, de «${action.from}» a «${action.to}». ` +
-    `Deshacer.`
-  );
+  // «Deshacer» is the last sentence, so Hebra turns it into the notice's button.
+  return `${renumberMessage(action, 'did')} Deshacer.`;
 }

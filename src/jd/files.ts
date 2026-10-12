@@ -4,7 +4,7 @@
  */
 
 import { relativeTo } from "./detect";
-import { findId, sameSystem, systemKey, type IdEntry, type JdIndex } from "./index";
+import { findId, sameSystem, selectCreationSystem, systemKey, type IdEntry, type JdIndex } from "./index";
 import { extractJdPrefix, isReserved, parseJdNumber } from "./parse";
 
 export type DateFormat = "YYYY-MM-DD" | "YYYY-MM";
@@ -79,6 +79,47 @@ export function isDatable(
   const n = parseJdNumber(entry.id);
   if (!n || n.kind !== "id" || isReserved(n)) return false;
   return true;
+}
+
+/**
+ * What a host may do when moving a file into an ID. The hosts differ on purpose: Obsidian offers
+ * to create a missing ID folder and can date the name (`dateOnMove`); Hebra does neither, since
+ * there the name is the note's title. Each host passes its own and keeps its behaviour.
+ */
+export interface MoveToIdHost {
+  createMissingFolder: boolean;
+  dateOnMove: boolean;
+}
+
+/**
+ * «Move to an ID», decided once for both hosts and executed by each: the destination folder,
+ * whether it must be created first, and whether the moved name gets a date.
+ * `no-folder`: the ID has no folder and this host cannot or may not create one.
+ */
+export type MoveToIdPlan =
+  | { type: "move"; folder: string; date: boolean }
+  | { type: "create-folder"; folder: string; date: boolean }
+  | { type: "no-folder"; reason: "host-does-not-create" | "no-category-folder" };
+
+export function planMoveToId(
+  index: JdIndex,
+  settings: { jdexFolder: string; templatesFolder: string; reportsFolder: string },
+  entry: IdEntry,
+  fileName: string,
+  host: MoveToIdHost,
+): MoveToIdPlan {
+  let folder = entry.folderPath;
+  let create = false;
+  if (!folder) {
+    if (!host.createMissingFolder) return { type: "no-folder", reason: "host-does-not-create" };
+    // The category of the ID's own system: D01, D02 and the unprefixed system stay apart.
+    const category = selectCreationSystem(index, entry.system).categories.find((c) => c.number === entry.category);
+    if (!category?.path) return { type: "no-folder", reason: "no-category-folder" };
+    folder = `${category.path}/${entry.label}`;
+    create = true;
+  }
+  const date = host.dateOnMove && isDatable(index, settings, `${folder}/${fileName}`);
+  return { type: create ? "create-folder" : "move", folder, date };
 }
 
 /** Direct children of a folder among `filePaths` (no sub-folders). */

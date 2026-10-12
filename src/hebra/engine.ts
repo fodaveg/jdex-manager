@@ -92,6 +92,7 @@ export {
   // pair.ts — qué le pasa a la pareja nota/carpeta de un ID al renombrar o mover
   // (lote 3, tarea 1: «avisar antes de renumerar o cambiar de categoría»).
   pairAction,
+  renumberMessage,
   // retire.ts — «retirar un ID» (lote 3, tarea 2): mover a la .09 de su categoría con
   // fecha y `tipo: archivado`, sin reutilizar el número (johnnydecimal.com).
   retirePlan,
@@ -134,6 +135,7 @@ export type {
   TemplateScope,
   RenameEvent,
   PairAction,
+  RenumberAction,
   RetirePlan,
   NumberMatch,
   Operation,

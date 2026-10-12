@@ -113,3 +113,26 @@ export function pairAction(
   if (newPartnerPath === entry.folderPath) return { type: "none" };
   return { type: "rename-partner", id: newId, partnerPath: entry.folderPath, newPartnerPath };
 }
+
+/** The pair actions that change an ID's number or place: both hosts warn about these. */
+export type RenumberAction = Extract<PairAction, { type: "unnumbered" } | { type: "renumbered" } | { type: "moved" }>;
+
+/** Language of a message the engine words for a host's interface. */
+export type MessageLanguage = "es" | "en";
+
+/**
+ * The single wording of the «never renumber» warning, shared by both hosts so neither drifts.
+ * `would`: asked before the change is written; `did`: told after it happened. Each host adds its
+ * own ending (a question, a clickable «Deshacer», or where to undo it).
+ */
+export function renumberMessage(action: RenumberAction, tense: "would" | "did", language: MessageLanguage = "es"): string {
+  const would = tense === "would";
+  if (language === "en") {
+    if (action.type === "unnumbered") return `${action.oldId} ${would ? "would lose" : "lost"} its number: an ID is never renumbered (johnnydecimal.com).`;
+    if (action.type === "renumbered") return `${action.oldId} ${would ? "would become" : "became"} ${action.newId}: an ID is never renumbered (johnnydecimal.com).`;
+    return `${action.id} ${would ? "would move" : "moved"} to another category or area, from ${action.from} to ${action.to}.`;
+  }
+  if (action.type === "unnumbered") return `«${action.oldId}» ${would ? "perdería" : "ha perdido"} su número: un ID nunca se renumera (johnnydecimal.com).`;
+  if (action.type === "renumbered") return `«${action.oldId}» ${would ? "pasaría" : "ha pasado"} a «${action.newId}»: un ID nunca se renumera (johnnydecimal.com).`;
+  return `«${action.id}» ${would ? "cambiaría" : "ha cambiado"} de categoría o área, de «${action.from}» a «${action.to}».`;
+}
