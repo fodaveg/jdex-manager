@@ -59,7 +59,7 @@ describe("Obsidian audit fixes", () => {
     const file = Object.assign(new TFile(), { path: "JDex/21.22 X.md" });
     const original = "---\ndescripcion: Texto existente\narea:\n---\n# 21.22 X\n";
     const state = { body: original };
-    const app = { vault: { getAbstractFileByPath: () => file,
+    const app = { vault: { getAbstractFileByPath: () => file, read: async () => state.body,
       process: async (_file: TFile, update: (current: string) => string) => (state.body = update(state.body)) } } as unknown as App;
     const effects: Effect[] = [];
     await applyFix(app, { type: "frontmatter", path: file.path, set: { jd: "21.22", tipo: "id", area: "20-29", categoria: "21" } }, effects);
@@ -223,7 +223,7 @@ describe("Obsidian audit fixes", () => {
     // After the audit: the description was written by hand and tipo changed elsewhere.
     const state = { body: '---\njd: wrong\ndescripcion: "Descripción manual posterior."\ntipo: archivado\n---\nDescripción propuesta.\n' };
     const app = {
-      vault: { getAbstractFileByPath: () => file,
+      vault: { getAbstractFileByPath: () => file, read: async () => state.body,
         process: async (_file: TFile, update: (current: string) => string) => (state.body = update(state.body)) },
     } as unknown as App;
     const before = state.body;
@@ -268,7 +268,7 @@ describe("Obsidian audit fixes", () => {
     const file = Object.assign(new TFile(), { path });
     const state = { body: '# 21.22 X\n' };
     const write = vi.fn(async (_file: TFile, update: (current: string) => string) => (state.body = update(state.body)));
-    const app = { vault: { getAbstractFileByPath: () => file, process: write } } as unknown as App;
+    const app = { vault: { getAbstractFileByPath: () => file, read: async () => state.body, process: write } } as unknown as App;
     const finding: Finding = { kind: 'missing-description', paths: [path], message: 'Descripción.',
       fix: { type: 'frontmatter', path, set: { descripcion: 'Seleccionada.' } } };
     const done = vi.fn(async () => {});

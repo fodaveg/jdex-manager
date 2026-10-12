@@ -24,7 +24,7 @@ export async function maintainSystem(app: App, settings: JdexManagerSettings, ef
     const expected = fix.expected ? Object.fromEntries(Object.entries(fix.expected).filter(([key]) => derived.has(key))) : undefined;
     // The plugin was unloaded mid-pass: no further write.
     if (stopped()) return;
-    await applyFix(app, { ...fix, set, expected }, effects);
+    await applyFix(app, { ...fix, set, expected }, effects, undefined, warn);
   }
   if (stopped()) return;
   await updateHeaders(app, index, undefined, effects, skip);

@@ -103,31 +103,48 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
  * (`patchFrontmatter`, never `processFrontMatter`, which reserialises the whole block
  * and drops the user's comments). Audited values are checked inside the writer; fields
  * edited since the audit are skipped. Only actual edits are appended to `effects`, when
- * given, as exact rewrites so the operation can be undone.
+ * given, as exact rewrites so the operation can be undone. A fix that would change nothing, or
+ * that the line writer refuses, never reaches `vault.process` (its modify event could reopen
+ * automatic maintenance). `warn`, when given (automatic maintenance), carries the warnings
+ * instead of a Notice of its own.
  */
-export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?: JdexManagerSettings): Promise<void> {
+export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?: JdexManagerSettings, warn?: (message: string) => void): Promise<void> {
   if (fix.type === "frontmatter") {
     const file = app.vault.getAbstractFileByPath(fix.path);
     if (!(file instanceof TFile)) throw new Error(`${fix.path} no es una nota.`);
-    const skipped: string[] = [];
-    let refused: string[] = [];
-    let rewrite: Effect | null = null;
-    await app.vault.process(file, (current) => {
+    const plan = (current: string) => {
       const fm = readFrontmatter(current) ?? {};
+      const skipped: string[] = [];
       const set: Record<string, string> = {};
       for (const [key, value] of Object.entries(fix.set)) {
         if (fix.expected && JSON.stringify(fm[key]) !== JSON.stringify(fix.expected[key])) skipped.push(key);
         else set[key] = value;
       }
       const patched = patchFrontmatter(current, set);
-      refused = patched.refused;
-      if (refused.length > 0 || patched.body === current) return current;
-      rewrite = { kind: "note-rewrite", path: fix.path, before: current, after: patched.body };
-      return patched.body;
-    });
+      return { skipped, refused: patched.refused, body: patched.body, changes: patched.refused.length === 0 && patched.body !== current };
+    };
+    let outcome = plan(await app.vault.read(file));
+    let rewrite: Effect | null = null;
+    if (outcome.changes) {
+      // Planned again inside the write: the note may have changed since it was read.
+      await app.vault.process(file, (current) => {
+        outcome = plan(current);
+        if (!outcome.changes) return current;
+        rewrite = { kind: "note-rewrite", path: fix.path, before: current, after: outcome.body };
+        return outcome.body;
+      });
+    }
     if (rewrite) effects?.push(rewrite);
-    if (skipped.length > 0) new Notice(`${fix.path}: se omitió ${skipped.join(", ")} porque cambió desde la auditoría.`);
-    if (refused.length > 0) new Notice(`${fix.path}: no se escribió ${refused.join(", ")} porque el frontmatter tiene una clave repetida o un formato que no se puede modificar sin riesgo.`, 10000);
+    if (outcome.skipped.length > 0) {
+      const message = `${fix.path}: se omitió ${outcome.skipped.join(", ")} porque cambió desde la auditoría.`;
+      if (warn) warn(message);
+      else new Notice(message);
+    }
+    if (outcome.refused.length > 0) {
+      const message = `${fix.path}: no se escribió ${outcome.refused.join(", ")} porque el frontmatter tiene una clave repetida o un formato que no se puede modificar sin riesgo.`;
+      if (warn) warn(message);
+      else new Notice(message, 10000);
+    }
     return;
   }
   if (fix.type === "folders") {
