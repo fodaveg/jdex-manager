@@ -96,6 +96,7 @@ import {
   mountCreateHeaderDialog,
   mountCreateIdDialog
 } from './jdex-create-view';
+import { jdexCreationIndex } from './jdex-create';
 import {
   createJdexArea,
   createJdexCategory,
@@ -435,14 +436,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentIndex = selectCreationSystem(index, namePrefix(settings));
+    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
         mountCreateIdDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
+            return jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
           },
           categories: currentIndex.categories,
           createFolderDefault: settings.createFolderByDefault,
@@ -481,7 +482,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       return;
     }
     const currentWalk = walk;
-    const currentIndex = selectCreationSystem(index, namePrefix(settings));
+    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
@@ -556,14 +557,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentIndex = selectCreationSystem(index, namePrefix(settings));
+    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
         mountCreateHeaderDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
+            return jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
           },
           categories: currentIndex.categories,
           onSubmit: async (request) => {

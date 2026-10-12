@@ -37,7 +37,7 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       systemRoot: 'R',
       templatesFolder: 'T',
       reportsFolder: 'I',
-      systemId: 'S',
+      systemId: 'D01',
       systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
       createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
       automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD'
@@ -47,11 +47,28 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       systemRoot: 'R',
       templatesFolder: 'T',
       reportsFolder: 'I',
-      systemId: 'S',
+      systemId: 'D01',
       systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
       createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
-      automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD'
+      automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD',
+      prefixNamesWithSystem: false
     });
+  });
+
+  it('persists prefixNamesWithSystem and a valid system id, normalized (27d68243)', async () => {
+    const storage = memoryStorage();
+    await persistJdexSettings(storage, { ...DEFAULT_SETTINGS, systemId: 'D01', prefixNamesWithSystem: true });
+    expect(await loadJdexSettings(storage)).toMatchObject({ systemId: 'D01', prefixNamesWithSystem: true });
+    await storage.save({ systemId: ' d02 ' });
+    expect((await loadJdexSettings(storage)).systemId).toBe('D02');
+  });
+
+  it('drops a stored system id the parser cannot read (d1), keeping the default', async () => {
+    const storage = memoryStorage();
+    await storage.save({ systemId: 'd1', prefixNamesWithSystem: true });
+    const loaded = await loadJdexSettings(storage);
+    expect(loaded.systemId).toBe('');
+    expect(loaded.prefixNamesWithSystem).toBe(true);
   });
 
   it('un valor guardado que no es un objeto (o una lectura que falla) cae a los valores por defecto', async () => {

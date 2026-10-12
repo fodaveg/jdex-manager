@@ -55,6 +55,7 @@ export {
   isHeader,
   nextFreeId,
   jdexNoteName,
+  normalizeSystemId,
   // structure.ts — números y nombres de estructura nueva (área, categoría, cabecera).
   nextFreeArea,
   nextFreeCategory,

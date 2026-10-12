@@ -89,6 +89,36 @@ describe('mountJdexSettingsPanel', () => {
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ structureNotesAreFindings: true }));
   });
 
+  it('rejects an invalid system id (d1) with a visible alert and keeps the stored value (27d68243)', () => {
+    const el = document.createElement('div');
+    let settings = { ...DEFAULT_SETTINGS, systemId: 'D01' };
+    const save = vi.fn((next: typeof settings) => { settings = next; });
+    mountJdexSettingsPanel(el, { get: () => settings, save, pickFolder: vi.fn(async () => '') });
+    const input = [...el.querySelectorAll<HTMLInputElement>('input[type="text"]')].find((i) => i.value === 'D01')!;
+    input.value = 'd1';
+    input.dispatchEvent(new Event('change'));
+    expect(save).not.toHaveBeenCalled();
+    expect(input.value).toBe('D01');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('«d1» no es un id de sistema');
+    input.value = 'd02';
+    input.dispatchEvent(new Event('change'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ systemId: 'D02' }));
+    expect(el.querySelector('[role="alert"]')?.textContent).toBe('');
+  });
+
+  it('offers the prefix checkbox and saves it (27d68243)', () => {
+    const el = document.createElement('div');
+    const save = vi.fn();
+    mountJdexSettingsPanel(el, { get: () => DEFAULT_SETTINGS, save, pickFolder: vi.fn(async () => '') });
+    const row = [...el.querySelectorAll('label')].find((label) => label.textContent?.includes('Poner el id de sistema delante'))!;
+    const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox.checked).toBe(false);
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ prefixNamesWithSystem: true }));
+  });
+
   it('lets the archive date use the monthly format from settings', () => {
     const el = document.createElement('div');
     const save = vi.fn();

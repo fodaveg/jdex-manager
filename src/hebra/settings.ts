@@ -6,7 +6,7 @@
  * empieza en los valores por defecto del motor (`DEFAULT_SETTINGS`).
  */
 import type { PluginSettingsStorage } from 'hebra-plugin-api';
-import { DEFAULT_SETTINGS, detectFolders, fillEmpty, type JdexManagerSettings } from './engine';
+import { DEFAULT_SETTINGS, detectFolders, fillEmpty, normalizeSystemId, type JdexManagerSettings } from './engine';
 
 /** Lo único que este fichero pide a `api.storage.settings`. */
 export type JdexSettingsStorage = Pick<PluginSettingsStorage, 'load' | 'save'>;
@@ -22,13 +22,17 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
     'systemRoot',
     'templatesFolder',
     'reportsFolder',
-    'systemId', 'systemIndexNote', 'subfolderPattern'
+    'systemIndexNote', 'subfolderPattern'
   ];
   for (const key of strings) {
     const value = source[key];
     if (typeof value === 'string') (out as Record<string, unknown>)[key] = value;
   }
-  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  // `D01` (a capital letter and two digits) or empty: anything else would name notes
+  // the parser cannot read back, so it is dropped instead of stored.
+  const systemId = typeof source.systemId === 'string' ? normalizeSystemId(source.systemId) : null;
+  if (systemId !== null) out.systemId = systemId;
+  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'prefixNamesWithSystem'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
   if (source.dateFormat === 'YYYY-MM-DD' || source.dateFormat === 'YYYY-MM') out.dateFormat = source.dateFormat;
   if (typeof source.inboxStaleDays === 'number' && Number.isInteger(source.inboxStaleDays) && source.inboxStaleDays >= 1) out.inboxStaleDays = source.inboxStaleDays;
   if (typeof source.healthMaxFiles === 'number' && Number.isFinite(source.healthMaxFiles) && source.healthMaxFiles >= 0) out.healthMaxFiles = source.healthMaxFiles;

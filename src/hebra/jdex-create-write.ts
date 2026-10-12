@@ -44,9 +44,10 @@ export type JdexCreateLibrary = Pick<
 /** Lo que usa este fichero de `api.markdown`: fijar el título en el frontmatter. */
 export type JdexCreateMarkdown = Pick<PluginMarkdown, 'withTitle'>;
 
-/** Lo que persiste Hebra de los ajustes (lote 1, `settings.ts`): el resto del motor se
- *  queda en su valor por defecto, `systemId`/`prefixNamesWithSystem` incluidos, así que
- *  `namePrefix` siempre da `''` hasta que un lote posterior lo active. */
+/** Lo que usa este fichero de los ajustes. `systemId` y `prefixNamesWithSystem` se
+ *  persisten (`settings.ts`), así que `namePrefix` da el sistema configurado para lo que
+ *  no hereda uno: un área nueva. Un ID, una cabecera o una categoría heredan el sistema
+ *  de su categoría o de su área. */
 type CreateSettings = Pick<
   JdexManagerSettings,
   | 'jdexFolder'
@@ -250,7 +251,9 @@ export async function createJdexCategory(
 ): Promise<JdexCreateOutcome> {
   const jdexFolderId = requireJdexFolder(walk, settings);
   const category = request.category;
-  const name = jdexNoteName(category, request.title, namePrefix(settings));
+  // A category belongs to its area's system (D01 area → D01.21), never to another one.
+  const system = request.area.system ?? namePrefix(settings);
+  const name = jdexNoteName(category, request.title, system);
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
 
   const template = await resolveJdexTemplate(library, walk, settings, 'categoria', {
@@ -284,8 +287,8 @@ export async function createJdexCategory(
           [request.createArchive, standardZeroNames(category).archive]
         ] as const) {
           if (!wanted) continue;
-          if (findId(index, zero.id)) continue; // ya existe: nunca se sobrescribe.
-          const zeroName = jdexNoteName(zero.id, zero.title, namePrefix(settings));
+          if (findId(index, zero.id, system)) continue; // ya existe: nunca se sobrescribe.
+          const zeroName = jdexNoteName(zero.id, zero.title, system);
           if (walk.systemNotes.some((n) => n.folderId === jdexFolderId && n.title === zeroName))
             continue;
           const zeroContent = renderTemplate(

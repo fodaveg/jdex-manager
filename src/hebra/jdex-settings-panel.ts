@@ -6,7 +6,7 @@
  * en cada reconstrucción del índice (`jdex-runtime.ts`, `fillEmpty`): solo rellena lo que
  * está vacío, así que un campo escrito aquí a mano nunca se pisa sola.
  */
-import { formatCategoryPatterns, parseCategoryPatterns, type JdexManagerSettings } from './engine';
+import { formatCategoryPatterns, normalizeSystemId, parseCategoryPatterns, type JdexManagerSettings } from './engine';
 
 export interface JdexSettingsPanelOptions {
   get(): JdexManagerSettings;
@@ -82,13 +82,36 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     systemIdInput.type = 'text';
     systemIdInput.value = options.get().systemId;
     systemIdInput.placeholder = 'D01, con varios sistemas en la misma biblioteca';
+    const systemIdError = document.createElement('small');
+    systemIdError.className = 'hebra-jdex-settings-error';
+    systemIdError.setAttribute('role', 'alert');
     systemIdInput.addEventListener('change', () => {
       const current = options.get();
-      if (current.systemId === systemIdInput.value) return;
-      options.save({ ...current, systemId: systemIdInput.value });
+      // Same rule as the Obsidian plugin (`normalizeSystemId`): a capital letter and two
+      // digits, or empty. Anything else is rejected and the stored value stays.
+      const normalized = normalizeSystemId(systemIdInput.value);
+      if (normalized === null) {
+        systemIdError.textContent = `«${systemIdInput.value.trim()}» no es un id de sistema: una letra y dos cifras, como D01.`;
+        systemIdInput.setAttribute('aria-invalid', 'true');
+        systemIdInput.value = current.systemId;
+        return;
+      }
+      systemIdError.textContent = '';
+      systemIdInput.removeAttribute('aria-invalid');
+      systemIdInput.value = normalized;
+      if (current.systemId === normalized) return;
+      options.save({ ...current, systemId: normalized });
     });
-    systemIdRow.append(systemIdLabel, systemIdInput);
+    systemIdRow.append(systemIdLabel, systemIdInput, systemIdError);
     container.append(systemIdRow);
+    const prefixRow = document.createElement('label');
+    prefixRow.className = 'hebra-jdex-settings-row';
+    const prefixInput = document.createElement('input');
+    prefixInput.type = 'checkbox';
+    prefixInput.checked = options.get().prefixNamesWithSystem;
+    prefixInput.addEventListener('change', () => options.save({ ...options.get(), prefixNamesWithSystem: prefixInput.checked }));
+    prefixRow.append(prefixInput, document.createTextNode('Poner el id de sistema delante de los nombres nuevos (D01.21.22 Título)'));
+    container.append(prefixRow);
 
     for (const [labelText, value, save] of [
       ['Patrón de subcarpetas', options.get().subfolderPattern, (value: string) => options.save({ ...options.get(), subfolderPattern: value })],

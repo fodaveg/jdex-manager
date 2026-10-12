@@ -10,7 +10,40 @@
  * Sin biblioteca: solo el índice ya calculado y lo que teclea el usuario. Lo que
  * escribe (plantilla, nota, carpeta) vive en `./jdex-create-write.ts`.
  */
-import { findId, isReserved, parseJdNumber, sameSystem, titleForCompare, jdexNoteName, type IdEntry, type JdIndex } from './engine';
+import { findId, isReserved, parseJdNumber, sameSystem, selectCreationSystem, selectSystem, titleForCompare, jdexNoteName, type IdEntry, type JdIndex } from './engine';
+
+/**
+ * What the Create ID / header / category dialogs offer: the configured creation system
+ * (`prefix`, with the unprefixed scaffolding it may borrow, `selectCreationSystem`) plus
+ * the areas and categories of every OTHER prefixed system in the library, each with its
+ * own identity. Without this, a library whose categories are all `D01` or `D02` offers
+ * nothing when no prefix is configured. D01, D02 and the default system never mix
+ * (decision of 5 Oct 2026): every entry keeps its `system`, and the default system only
+ * appears when it is the configured one (otherwise its scaffolding is already borrowed).
+ * The result has no `system`, so number lookups must pass the entry's own system.
+ */
+export function jdexCreationIndex(index: JdIndex, prefix: string): JdIndex {
+  const base = selectCreationSystem(index, prefix);
+  const others = new Set<string>();
+  for (const entry of [...index.areas, ...index.categories]) {
+    const system = entry.system ?? '';
+    if (system !== '' && system !== prefix) others.add(system);
+  }
+  const merged: JdIndex = { ...base, areas: [...base.areas], categories: [...base.categories], ids: [...base.ids], misplaced: [...base.misplaced],
+    rawIdFolders: [...base.rawIdFolders], rawIdNotes: [...base.rawIdNotes], malformed: [...(base.malformed ?? [])] };
+  delete merged.system;
+  for (const system of [...others].sort()) {
+    const own = selectSystem(index, system);
+    merged.areas.push(...own.areas);
+    merged.categories.push(...own.categories);
+    merged.ids.push(...own.ids);
+    merged.misplaced.push(...own.misplaced);
+    merged.rawIdFolders.push(...own.rawIdFolders);
+    merged.rawIdNotes.push(...own.rawIdNotes);
+    merged.malformed!.push(...(own.malformed ?? []));
+  }
+  return merged;
+}
 
 /** Por qué el número de ID tecleado no se puede usar, o `null` si vale (copia
  *  `CreateIdModal.currentError` del plugin, menos el título, que valida
