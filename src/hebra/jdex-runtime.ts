@@ -163,6 +163,17 @@ const REBUILD_DEBOUNCE_MS = 800;
 /** Tras tantos fallos seguidos de la reconstrucción, el reintento automático para. */
 const MAX_REBUILD_FAILURES = 5;
 const MAX_REBUILD_DELAY_MS = 30_000;
+/** Longest a pending notice waits while new notices keep re-arming the debounce. */
+const MAX_BATCH_WAIT_MS = 3_000;
+
+/** The first rebuild of each activation, keyed by its cleanup (tests and diagnostics). */
+const activationSettled = new WeakMap<PluginCleanup, Promise<void>>();
+
+/** Resolves when the activation that returned `cleanup` has finished (or failed) its first
+ *  rebuild. `activateJdex` itself does not wait for it. */
+export function jdexActivationSettled(cleanup: PluginCleanup): Promise<void> {
+  return activationSettled.get(cleanup) ?? Promise.resolve();
+}
 
 function report(error: unknown, where: string): void {
   console.error(`[jdex] ${where}`, error);
@@ -285,12 +296,21 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   /** Reconstrucciones y puestas al día en vuelo: mientras haya alguna, un guardado no se
    *  descarta por no estar la nota en el recorrido (puede estar a punto de entrar). */
   let busy = 0;
+  /** Every by-id refresh applies its result in this one queue (notice batches, own writes,
+   *  live headers and maintenance): each starts from the state the previous one left, so
+   *  two refreshes finishing in reverse order cannot drop each other's notes. The queue
+   *  never waits for the journal or for a batch, so a batch can await it without a cycle. */
+  let refreshTail: Promise<void> = Promise.resolve();
+  /** Notes indexed at any point since activation: the at-rest `save` shortcut never
+   *  discards one of these, even if an earlier refresh left it out of `walk`. */
+  const everIndexed = new Set<string>();
 
   /** Índice, auditoría e inbox a partir de `walk` y `auditEntries` (puro, sin
    *  biblioteca) y lo que se pinta de ellos. */
   function derive(): void {
     if (!walk) return;
     walkNoteIds = new Set(walk.systemNotes.map((note) => note.id));
+    for (const id of walkNoteIds) everIndexed.add(id);
     index = buildIndex(buildJdexIndexInput(walk, settings));
     const notes = jdexAuditNotes(walk, auditEntries, settings.jdexFolder);
     const auditInput = buildJdexAuditInput(index, notes, walk, {
@@ -359,7 +379,6 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     if (gen !== generation) return latestRebuild;
     walk = nextWalk;
     auditEntries = nextEntries;
-    failures = 0;
     derive();
   }
 
@@ -1033,11 +1052,20 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
    *  anterior). */
   let notesTail: Promise<void> = Promise.resolve();
 
-  function armBatchTimer(delayMs: number = REBUILD_DEBOUNCE_MS): void {
+  /** When the oldest unprocessed notice arrived: a steady stream of notices under the
+   *  debounce still flushes every `MAX_BATCH_WAIT_MS`. */
+  let batchSince: number | null = null;
+
+  function armBatchTimer(delayMs: number = REBUILD_DEBOUNCE_MS, capped = true): void {
     if (disposed) return;
     if (rebuildTimer !== null) clearTimeout(rebuildTimer);
+    if (capped) {
+      batchSince ??= Date.now();
+      delayMs = Math.max(0, Math.min(delayMs, MAX_BATCH_WAIT_MS - (Date.now() - batchSince)));
+    }
     rebuildTimer = setTimeout(() => {
       rebuildTimer = null;
+      batchSince = null;
       void flushBatch();
     }, delayMs);
   }
@@ -1052,7 +1080,19 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     failures += 1;
     pendingFull = true;
     if (failures >= MAX_REBUILD_FAILURES) return;
-    armBatchTimer(Math.min(REBUILD_DEBOUNCE_MS * 2 ** (failures - 1), MAX_REBUILD_DELAY_MS));
+    armBatchTimer(Math.min(REBUILD_DEBOUNCE_MS * 2 ** (failures - 1), MAX_REBUILD_DELAY_MS), false);
+  }
+
+  /** `syncDerived` failed (a write the host rejects, a journal it cannot save): that is not
+   *  a stale index, so no full rebuild. One notice until a batch succeeds again; the next
+   *  real change retries the derived writes. */
+  let derivedFailureNotified = false;
+  function reportDerivedFailure(error: unknown): void {
+    report(error, 'mantener-derivados');
+    if (disposed || derivedFailureNotified) return;
+    derivedFailureNotified = true;
+    const reason = error instanceof Error ? error.message : String(error);
+    host.notice(`JDex no pudo mantener las cabeceras, el índice o el frontmatter: ${reason} Lo reintentará con el próximo cambio.`);
   }
 
   /** Un cambio de estructura de carpetas (o de ajustes): reconstrucción completa, con
@@ -1067,32 +1107,61 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const ids = [...pendingIds];
     pendingFull = false;
     pendingIds.clear();
-    if (full) {
-      await rebuild().then(async () => { settleFolderChanges(); await syncDerived(); }).catch((error: unknown) => {
-        report(error, 'rebuild');
-        // Sin esto un fallo dejaría `walk` viejo (o `null`) hasta el próximo aviso de
-        // carpetas.
+    if (!full && ids.length === 0) return;
+    // Only a failed rebuild or refresh asks for another full rebuild; a failed derived
+    // write is reported once (`reportDerivedFailure`). `failures` resets only when the
+    // whole batch ends well. By-id batches go one after another (`notesTail`); a full one
+    // does not wait for them (a newer rebuild must be able to overtake a slow one).
+    const batch = async (): Promise<void> => {
+      try {
+        if (full) {
+          await rebuild();
+          settleFolderChanges();
+        } else {
+          await refreshNotes(ids);
+        }
+      } catch (error) {
+        report(error, full ? 'rebuild' : 'actualizar-notas');
+        // Sin esto un fallo dejaría `walk` viejo (o `null`), o una nota cuya lectura
+        // falló fuera del índice, hasta el próximo aviso.
         retryAfterFailure();
-      });
-      return;
+        return;
+      }
+      try {
+        await syncDerived();
+      } catch (error) {
+        reportDerivedFailure(error);
+        return;
+      }
+      failures = 0;
+      derivedFailureNotified = false;
+    };
+    busy += 1;
+    try {
+      if (full) {
+        await batch();
+        return;
+      }
+      notesTail = notesTail.then(batch);
+      await notesTail;
+    } finally {
+      busy -= 1;
     }
-    if (ids.length === 0) return;
-    notesTail = notesTail
-      .then(async () => { await refreshNotes(ids); await syncDerived(); })
-      .catch((error: unknown) => {
-        report(error, 'actualizar-notas');
-        // Los ids ya salieron de `pendingIds`: sin una reconstrucción completa una
-        // nota cuya lectura falló no entraría nunca en el índice.
-        retryAfterFailure();
-      });
-    await notesTail;
   }
 
   /** Pone al día solo las notas `ids` (`applyJdexNoteChanges`); el recorrido completo
-   *  se reserva para lo que no se puede resolver por ids. */
-  async function refreshNotes(ids: readonly string[]): Promise<void> {
+   *  se reserva para lo que no se puede resolver por ids. Serialised in `refreshTail`. */
+  function refreshNotes(ids: readonly string[]): Promise<void> {
     busy += 1;
-    try {
+    const run = refreshTail.then(() => refreshNotesNow(ids));
+    refreshTail = run.catch(() => undefined);
+    return run.finally(() => {
+      busy -= 1;
+    });
+  }
+
+  async function refreshNotesNow(ids: readonly string[]): Promise<void> {
+    for (;;) {
       // Una reconstrucción en vuelo deja su estado antes; si arranca otra mientras
       // se espera, se espera también a esa.
       let seen: number;
@@ -1106,6 +1175,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         return;
       }
       const gen = generation;
+      const base = walk;
       const update = await applyJdexNoteChanges(
         api.vault,
         api.markdown,
@@ -1116,6 +1186,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       if (disposed) return;
       // Arrancó una reconstrucción completa mientras tanto: lee el estado de después.
       if (gen !== generation) return;
+      // Something else replaced `walk` meanwhile: apply the same ids to the new state.
+      if (walk !== base) continue;
       if (update.kind === 'rebuild') {
         await rebuild();
       } else if (update.kind === 'updated') {
@@ -1123,8 +1195,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         auditEntries = update.state.entries;
         derive();
       }
-    } finally {
-      busy -= 1;
+      return;
     }
   }
 
@@ -1167,7 +1238,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       walk !== null &&
       !pendingFull &&
       busy === 0 &&
-      event.ids.every((id) => !walkNoteIds.has(id) && !pendingIds.has(id))
+      rebuildTimer === null &&
+      event.ids.every((id) => !walkNoteIds.has(id) && !pendingIds.has(id) && !everIndexed.has(id))
     ) {
       return;
     }
@@ -1184,7 +1256,12 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   });
   const offNotes = api.workspace.onNotesChange(onNotesChanged);
 
-  await rebuild().catch((error: unknown) => report(error, 'rebuild-inicial'));
+  // Activation does not wait for the first walk (the host abandons a slow activation): the
+  // bar shows «JD: …» until it lands. A failure enters the normal retry path.
+  const initialRebuild = rebuild().catch((error: unknown) => {
+    report(error, 'rebuild-inicial');
+    retryAfterFailure();
+  });
 
   const offActiveNote = api.workspace.onActiveNoteChange(() => refreshPathItem());
   const offRenameGuard = api.workspace.onBeforeFolderRename(confirmRename);
@@ -1523,7 +1600,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     })
   );
 
-  return () => {
+  const cleanup: PluginCleanup = () => {
     disposed = true;
     if (rebuildTimer !== null) clearTimeout(rebuildTimer);
     rebuildTimer = null;
@@ -1561,4 +1638,6 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     auditHandle.remove();
     inboxHandle.remove();
   };
+  activationSettled.set(cleanup, initialRebuild);
+  return cleanup;
 }

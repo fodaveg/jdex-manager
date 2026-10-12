@@ -12,8 +12,8 @@ import { activate } from '../../src/hebra/main';
 import {
   JDEX_COMMAND_GOTO_ID,
   JDEX_ID_SECTION_VIEW_ID,
-  activateJdex
 } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import { FakeJdexVault, createJdexTestApi, fakeFolder, fakeNote } from './support/fakes';
 
 const HEBRA_PATH =

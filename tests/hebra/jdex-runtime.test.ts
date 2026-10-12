@@ -26,8 +26,8 @@ import {
   JDEX_STATUS_AUDIT_ID,
   JDEX_STATUS_INBOX_ID,
   JDEX_STATUS_PATH_ID,
-  activateJdex
 } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import {
   FAKE_ROOT_FOLDER_ID as ROOT_FOLDER_ID,
   createJdexTestApi,

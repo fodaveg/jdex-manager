@@ -11,8 +11,8 @@ import {
   JDEX_COMMAND_PROCESS_INBOX,
   JDEX_ID_SECTION_VIEW_ID,
   JDEX_STATUS_INBOX_ID,
-  activateJdex
 } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import {
   FAKE_ROOT_FOLDER_ID as ROOT_FOLDER_ID,
   FakeJdexVault,
