@@ -158,6 +158,22 @@ export function mountJdexIdSectionView(
     const iso = options.isoDates();
     for (const file of data.files) list.append(fileRow(file, (id) => options.onOpenNote(id), iso));
     filesSection.append(list);
+    const order = document.createElement('p');
+    order.className = 'hebra-jdex-section-hint';
+    order.textContent = 'Las más recientes primero.';
+    filesSection.append(order);
+  }
+  const limit = data.contentsLimit ?? 200;
+  const cut = [
+    data.truncated?.notes ? `${limit} notas` : '',
+    data.truncated?.files ? `${limit} ficheros` : ''
+  ].filter((part) => part !== '');
+  if (cut.length > 0) {
+    const notice = document.createElement('p');
+    notice.className = 'hebra-jdex-section-hint hebra-jdex-section-truncated';
+    notice.setAttribute('role', 'status');
+    notice.textContent = `Se muestran solo ${cut.join(' y ')}: hay más en la carpeta.`;
+    filesSection.append(notice);
   }
   el.append(filesSection);
 
@@ -169,7 +185,14 @@ export function mountJdexIdSectionView(
 
   el.append(
     entriesSection('Hijos', data.children, 'Sin hijos.', (entry) => options.onGoto(entry), addChild),
-    entriesSection('Hermanos', data.siblings, 'Sin más IDs en esta categoría.', (entry) => options.onGoto(entry))
+    entriesSection(
+      data.siblingsTitle ? `Hermanos (${data.siblingsTitle})` : 'Hermanos',
+      data.siblings,
+      data.siblingsTitle === ''
+        ? 'Este ID no cuelga de ninguna cabecera.'
+        : 'Sin más IDs bajo esta cabecera.',
+      (entry) => options.onGoto(entry)
+    )
   );
 
   return () => el.replaceChildren();

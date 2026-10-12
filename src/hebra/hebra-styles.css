@@ -343,6 +343,12 @@
   font-size: var(--type-ui-sm);
 }
 
+.hebra-jdex-section-hint {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
+}
+
 .hebra-jdex-section-list {
   display: flex;
   flex-direction: column;

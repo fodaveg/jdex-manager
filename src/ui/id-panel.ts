@@ -47,7 +47,11 @@ export class IdPanelView extends ItemView {
     root.addClass("jdex-panel");
     const file = this.app.workspace.getActiveFile();
     const settings = this.source.settings();
-    if (!file || settings.jdexFolder === "") {
+    if (settings.jdexFolder === "") {
+      root.createEl("p", { text: "No folder is set for the index. Choose it in the plugin settings to use this panel.", cls: "jdex-panel-muted" });
+      return;
+    }
+    if (!file) {
       root.createEl("p", { text: "Open a file inside an ID.", cls: "jdex-panel-muted" });
       return;
     }

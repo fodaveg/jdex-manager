@@ -112,6 +112,26 @@ describe('fechas de los ficheros (api.env.isoDates)', () => {
     expect(el.querySelector('.hebra-jdex-section-row small')?.textContent).toBe('2026-10-03');
   });
 
+  it('avisa del recorte, titula los hermanos y declara el orden', () => {
+    const el = document.createElement('div');
+    mountJdexIdSectionView(el, {
+      ...options,
+      data: { ...data, truncated: { notes: true, files: true }, contentsLimit: 200, siblingsTitle: 'Bajo 21.10 Cabecera A' },
+      isoDates: () => true
+    });
+    expect(el.querySelector('.hebra-jdex-section-truncated')?.textContent).toBe('Se muestran solo 200 notas y 200 ficheros: hay más en la carpeta.');
+    expect([...el.querySelectorAll('h3')].map((h) => h.textContent)).toContain('Hermanos (Bajo 21.10 Cabecera A) (0)');
+    expect(el.textContent).toContain('Las más recientes primero.');
+    expect(el.textContent).toContain('Sin más IDs bajo esta cabecera.');
+  });
+
+  it('un ID sin cabecera lo dice en vez de «sin más IDs en la categoría»', () => {
+    const el = document.createElement('div');
+    mountJdexIdSectionView(el, { ...options, data: { ...data, siblingsTitle: '' }, isoDates: () => true });
+    expect(el.textContent).toContain('Este ID no cuelga de ninguna cabecera.');
+    expect(el.querySelector('.hebra-jdex-section-truncated')).toBeNull();
+  });
+
   it('con el ajuste apagado, el formato español día/mes/año', () => {
     const el = document.createElement('div');
     mountJdexIdSectionView(el, { ...options, isoDates: () => false });
