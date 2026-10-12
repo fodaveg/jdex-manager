@@ -492,7 +492,7 @@ export default class JdexManagerPlugin extends Plugin {
     try {
       // Waits for an undo in progress; leaves alone what that undo restored.
       await this.data.journal.exclusive(async () => {
-        const effects = this.journalOperation("fix", "Automatic JDex maintenance");
+        const effects = this.journalOperation("fix", "Automatic JDex maintenance", true);
         try {
           // An unload during the pass stops it before its next write.
           await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn, (path) => this.undoShield.protects(path), () => this.unloaded);
@@ -542,16 +542,16 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   /** Records an operation in the undo journal (the last 20) and persists it. */
-  async record(kind: OperationKind, label: string, effects: Effect[]): Promise<void> {
+  async record(kind: OperationKind, label: string, effects: Effect[], auto = false): Promise<void> {
     if (effects.length === 0) return;
-    const sink = this.data.journal.begin(kind, label);
+    const sink = this.data.journal.begin(kind, label, auto);
     sink.push(...effects);
     await sink.flush();
   }
 
-  /** An effects list that records each effect in the journal, and saves it, as it happens. */
-  journalOperation(kind: OperationKind, label: string): RecordingEffects {
-    return this.data.journal.begin(kind, label);
+  /** An effects list that records each effect in the journal, and saves it, as it happens. `auto`: written by the plugin on its own (own quota in the journal). */
+  journalOperation(kind: OperationKind, label: string, auto = false): RecordingEffects {
+    return this.data.journal.begin(kind, label, auto);
   }
 
   /** Shows what undoing the last operation will do, then does exactly that operation. */
@@ -676,7 +676,7 @@ export default class JdexManagerPlugin extends Plugin {
   async refreshHeaders(onlyCategory: string | undefined, announce: boolean): Promise<void> {
     if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
-    const effects = this.journalOperation("fix", onlyCategory ? `Update header lists of ${onlyCategory}` : "Update header lists");
+    const effects = this.journalOperation("fix", onlyCategory ? `Update header lists of ${onlyCategory}` : "Update header lists", !announce);
     const changed = await updateHeaders(this.app, index, onlyCategory, effects, (path) => this.undoShield.protects(path));
     await effects.flush().catch(() => undefined);
     if (announce) new Notice(`Header lists updated in ${changed} note(s).`);
@@ -969,11 +969,11 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   /** Dates `file` in place and records the rename for undo. */
-  private async datedRename(file: TFile): Promise<string | null> {
+  private async datedRename(file: TFile, auto = false): Promise<string | null> {
     const from = file.path;
     const identity = movedIdentity(file);
     const to = await dateFile(this.app, file, this.settings.dateFormat);
-    if (to) await this.record("move", `Date ${from.slice(from.lastIndexOf("/") + 1)}`, [{ kind: "moved", from, to, ...identity }]);
+    if (to) await this.record("move", `Date ${from.slice(from.lastIndexOf("/") + 1)}`, [{ kind: "moved", from, to, ...identity }], auto);
     return to;
   }
 
@@ -1038,7 +1038,7 @@ export default class JdexManagerPlugin extends Plugin {
       const index = scanVault(this.app, this.settings);
       if (isDatable(index, this.settings, file.path)) {
         try {
-          await this.datedRename(file);
+          await this.datedRename(file, true);
         } catch {
           // A clash on the dated name is not worth a notice at creation time.
         }
@@ -1113,7 +1113,7 @@ export default class JdexManagerPlugin extends Plugin {
   async refreshSystemIndex(announce: boolean): Promise<void> {
     if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
-    const effects = this.journalOperation("fix", "Update the system index");
+    const effects = this.journalOperation("fix", "Update the system index", !announce);
     const changed = await updateSystemIndex(this.app, this.settings, index, announce, effects);
     await effects.flush().catch(() => undefined);
     if (announce) new Notice(changed ? "System index updated." : "System index unchanged.");

@@ -16,7 +16,7 @@ import {
   appendOperation,
   durableEffect,
   type Effect,
-  JOURNAL_MAX,
+  trimJournal,
   JOURNAL_VERSION,
   journalOperationId,
   mergeJournals,
@@ -179,7 +179,7 @@ export class JournalStore {
     const valid = raw.filter(isOperation);
     this.unreadable = [...(Array.isArray(stored.journalUnreadable) ? (stored.journalUnreadable as unknown[]) : []), ...raw.filter((entry) => !isOperation(entry))];
     if (raw.length > valid.length) notices.push(`${raw.length - valid.length} journal entr${raw.length - valid.length === 1 ? "y is" : "ies are"} unreadable; kept in data.json and not offered for undo.`);
-    this.entries = withJournalIds(valid.filter((op) => op.effects.length > 0)).slice(-JOURNAL_MAX);
+    this.entries = trimJournal(withJournalIds(valid.filter((op) => op.effects.length > 0))).entries;
     this.removed = Array.isArray(stored.journalRemoved) ? (stored.journalRemoved as unknown[]).filter((id): id is string => typeof id === "string") : [];
     return notices;
   }
@@ -267,13 +267,13 @@ export class JournalStore {
    * Opens an operation that is recorded with its first effect and saved after each one.
    * With a journal from a newer version nothing is recorded.
    */
-  begin(kind: OperationKind, label: string): RecordingEffects {
+  begin(kind: OperationKind, label: string, auto = false): RecordingEffects {
     let op: Operation | null = null;
     const sink = new RecordingEffects();
     return sink.attach((items) => {
       if (this.future) return;
       if (!op) {
-        op = { id: newJournalId(), device: this.device, kind, label, at: new Date().toISOString(), effects: [], rev: 0 };
+        op = { id: newJournalId(), device: this.device, kind, label, at: new Date().toISOString(), effects: [], rev: 0, ...(auto ? { auto: true } : {}) };
         ({ entries: this.entries, removed: this.removed } = appendOperation({ entries: this.entries, removed: this.removed }, op));
       }
       op.effects.push(...items.map(durableEffect));

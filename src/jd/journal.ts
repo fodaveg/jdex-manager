@@ -47,9 +47,35 @@ export interface Operation<E = Effect> {
   device?: string;
   /** Bumped on every change of `effects`, so a merge keeps the newest copy of the same operation. */
   rev?: number;
+  /**
+   * Written by the plugin on its own (maintenance, live header lists, dating a new file), not by a
+   * command of the user. These have their own quota (`JOURNAL_AUTO_MAX`), so they never push the
+   * user's operations out. Undo still takes the last operation of either kind.
+   */
+  auto?: boolean;
 }
 
+/** How many operations of the user the journal keeps. */
 export const JOURNAL_MAX = 20;
+/** How many automatic operations the journal keeps, on top of `JOURNAL_MAX`. */
+export const JOURNAL_AUTO_MAX = 10;
+
+/**
+ * Keeps the last `max` operations of the user and the last `JOURNAL_AUTO_MAX` automatic ones, in
+ * their order, and returns the identities of the ones that fell off.
+ */
+export function trimJournal<E>(entries: Operation<E>[], max = JOURNAL_MAX): { entries: Operation<E>[]; evicted: string[] } {
+  let user = entries.filter((op) => !op.auto).length - max;
+  let auto = entries.filter((op) => op.auto).length - JOURNAL_AUTO_MAX;
+  if (user <= 0 && auto <= 0) return { entries, evicted: [] };
+  const kept: Operation<E>[] = [];
+  const evicted: string[] = [];
+  for (const op of entries) {
+    if (op.auto ? auto-- > 0 : user-- > 0) evicted.push(journalOperationId(op));
+    else kept.push(op);
+  }
+  return { entries: kept, evicted };
+}
 /** Version of the stored journal format. 0.3.x and 0.4.x stored no version. */
 export const JOURNAL_VERSION = 2;
 /** How many identities of removed operations a merge remembers. */
@@ -62,11 +88,11 @@ export function durableEffect(effect: Effect): Effect {
   return missingKeys.length > 0 ? { ...effect, missingKeys } : effect;
 }
 
-/** Appends `op` and keeps the last `max` operations. Empty operations are not recorded. */
+/** Appends `op` and keeps the last `max` operations of the user (and `JOURNAL_AUTO_MAX` automatic ones). Empty operations are not recorded. */
 export function pushOperation<E>(journal: Operation<E>[], op: Operation<E>, max = JOURNAL_MAX): Operation<E>[] {
   if (op.effects.length === 0) return journal;
   const next = [...journal, op];
-  return next.length > max ? next.slice(next.length - max) : next;
+  return trimJournal(next, max).entries;
 }
 
 /** A new operation or device identity. Not cryptographic: it only has to be unique per journal. */
@@ -99,7 +125,7 @@ export interface JournalState<E = Effect> {
  * - an operation present in both keeps the copy with the higher `rev` (this device's on a tie);
  * - operations without effects are dropped;
  * - the result is ordered by date (operations of the same instant keep this device's order) and
- *   keeps the last `max`.
+ *   keeps the last `max` operations of the user and the last `JOURNAL_AUTO_MAX` automatic ones.
  * Undo always targets the last operation, and refuses one made on another device, so the merged
  * order never makes a device undo past an operation it did not make.
  */
@@ -117,18 +143,20 @@ export function mergeJournals<E>(local: JournalState<E>, stored: JournalState<E>
   const entries = [...byId.values()]
     .filter((op) => Array.isArray(op.effects) && op.effects.length > 0)
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-  if (entries.length <= max) return { entries, removed };
   // What falls off the end is remembered as removed, so an older copy does not bring it back.
-  const evicted = entries.slice(0, entries.length - max).map((op) => op.id!);
-  return { entries: entries.slice(entries.length - max), removed: [...removed, ...evicted].slice(-JOURNAL_REMOVED_MAX) };
+  const trimmed = trimJournal(entries, max);
+  if (trimmed.evicted.length === 0) return { entries, removed };
+  return { entries: trimmed.entries, removed: [...removed, ...trimmed.evicted].slice(-JOURNAL_REMOVED_MAX) };
 }
 
-/** Appends `op` like `pushOperation` and returns the identities that fell off the end. */
+/**
+ * Appends `op` like `pushOperation`; what falls off (per quota, see `trimJournal`) is added to
+ * `removed`.
+ */
 export function appendOperation<E>(state: JournalState<E>, op: Operation<E>, max = JOURNAL_MAX): JournalState<E> {
-  const next = [...state.entries, op];
-  if (next.length <= max) return { entries: next, removed: state.removed };
-  const evicted = next.slice(0, next.length - max).map((entry) => journalOperationId(entry));
-  return { entries: next.slice(next.length - max), removed: [...state.removed, ...evicted].slice(-JOURNAL_REMOVED_MAX) };
+  const trimmed = trimJournal([...state.entries, op], max);
+  if (trimmed.evicted.length === 0) return { entries: trimmed.entries, removed: state.removed };
+  return { entries: trimmed.entries, removed: [...state.removed, ...trimmed.evicted].slice(-JOURNAL_REMOVED_MAX) };
 }
 
 const KNOWN_EFFECTS = new Set(["note-rewrite", "frontmatter-block", "created-note", "trashed-note", "created-folder", "moved", "frontmatter", "line"]);
