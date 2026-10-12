@@ -1,0 +1,234 @@
+{
+  "source": "Measured 2026-10-12 by running setMarkdownProperty from hebra/src/lib/notes/markdown.ts (bundled with esbuild, read-only) on each body/key/value. Regenerate the same way when the host parser changes.",
+  "cases": [
+    {
+      "name": "replace existing",
+      "body": "---\njd: \"21.22\"\ntipo: id\n---\n# 21.22 X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\njd: \"21.22\"\ntipo: \"archivado\"\n---\n# 21.22 X\n"
+    },
+    {
+      "name": "append new key",
+      "body": "---\njd: \"21.22\"\n---\n# X\n",
+      "key": "archivado",
+      "value": "2026-10-12",
+      "result": "---\njd: \"21.22\"\narchivado: \"2026-10-12\"\n---\n# X\n"
+    },
+    {
+      "name": "no frontmatter",
+      "body": "# 21.22 X\n\nCuerpo\n",
+      "key": "tipo",
+      "value": "id",
+      "result": "---\ntipo: \"id\"\n---\n\n# 21.22 X\n\nCuerpo\n"
+    },
+    {
+      "name": "no frontmatter leading blank lines",
+      "body": "\n\n# X\n",
+      "key": "tipo",
+      "value": "id",
+      "result": "---\ntipo: \"id\"\n---\n\n# X\n"
+    },
+    {
+      "name": "empty body",
+      "body": "",
+      "key": "tipo",
+      "value": "id",
+      "result": "---\ntipo: \"id\"\n---\n\n"
+    },
+    {
+      "name": "null leaves key empty",
+      "body": "---\ntipo: id\narea: A\n---\n# X\n",
+      "key": "tipo",
+      "value": null,
+      "result": "---\ntipo: \narea: A\n---\n# X\n"
+    },
+    {
+      "name": "null on missing key adds empty key",
+      "body": "---\narea: A\n---\n# X\n",
+      "key": "tipo",
+      "value": null,
+      "result": "---\narea: A\ntipo:\n---\n# X\n"
+    },
+    {
+      "name": "duplicate key is a no-op",
+      "body": "---\ntipo: id\ntipo: otro\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo: id\ntipo: otro\n---\n# X\n"
+    },
+    {
+      "name": "duplicate key with different case is a no-op",
+      "body": "---\nTipo: id\ntipo: otro\n---\n# X\n",
+      "key": "area",
+      "value": "B",
+      "result": "---\nTipo: id\ntipo: otro\n---\n# X\n"
+    },
+    {
+      "name": "flow map continuation is a no-op",
+      "body": "---\nmeta: {a: 1,\n b: 2}\ntipo: id\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\nmeta: {a: 1,\n b: 2}\ntipo: \"archivado\"\n---\n# X\n"
+    },
+    {
+      "name": "flow map on one line is patchable",
+      "body": "---\nmeta: {a: 1, b: 2}\ntipo: id\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\nmeta: {a: 1, b: 2}\ntipo: \"archivado\"\n---\n# X\n"
+    },
+    {
+      "name": "capitalized key keeps its spelling",
+      "body": "---\nTipo: id\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\nTipo: \"archivado\"\n---\n# X\n"
+    },
+    {
+      "name": "inline comment preserved",
+      "body": "---\ntipo: id # mi comentario\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo: \"archivado\" # mi comentario\n---\n# X\n"
+    },
+    {
+      "name": "comment line after field preserved",
+      "body": "---\ntipo: id\n# nota suelta\narea: A\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo: \"archivado\"\n# nota suelta\narea: A\n---\n# X\n"
+    },
+    {
+      "name": "CRLF replace",
+      "body": "---\r\ntipo: id\r\narea: A\r\n---\r\n# X\r\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\r\ntipo: \"archivado\"\r\narea: A\r\n---\r\n# X\r\n"
+    },
+    {
+      "name": "CRLF append",
+      "body": "---\r\ntipo: id\r\n---\r\n# X\r\n",
+      "key": "archivado",
+      "value": "2026-10-12",
+      "result": "---\r\ntipo: id\r\narchivado: \"2026-10-12\"\r\n---\r\n# X\r\n"
+    },
+    {
+      "name": "block list replaced",
+      "body": "---\ntags:\n  - a\n  - b\ntipo: id\n---\n# X\n",
+      "key": "tags",
+      "value": [
+        "c"
+      ],
+      "result": "---\ntags: [\"c\"]\ntipo: id\n---\n# X\n"
+    },
+    {
+      "name": "block list dash at column 0",
+      "body": "---\ntags:\n- a\n- b\ntipo: id\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntags:\n- a\n- b\ntipo: \"archivado\"\n---\n# X\n"
+    },
+    {
+      "name": "array value",
+      "body": "---\ntipo: id\n---\n# X\n",
+      "key": "aliases",
+      "value": [
+        "a",
+        "b"
+      ],
+      "result": "---\ntipo: id\naliases: [\"a\",\"b\"]\n---\n# X\n"
+    },
+    {
+      "name": "string with quotes and backslash",
+      "body": "---\ntipo: id\n---\n# X\n",
+      "key": "area",
+      "value": "21 Software \"propio\" C:\\x",
+      "result": "---\ntipo: id\narea: \"21 Software \\\"propio\\\" C:\\\\x\"\n---\n# X\n"
+    },
+    {
+      "name": "unrecognized root line is a no-op",
+      "body": "---\ntipo: id\n:rota\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo: id\n:rota\n---\n# X\n"
+    },
+    {
+      "name": "no root separation is a no-op",
+      "body": "---\ntipo:id\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo:id\n---\n# X\n"
+    },
+    {
+      "name": "opening delimiter without closing is a no-op",
+      "body": "---\ntipo: id\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo: id\n# X\n"
+    },
+    {
+      "name": "closing with dots",
+      "body": "---\ntipo: id\n...\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo: \"archivado\"\n...\n# X\n"
+    },
+    {
+      "name": "BOM frontmatter",
+      "body": "﻿---\ntipo: id\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "﻿---\ntipo: \"archivado\"\n---\n# X\n"
+    },
+    {
+      "name": "quoted key matched",
+      "body": "---\n\"tipo\": id\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\n\"tipo\": \"archivado\"\n---\n# X\n"
+    },
+    {
+      "name": "key needing quotes is quoted",
+      "body": "---\ntipo: id\n---\n# X\n",
+      "key": "1clave",
+      "value": "v",
+      "result": "---\ntipo: id\n\"1clave\": \"v\"\n---\n# X\n"
+    },
+    {
+      "name": "empty value field replaced",
+      "body": "---\ntipo:\narea: A\n---\n# X\n",
+      "key": "tipo",
+      "value": "id",
+      "result": "---\ntipo: \"id\"\narea: A\n---\n# X\n"
+    },
+    {
+      "name": "tab continuation is a no-op",
+      "body": "---\ntipo: id\n\tsigue\n---\n# X\n",
+      "key": "tipo",
+      "value": "archivado",
+      "result": "---\ntipo: id\n\tsigue\n---\n# X\n"
+    },
+    {
+      "name": "empty frontmatter gets key",
+      "body": "---\n---\n# X\n",
+      "key": "tipo",
+      "value": "id",
+      "result": "---\ntipo: \"id\"\n---\n# X\n"
+    },
+    {
+      "name": "key with surrounding spaces is trimmed",
+      "body": "---\ntipo: id\n---\n# X\n",
+      "key": "  tipo  ",
+      "value": "archivado",
+      "result": "---\ntipo: \"archivado\"\n---\n# X\n"
+    },
+    {
+      "name": "empty key is a no-op",
+      "body": "---\ntipo: id\n---\n# X\n",
+      "key": "   ",
+      "value": "archivado",
+      "result": "---\ntipo: id\n---\n# X\n"
+    }
+  ]
+}

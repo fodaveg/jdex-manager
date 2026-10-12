@@ -134,6 +134,34 @@ describe('applyJdexFrontmatterFixes', () => {
     expect(auditSystem({ index, notes: [{ path: notePath, frontmatter, body: after }], filePaths: [notePath] }).filter((f) => f.kind === 'missing-description')).toEqual([]);
   });
 
+  it('leaves a note whose frontmatter the host cannot patch in skipped, with a warning', async () => {
+    const { index, notePath } = fixture();
+    // Repeated key: the host setProperty returns the body unchanged (measured case).
+    const content = '---\njd: 21.20\njd: 21.20\ntipo: cabecera\n---\n# 21.20 Cabecera\n';
+    const findings = auditSystem({ index, notes: [{ path: notePath, frontmatter: {}, body: content }], filePaths: [notePath] });
+    expect(frontmatterFindingsFor(findings)).toHaveLength(1);
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('note-1', 'f-jdex', content));
+    const result = await applyJdexFrontmatterFixes(library, markdown, findings, () => 'note-1');
+    expect(result.written).toEqual([]);
+    expect(result.skipped).toEqual(['note-1']);
+    expect(result.warnings.join(' ')).toContain('no se puede modificar sin riesgo');
+    expect(library.rewriteCalls).toHaveLength(0);
+    expect((await library.noteRead('note-1'))?.body).toBe(content);
+  });
+
+  it('control: the same fix on a patchable frontmatter is written', async () => {
+    const { index, notePath } = fixture();
+    const content = '---\njd: 21.20\ntipo: cabecera\n---\n# 21.20 Cabecera\n';
+    const findings = auditSystem({ index, notes: [{ path: notePath, frontmatter: { jd: 21.2, tipo: 'cabecera' }, body: content }], filePaths: [notePath] });
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('note-1', 'f-jdex', content));
+    const result = await applyJdexFrontmatterFixes(library, markdown, findings, () => 'note-1');
+    expect(result.written).toEqual(['note-1']);
+    expect(result.skipped).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
   it('devuelve el motivo cuando la nota se bloqueó después de la auditoría', async () => {
     const { index, notePath, body } = fixture();
     const content = `${body}\nDescripción propuesta.\n`;

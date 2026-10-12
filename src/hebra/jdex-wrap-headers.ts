@@ -39,14 +39,34 @@ export function findJdexWrapCandidates(
 }
 
 /** Aplica el envoltorio a los candidatos de `noteIds` (los marcados en la vista
- *  previa). Sin ellos, no escribe nada. */
+ *  previa). Sin ellos, no escribe nada. Only a note whose body is still the one shown
+ *  in the preview is written: an edit made in between is kept and the note is skipped
+ *  with a warning. The write carries a `cause`, so Hebra keeps a previous version. */
 export async function applyJdexWrap(
   library: JdexRewriteLibrary,
   candidates: readonly JdexWrapCandidate[],
   noteIds: readonly string[]
-): Promise<{ written: string[]; skipped: string[] }> {
+): Promise<{ written: string[]; skipped: string[]; warnings: string[] }> {
   const chosen = new Set(noteIds);
   const byId = new Map(candidates.map((c) => [c.noteId, c] as const));
   const ids = candidates.filter((c) => chosen.has(c.noteId)).map((c) => c.noteId);
-  return rewriteJdexNotes(library, ids, (current) => byId.get(current.id)?.after ?? null);
+  const changed = new Set<string>();
+  const result = await rewriteJdexNotes(
+    library,
+    ids,
+    (current) => {
+      const candidate = byId.get(current.id);
+      if (!candidate) return null;
+      if (current.body !== candidate.before) {
+        changed.add(current.id);
+        return null;
+      }
+      changed.delete(current.id);
+      return candidate.after;
+    },
+    'Antes de envolver las cabeceras JDex'
+  );
+  const warnings = [...changed].map((id) => `${byId.get(id)?.label ?? id}: no se envolvió porque la nota cambió después de la vista previa.`);
+  for (const id of result.skipped) warnings.push(`${byId.get(id)?.label ?? id}: no se envolvió porque la nota cambió durante los dos intentos.`);
+  return { written: result.written, skipped: [...new Set([...result.skipped, ...changed])], warnings };
 }

@@ -74,6 +74,8 @@ export function mountJdexWrapHeadersView(
     apply.disabled = true;
     try {
       await options.onApply(chosen);
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : String(error);
     } finally {
       apply.disabled = false;
     }
