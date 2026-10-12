@@ -13,6 +13,7 @@ import type { PluginFolder, PluginMarkdown, PluginNote, PluginVault } from 'hebr
 import {
   areaCode,
   selectCreationSystem,
+  selectSystem,
   findId,
   jdexNoteName,
   managementCategoryName,
@@ -34,7 +35,7 @@ import {
   type JdexNoteType,
   type TemplateScope
 } from './engine';
-import { isJdexChildEntry, JDEX_CHILD_OF_CHILD_MESSAGE, requireTitle, validateNewChildTitle, validateNewHeader, validateNewId } from './jdex-create';
+import { isJdexChildEntry, JDEX_CHILD_OF_CHILD_MESSAGE, jdexCreationIndex, requireTitle, validateNewChildTitle, validateNewHeader, validateNewId } from './jdex-create';
 import { jdexResolveFolderId, readJdexCreationIndex, type JdexLibraryWalk } from './library-index';
 
 /** Lo que usa este fichero del `vault` de la API. */
@@ -257,9 +258,13 @@ export async function createJdexCategory(
   const system = request.area.system ?? namePrefix(settings);
   const name = jdexNoteName(category, request.title, system);
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
-  // Same number with another title is still the same category: never two of them.
-  if (index.categories.some((entry) => entry.number === category)) {
-    const free = nextFreeCategory(request.area.number, index.categories.map((entry) => entry.number));
+  // Same number with another title is still the same category: never two of them. Only
+  // the area's own system counts (D01.21 does not occupy D02.21), so `index` may hold
+  // every system and is narrowed here, as the dialog sees it (`jdexCreationIndex`: only
+  // the configured system borrows the unprefixed scaffolding).
+  const own = selectSystem(jdexCreationIndex(index, namePrefix(settings)), system).categories;
+  if (own.some((entry) => entry.number === category)) {
+    const free = nextFreeCategory(request.area.number, own.map((entry) => entry.number));
     throw new Error(`La categoría ${category} ya existe. Siguiente libre: ${free ?? 'ninguna'}.`);
   }
 

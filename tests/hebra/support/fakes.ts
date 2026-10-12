@@ -784,6 +784,45 @@ export interface JdexTestApi {
   fake: FakePluginApi;
   vault: PluginVault;
   workspace: FakeWorkspace;
+  /** Settings written by another tab or device (`applySyncedPluginSettings` in Hebra):
+   *  stored, then `onChange` gets a parsed copy, never the object passed here. */
+  settingsFromElsewhere: (value: unknown) => void;
+}
+
+/**
+ * `storage.settings` as Hebra's host does it (`src/lib/plugins/api/storage.ts`): `save`
+ * stores and then calls every `onChange` listener with the value just saved (the very
+ * object), so a plugin hears its own saves too (`storage.test.ts`, «cada save avisa»).
+ */
+export function hostLikeSettingsStorage(base: HebraPluginApi['storage']['settings']): {
+  settings: HebraPluginApi['storage']['settings'];
+  fromElsewhere: (value: unknown) => void;
+} {
+  const listeners = new Set<(value: unknown) => void>();
+  const emit = (value: unknown) => {
+    for (const listener of [...listeners]) listener(value);
+  };
+  // The host stores JSON: what is saved is a copy (later changes to the object do not
+  // reach the store) and every load is a new object.
+  const copy = (value: unknown): unknown => (value === null || value === undefined ? null : JSON.parse(JSON.stringify(value)));
+  return {
+    settings: {
+      load: async <T>() => copy(await base.load<T>()) as T | null,
+      save: async (value: unknown) => {
+        await base.save(copy(value));
+        emit(value ?? null);
+      },
+      onChange: (listener) => {
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      }
+    },
+    fromElsewhere: (value) => {
+      const arrived = copy(value);
+      void base.save(copy(arrived));
+      emit(arrived);
+    }
+  };
 }
 
 export async function createJdexTestApi(options: JdexTestApiOptions = {}): Promise<JdexTestApi> {
@@ -794,13 +833,16 @@ export async function createJdexTestApi(options: JdexTestApiOptions = {}): Promi
   const workspace = new FakeWorkspace();
   const vault = options.vault ?? new FakeJdexVault();
   const markdown: PluginMarkdown = { ...fake.api.markdown, setProperty: fakeSetProperty, frontmatter: fakeFrontmatter };
+  // The host's `onChange` also fires after the plugin's own saves.
+  const settings = hostLikeSettingsStorage(fake.api.storage.settings);
   const api: HebraPluginApi = {
     ...fake.api,
+    storage: { ...fake.api.storage, settings: settings.settings },
     ui: domUi(fake.api.ui),
     vault,
     workspace: workspace.api,
     markdown
   };
   if (options.settings !== undefined) await api.storage.settings.save(options.settings);
-  return { api, fake, vault, workspace };
+  return { api, fake, vault, workspace, settingsFromElsewhere: settings.fromElsewhere };
 }

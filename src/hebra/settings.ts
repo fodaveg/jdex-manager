@@ -95,6 +95,42 @@ export async function persistJdexSettings(
   if (Object.keys(patch).length > 0) await updateJdexStoredSettings(storage, patch);
 }
 
+/**
+ * `api.storage.settings` with this plugin's own saves remembered. Hebra's host calls
+ * `onChange` after every `save` too, with the very object saved (`src/lib/plugins/api/
+ * storage.ts`, `save` → `emit`); a value from another tab or device arrives parsed, as a
+ * new object. `isOwnSave` tells the echo from real news.
+ */
+export function trackJdexSettingsSaves(storage: PluginSettingsStorage): { storage: PluginSettingsStorage; isOwnSave(value: unknown): boolean } {
+  const own = new WeakSet<object>();
+  return {
+    storage: {
+      load: <T>() => storage.load<T>(),
+      save: (value) => {
+        if (typeof value === 'object' && value !== null) own.add(value);
+        return storage.save(value);
+      },
+      onChange: (listener) => storage.onChange(listener)
+    },
+    isOwnSave: (value) => typeof value === 'object' && value !== null && own.has(value)
+  };
+}
+
+/** Settings read only when creating, writing reports or typing: changing them elsewhere
+ *  needs no walk of the library. Any other setting can change the index or the audit. */
+const OUTSIDE_THE_INDEX = new Set<string>([
+  'autocomplete', 'autocompleteInsert', 'debugLog', 'renamePairsWithoutAsking', 'createFolderByDefault',
+  'createPatternByDefault', 'templateNames', 'dateFormat', 'healthMaxFiles'
+]);
+
+/** True when going from `before` to `after` changes something the index, the audit or
+ *  the inbox are built from. */
+export function jdexSettingsChangeNeedsRebuild(before: JdexManagerSettings, after: JdexManagerSettings): boolean {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys].some((key) => !OUTSIDE_THE_INDEX.has(key) &&
+    JSON.stringify((before as unknown as Record<string, unknown>)[key]) !== JSON.stringify((after as unknown as Record<string, unknown>)[key]));
+}
+
 const storageTails = new WeakMap<JdexSettingsStorage, Promise<void>>();
 
 /**

@@ -275,7 +275,7 @@ export function mountCreateCategoryDialog(
       }
       const conflict = currentError();
       if (conflict) {
-        number = nextFreeCategory(area.number, options.index.categories.map((c) => c.number)) ?? '';
+        number = nextFreeCategory(area.number, sameSystemCategories()) ?? '';
         numberField.input.value = number;
         refresh();
         error.textContent = `${conflict} Siguiente libre: ${number || 'ninguna'}.`;

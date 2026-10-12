@@ -10,6 +10,7 @@
  * cuerpo nuevo no da ninguno (`deriveNoteKeepingTitle`): el plugin ya no lo calcula.
  */
 import type { PluginNote, PluginNoteRewrite, PluginVault } from 'hebra-plugin-api';
+import { JdexJournalSaveError } from './jdex-journal';
 
 /** Lo que usa este fichero del `vault` de la API. */
 export type JdexRewriteLibrary = Pick<PluginVault, 'noteRead' | 'notesRewriteBatch'>;
@@ -41,9 +42,15 @@ export class JdexPartialRewriteError extends Error {
   readonly written: readonly string[];
   readonly unwritten: readonly string[];
   constructor(written: readonly string[], unwritten: readonly string[], cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
     super(
-      `Se escribieron ${written.length} nota(s) antes del fallo y ${unwritten.length} quedaron sin escribir. ` +
-        `Lo escrito queda en el diario y se puede deshacer. Causa: ${cause instanceof Error ? cause.message : String(cause)}`
+      // A journal that could not be saved is the cause: the last batch may even have been
+      // written, and nothing is undoable after a close until the journal is saved again.
+      cause instanceof JdexJournalSaveError
+        ? `Se escribieron al menos ${written.length} nota(s) antes del fallo y ${unwritten.length} quedaron sin confirmar. ` +
+            `El diario de deshacer no se pudo guardar: lo escrito sigue en el diario en memoria y se guardará con el próximo cambio; si cierras Hebra antes, no se podrá deshacer. Causa: ${reason}`
+        : `Se escribieron ${written.length} nota(s) antes del fallo y ${unwritten.length} quedaron sin escribir. ` +
+            `Lo escrito queda en el diario y se puede deshacer. Causa: ${reason}`
     );
     this.name = 'JdexPartialRewriteError';
     this.written = written;
@@ -67,9 +74,12 @@ export async function rewriteJdexNotes(
   ids: readonly string[],
   nextBody: (current: JdexNoteBody) => string | null,
   cause?: string | null
-): Promise<{ written: string[]; skipped: string[] }> {
+): Promise<{ written: string[]; skipped: string[]; held?: string[] }> {
   const written: string[] = [];
   const skipped: string[] = [];
+  /** Held back by the journal (an automatic run over what an undo restored): skipped
+   *  without a retry, and without the «changed meanwhile» warning. */
+  const held: string[] = [];
   let pending = ids;
   for (let attempt = 0; attempt < REWRITE_ATTEMPTS && pending.length > 0; attempt += 1) {
     const entries: PluginNoteRewrite[] = [];
@@ -81,7 +91,7 @@ export async function rewriteJdexNotes(
       if (body === null || body === note.body) continue;
       entries.push({ id, body, expected: note.revision });
     }
-    if (entries.length === 0) return { written, skipped };
+    if (entries.length === 0) return held.length > 0 ? { written, skipped: [...skipped, ...held], held } : { written, skipped };
     const stale: string[] = [];
     for (let from = 0; from < entries.length; from += JDEX_REWRITE_BATCH_MAX) {
       const batch = entries.slice(from, from + JDEX_REWRITE_BATCH_MAX);
@@ -97,9 +107,10 @@ export async function rewriteJdexNotes(
       }
       written.push(...result.written);
       stale.push(...result.stale);
+      held.push(...((result as { held?: string[] }).held ?? []));
     }
     pending = stale;
   }
-  skipped.push(...pending);
-  return { written, skipped };
+  skipped.push(...pending, ...held);
+  return held.length > 0 ? { written, skipped, held } : { written, skipped };
 }
