@@ -10,7 +10,7 @@ An Obsidian plugin for vaults organised with [Johnny.Decimal](https://johnnydeci
 
 ## Status
 
-What works today (0.4.1):
+What works today (0.5.0):
 
 - **Create ID** (command and ribbon icon): pick a category, get the next free number (zeros and headers skipped), type a title, optionally tick "also create the folder". The JDex note is created from the template and opened. Nothing is ever overwritten: a number already used by a note or a folder is rejected with the name that uses it.
 - **Settings with auto-detection**: JDex folder, system root, templates folder and reports folder. Empty fields are filled on startup from `00-09*/00*/00.00`, `00.02` and `00.03`; a button and a command run the detection again. A configured value is never replaced.
@@ -20,7 +20,7 @@ What works today (0.4.1):
 
   Numbered content subfolders such as `70 Attachments` or `40 Audits` inside a valid ID are local organisation, not misplaced JD categories. Repair is enabled when at least one available repair is selected; findings without a safe repair require manual review.
 
-- **Rename in pairs**: renaming a JDex note offers to rename its ID folder, and the other way round (a setting skips the question). Changing the number is refused with a notice: an ID is never renumbered. Moving an ID folder to another category also gets a notice.
+- **Rename in pairs**: renaming a JDex note offers to rename its ID folder, and the other way round (a setting skips the question). In Obsidian, changing the number is refused with a notice: an ID is never renumbered; moving an ID folder to another category also gets a notice. In Hebra, a folder rename or move that would renumber an ID or change its category shows a warning, and the change is applied only after you confirm it.
 - **Frontmatter from the name**: "Normalize JDex frontmatter" fills or corrects `jd`, `tipo`, `area` and `categoria` from the note's number and the system folders, for the active note or the whole JDex, with a checklist before writing.
 - **Live header lists**: the children of each `AC.X0 ■` note are regenerated between `<!-- jdex:hijos -->` and `<!-- /jdex:hijos -->` when an ID of that range is created or renamed, and on demand with "Update header lists". "Wrap existing header lists in markers" migrates the notes you already have, after a preview.
 
@@ -31,6 +31,7 @@ What works today (0.4.1):
 - **Send to inbox / Archive**: move the active file to the `.01` or `.09` of its category (a picker when the file lives outside the system). Archiving adds the date as prefix: the `fecha` / `creado` / `created` / `date` frontmatter value when a note has one, else the file creation time (not verified for files received through Obsidian Sync).
 - **Process inboxes**: walks every `AC.01` and `00.01` file by file with a preview: move to an ID, archive, skip, open or delete. The status bar shows how many files are waiting. In Hebra the dialog also previews each note, sends it to the trash only after a confirmation, and can move it to an ID that has no folder only if you tick "Include IDs without a folder" and confirm creating it. Hebra does not date the name when moving (only Archive adds the date), and Open advances to the next note without closing the dialog.
 - **Date file name**: prefixes the date (frontmatter first, else creation time) to a file inside a content ID (`YYYY-MM-DD` or `YYYY-MM`). Optional automatic dating on creation. JDex notes and management folders are never touched.
+- **Clickable numbers in the Hebra editor**: ⌘-click (Ctrl-click) on an ID number opens its JDex note, with Alt the folder; a plain click only places the cursor.
 - **Go to ID**: a picker with note and folder on the same row; Enter opens the note, Cmd/Ctrl+Enter the folder.
 - **Move active file to an ID**: the same picker, from the command palette or the file menu, moves the file into the folder of the chosen ID (offering to create the folder when the ID has none). A setting dates the name on the way.
 - **Search inside the active ID / category**: opens Obsidian's search with `path:"…/21.22 JDex Manager/"` already typed; when the core search plugin is not reachable the query goes to the clipboard.
@@ -50,6 +51,8 @@ What works today (0.4.1):
   - **What is journaled**: every write of the plugin, effect by effect as it happens (creating IDs, categories, areas, headers, `+` children and structure notes; repair, normalize, retire, move, archive, send to inbox, inbox processing, dating names, renaming the pair partner, header lists, markers, system index, health and system reports, and automatic maintenance). Left out on purpose: the audit report (overwritten by every audit), creating the built-in templates (only creates missing files), the plugin’s own settings, and deleting a non-Markdown file from the inbox (it goes to the trash, which is how it is recovered).
   - **Discard last JDex journal entry**: removes the last entry without touching any file, so an entry that cannot be undone no longer hides the earlier ones.
   - **Devices and versions**: each entry records the device that made it; an operation of another device is not undone (discard it, or undo it there). When `data.json` changes outside Obsidian (for example through Sync), settings and journal are reloaded and joined by identity, and a local save keeps what changed elsewhere. Journals from 0.3.x/0.4.x are migrated in place; their frontmatter steps need explicit confirmation, and steps whose keys were lost by 0.3.1 stay in the journal with a warning. A journal from a newer version is kept untouched and not used.
+- **Interface language**: the Obsidian interface, notices and engine messages follow Obsidian's language (English or Spanish); changing the language requires reloading the plugin.
+- **Debug log** (optional, off by default): when enabled, errors are appended to a note titled `Registro de depuración JDex`, with stack locations sanitised. The log note itself is never audited or journaled.
 - **Optional automatic maintenance**: off by default. When enabled, updates derived frontmatter, header lists and the system index after changes, with an undo journal. Other repairs require the preview. After an undo, maintenance and live header lists leave the restored notes alone until they change again, so undo is not redone and repeated undos reach earlier operations.
 - **System report**: run manually to write `Informe JD - YYYY-MM-DD` in the reports folder (`00.02` by auto-detection), with audit, health and differences from the previous report. Inbox age is informational; its default threshold is 30 days and is configurable.
 - **Status bar**: audit findings, inbox count and the JD path of the active file (`21 Productos … › 21.22 JDex Manager`; click jumps between the JDex note and the folder). On mobile, where there is no status bar, "Show where the active file lives" and "Toggle between JDex note and folder" do the same.
@@ -85,7 +88,7 @@ Both hosts share the engine defaults. Hebra stores its settings per library and 
 
 **Manual**: download `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/jdex-manager/` and enable the plugin.
 
-**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list or by URL (`fodaveg/jdex-manager`). Version 0.4.1 requires a Hebra host with plugin API 1.2 or later; the manifest checks compatibility before loading.
+**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list or by URL (`fodaveg/jdex-manager`). Version 0.5.0 requires a Hebra host with plugin API 1.2 or later (unchanged since 0.4.1) that knows the `debugLog` settings field; the manifest checks compatibility before loading.
 
 ## Develop
 
