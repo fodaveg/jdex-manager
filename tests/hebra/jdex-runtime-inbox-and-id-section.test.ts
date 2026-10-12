@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 //
-// El lote 4 («Procesar inbox» y la sección del ID en el panel de contexto) de
-// extremo a extremo: `activateJdex(api)` sobre el host falso del paquete
+// «Procesar inbox» y la sección del ID en el panel de contexto, de extremo a extremo: `activateJdex(api)` sobre el host falso del paquete
 // (`createFakePluginApi`, que registra comandos, vistas y piezas de la barra), diálogo
 // montado de verdad en el DOM (`support/fakes.ts`) y biblioteca en memoria
 // (`FakeJdexVault`).
@@ -96,7 +95,7 @@ beforeEach(() => {
   seq = 0;
 });
 
-describe('activate — lote 4, «Procesar inbox»', () => {
+describe('activate — «Procesar inbox»', () => {
   it('el comando y el clic en «Inbox: N» abren el mismo diálogo, con las dos notas', async () => {
     const fixture = buildFixture();
     const { api, fake } = await setup(fixture);
@@ -193,7 +192,7 @@ describe('activate — lote 4, «Procesar inbox»', () => {
   });
 });
 
-describe('activate — lote 4, sección del ID en el panel de contexto', () => {
+describe('activate — sección del ID en el panel de contexto', () => {
   it('registra la vista de columna', async () => {
     const fixture = buildFixture();
     const { api, fake } = await setup(fixture);

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
-// El lote 2 (crear ID/categoría/área/cabecera/hijo, normalizar el frontmatter,
-// cabeceras e índice al día) de extremo a extremo: `activateJdex(api)` sobre el host falso
+// Crear ID/categoría/área/cabecera/hijo, normalizar el frontmatter, cabeceras e índice al día,
+// de extremo a extremo: `activateJdex(api)` sobre el host falso
 // del paquete (comandos y piezas registrados), diálogo montado de verdad en el DOM
 // (`support/fakes.ts`) y biblioteca en memoria (`FakeJdexVault`, con lectura Y escritura).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -102,7 +102,7 @@ beforeEach(() => {
   seq = 0;
 });
 
-describe('activate — lote 2', () => {
+describe('activate — crear y normalizar', () => {
   it('registra los diez comandos nuevos', async () => {
     const fixture = buildFixture();
     const { api, fake } = await setup(fixture);

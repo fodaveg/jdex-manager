@@ -1,38 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { type App, TFile, TFolder } from "obsidian";
+import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 import { isUneditedReport, stampReport, writeDailyReport } from "../src/vault/report-write";
 
 const FOLDER = "00.02 Informes";
 const PATH = `${FOLDER}/Auditoría JD - 2026-10-12.md`;
 
-/** An in-memory vault with folders and notes, enough for the report writer. */
+/** The shared vault double; `notes` is the text of every file by path. */
 function memoryVault() {
-  const notes = new Map<string, string>();
-  const folders = new Set<string>();
-  const fileAt = (path: string) => Object.assign(new TFile(), { path, basename: path.slice(path.lastIndexOf("/") + 1, -3) });
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => (notes.has(path) ? fileAt(path) : folders.has(path) ? Object.assign(new TFolder(), { path }) : null),
-      read: async (file: TFile) => notes.get(file.path)!,
-      process: async (file: TFile, update: (current: string) => string) => {
-        const next = update(notes.get(file.path)!);
-        notes.set(file.path, next);
-        return next;
-      },
-      create: async (path: string, content: string) => {
-        if (notes.has(path)) throw new Error("exists");
-        notes.set(path, content);
-        return fileAt(path);
-      },
-      createFolder: async (path: string) => {
-        folders.add(path);
-      },
-      modify: async () => {
-        throw new Error("the report writer must not call vault.modify");
-      },
-    },
-  } as unknown as App;
-  return { app, notes };
+  const v = new FakeObsidianVault();
+  return { app: v.app, notes: v.bodies, v };
 }
 
 describe("stamped daily reports", () => {
@@ -76,8 +52,8 @@ describe("stamped daily reports", () => {
   });
 
   it("a report written before stamps existed is not overwritten", async () => {
-    const { app, notes } = memoryVault();
-    notes.set(PATH, "# Informe antiguo sin huella\n");
+    const { app, notes, v } = memoryVault();
+    v.file(PATH, "# Informe antiguo sin huella\n"); // a file must exist for the double to find it
     const result = await writeDailyReport(app, FOLDER, PATH, "# Nuevo\n");
     expect(result.path).toBe(`${FOLDER}/Auditoría JD - 2026-10-12 (2).md`);
     expect(notes.get(PATH)).toBe("# Informe antiguo sin huella\n");

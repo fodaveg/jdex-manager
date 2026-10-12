@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 /* These tests run against happy-dom's own `document`, not an Obsidian window, so the popout-window rules do not apply. */
-/* eslint-disable obsidianmd/prefer-active-doc, obsidianmd/prefer-create-el, no-unsanitized/property, @microsoft/sdl/no-inner-html */
+/* eslint-disable @typescript-eslint/unbound-method, obsidianmd/prefer-active-doc, obsidianmd/prefer-create-el, no-unsanitized/property, @microsoft/sdl/no-inner-html */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TFile, type Plugin } from "obsidian";
+import type { Plugin, TFile } from "obsidian";
 import type { IdEntry, JdIndex } from "../src/jd/index";
 import { registerReadingLinks } from "../src/vault/reading-links";
+import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 
 function entry(id: string, title: string, over: Partial<IdEntry> = {}): IdEntry {
   const label = `${id} ${title}`;
@@ -17,23 +18,15 @@ function emptyIndex(ids: IdEntry[]): JdIndex {
 
 function setup(initial: IdEntry[], extra: { choose?: (entries: IdEntry[]) => Promise<IdEntry | null> } = {}) {
   let ids = initial;
-  const files = new Map<string, TFile>();
-  const open = vi.fn(async (_file: TFile) => undefined);
-  const getLeaf = vi.fn((_mode: unknown) => ({ openFile: open }));
+  const v = new FakeObsidianVault();
+  const open = v.openFile;
+  const getLeaf = v.app.workspace.getLeaf;
   let process: ((el: HTMLElement) => void) | undefined;
   const plugin = {
     registerMarkdownPostProcessor: (fn: (el: HTMLElement) => void) => {
       process = fn;
     },
-    app: {
-      vault: {
-        getAbstractFileByPath: (path: string) => {
-          if (!files.has(path)) return null;
-          return files.get(path)!;
-        },
-      },
-      workspace: { getLeaf },
-    },
+    app: v.app,
   } as unknown as Plugin;
   registerReadingLinks(plugin, { index: () => emptyIndex(ids), enabled: () => true, ...extra });
   const render = (html: string): HTMLElement => {
@@ -43,11 +36,7 @@ function setup(initial: IdEntry[], extra: { choose?: (entries: IdEntry[]) => Pro
     process!(el);
     return el;
   };
-  const addFile = (path: string): TFile => {
-    const file = Object.assign(new TFile(), { path });
-    files.set(path, file);
-    return file;
-  };
+  const addFile = (path: string): TFile => v.file(path);
   return { render, open, getLeaf, setIds: (next: IdEntry[]) => (ids = next), addFile };
 }
 
