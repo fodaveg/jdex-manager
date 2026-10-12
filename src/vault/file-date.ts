@@ -15,8 +15,10 @@ export function parseDateValue(value: unknown): Date | null {
 
 /**
  * The date a file is dated with: a valid date in its frontmatter when it has one, else its ctime.
- * ctime is the file system's creation time; what it holds for a file that arrived through Obsidian Sync
- * is not verified (it may be the arrival time), which is why an explicit date wins.
+ * ctime is the file system's creation time on this device. For a file that arrived through Obsidian
+ * Sync it is the arrival, not the original creation (measured on macOS on 12 Oct 2026: notes made on
+ * other devices on different days shared one birthtime, the moment they arrived; on Linux ctime is
+ * not even a creation time), which is why an explicit date wins.
  */
 export function fileDate(app: App, file: TFile): Date {
   if (file.extension === "md") {
