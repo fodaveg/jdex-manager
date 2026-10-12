@@ -86,7 +86,7 @@ describe("Obsidian frontmatter writes touch only their keys", () => {
     const { app, bodies, renameFile } = textVault({ [NOTE]: duplicated }, [folder, "20-29 Area/21 Cat/21.09 Archivo"]);
     const index = buildIndex({ systemRoot: "", jdexFolder: "J", notePaths: [NOTE], folderPaths: ["20-29 Area", "20-29 Area/21 Cat", folder, "20-29 Area/21 Cat/21.09 Archivo"] });
     const effects: Effect[] = [];
-    await expect(retireId(app, index, index.ids.find((entry) => entry.id === "21.11")!, undefined, effects)).rejects.toThrow(/no se puede modificar sin riesgo/);
+    await expect(retireId(app, index, index.ids.find((entry) => entry.id === "21.11")!, undefined, effects)).rejects.toThrow(/cannot be changed safely/);
     expect(bodies.get(NOTE)).toBe(duplicated);
     expect(renameFile).not.toHaveBeenCalled();
     expect(effects).toEqual([]);

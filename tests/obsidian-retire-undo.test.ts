@@ -123,7 +123,7 @@ describe("retire then undo: partial failures", () => {
     const after = snapshot(v);
     const effects: Effect[] = [];
     // A stale index still lists the folder at its old path: the live note says it is retired.
-    await expect(retireId(v.app, index, entry, undefined, effects)).rejects.toThrow("Ya retirado el");
+    await expect(retireId(v.app, index, entry, undefined, effects)).rejects.toThrow("Already retired on");
     expect(snapshot(v)).toEqual(after);
     expect(effects).toEqual([]);
   });

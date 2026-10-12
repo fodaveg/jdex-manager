@@ -16,6 +16,8 @@ import type { Effect } from "../jd/journal";
 import { frontmatterRewrite, movedIdentity } from "./journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
 import type { JdIndex } from "../jd/index";
+import type { MessageLanguage } from "../jd/pair";
+import { t } from "../ui/i18n";
 
 export interface AuditResult {
   findings: Finding[];
@@ -43,8 +45,11 @@ export async function jdexNoteMetas(app: App, settings: JdexManagerSettings, dup
   return out;
 }
 
-/** Reads one live audit snapshot for repairs, maintenance and reports. */
-export async function collectAudit(app: App, settings: JdexManagerSettings): Promise<{ index: JdIndex; findings: Finding[]; filePaths: string[] }> {
+/**
+ * Reads one live audit snapshot for repairs, maintenance and reports. `findings` speak `language`
+ * (the interface, for the Repair dialog); `reportFindings` are always Spanish, for written reports.
+ */
+export async function collectAudit(app: App, settings: JdexManagerSettings, language: MessageLanguage = "es"): Promise<{ index: JdIndex; findings: Finding[]; reportFindings: Finding[]; filePaths: string[] }> {
   const index = scanVault(app, settings);
   const idCounts = new Map<string, number>();
   for (const entry of index.rawIdNotes) {
@@ -57,42 +62,51 @@ export async function collectAudit(app: App, settings: JdexManagerSettings): Pro
     .getAllLoadedFiles()
     .filter((f): f is TFile => f instanceof TFile)
     .map((f) => f.path);
-  const findings = auditSystem({
-    index,
-    jdexFolder: settings.jdexFolder,
-    notes: await jdexNoteMetas(app, settings, duplicatePaths),
-    filePaths,
-    folderPaths: allFolderPaths(app),
-    patternFor: (category) => patternFor(settings, category),
-    options: {
-      noteWithoutFolderIsFinding: settings.noteWithoutFolderIsFinding,
-      descriptionIsFinding: settings.descriptionIsFinding,
-      structureNotesAreFindings: settings.structureNotesAreFindings,
-    },
-  });
-  findings.push(...staleInboxFindings(index, app.vault.getAllLoadedFiles().filter((file): file is TFile => file instanceof TFile).map((file) => ({
+  const notes = await jdexNoteMetas(app, settings, duplicatePaths);
+  const folderPaths = allFolderPaths(app);
+  const inboxNotes = app.vault.getAllLoadedFiles().filter((file): file is TFile => file instanceof TFile).map((file) => ({
     path: file.path, folderPath: file.path.slice(0, file.path.lastIndexOf('/')), createdAt: fileDate(app, file).getTime(),
-  })), settings.inboxStaleDays, Date.now()));
-  findings.unshift(...missingConfiguredFolders(settings, allFolderPaths(app)));
-  return { index, findings, filePaths };
+  }));
+  const build = (lang: MessageLanguage): Finding[] => {
+    const found = auditSystem({
+      index,
+      jdexFolder: settings.jdexFolder,
+      notes,
+      filePaths,
+      folderPaths,
+      patternFor: (category) => patternFor(settings, category),
+      language: lang,
+      options: {
+        noteWithoutFolderIsFinding: settings.noteWithoutFolderIsFinding,
+        descriptionIsFinding: settings.descriptionIsFinding,
+        structureNotesAreFindings: settings.structureNotesAreFindings,
+      },
+    });
+    found.push(...staleInboxFindings(index, inboxNotes, settings.inboxStaleDays, Date.now(), lang));
+    found.unshift(...missingConfiguredFolders(settings, folderPaths, lang));
+    return found;
+  };
+  const findings = build(language);
+  // The written report is system content: Spanish whatever the interface language is.
+  return { index, findings, reportFindings: language === "es" ? findings : build("es"), filePaths };
 }
 
 /** Fresh repair proposals without creating a report note. */
-export async function collectAuditFindings(app: App, settings: JdexManagerSettings): Promise<Finding[]> {
-  return (await collectAudit(app, settings)).findings;
+export async function collectAuditFindings(app: App, settings: JdexManagerSettings, language: MessageLanguage = "es"): Promise<Finding[]> {
+  return (await collectAudit(app, settings, language)).findings;
 }
 
 /** Audits without mutating system content, then writes today's audit report. */
-export async function runAudit(app: App, settings: JdexManagerSettings): Promise<AuditResult> {
-  const { findings } = await collectAudit(app, settings);
+export async function runAudit(app: App, settings: JdexManagerSettings, language: MessageLanguage = "es"): Promise<AuditResult> {
+  const { findings, reportFindings } = await collectAudit(app, settings, language);
 
   if (settings.reportsFolder === "") {
-    new Notice("No reports folder set; the audit ran but no report was written.");
+    new Notice(t().auditNoReportsFolder);
     return { findings, reportPath: null };
   }
   const date = todayIso();
   const reportPath = normalizePath(`${settings.reportsFolder}/${reportFileName(date)}`);
-  const content = renderReport(findings, date);
+  const content = renderReport(reportFindings, date);
   // A report of the day edited by hand is kept; the new one goes to «(2)».
   const written = await writeDailyReport(app, settings.reportsFolder, reportPath, content);
   return { findings, reportPath: written.path };
@@ -111,7 +125,7 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
 export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?: JdexManagerSettings, warn?: (message: string) => void): Promise<void> {
   if (fix.type === "frontmatter") {
     const file = app.vault.getAbstractFileByPath(fix.path);
-    if (!(file instanceof TFile)) throw new Error(`${fix.path} no es una nota.`);
+    if (!(file instanceof TFile)) throw new Error(t().notANote(fix.path));
     const plan = (current: string) => {
       const fm = readFrontmatter(current) ?? {};
       const skipped: string[] = [];
@@ -136,12 +150,12 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
     }
     if (rewrite) effects?.push(rewrite);
     if (outcome.skipped.length > 0) {
-      const message = `${fix.path}: se omitió ${outcome.skipped.join(", ")} porque cambió desde la auditoría.`;
+      const message = t().fixSkippedChanged(fix.path, outcome.skipped.join(", "));
       if (warn) warn(message);
       else new Notice(message);
     }
     if (outcome.refused.length > 0) {
-      const message = `${fix.path}: no se escribió ${outcome.refused.join(", ")} porque el frontmatter tiene una clave repetida o un formato que no se puede modificar sin riesgo.`;
+      const message = t().fixRefused(fix.path, outcome.refused.join(", "));
       if (warn) warn(message);
       else new Notice(message, 10000);
     }
@@ -156,16 +170,16 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
     return;
   }
   if (fix.type === "create-note") {
-    if (!settings) throw new Error("Faltan los ajustes para crear la nota.");
+    if (!settings) throw new Error(t().fixNeedSettings);
     if ((fix.kind === "area" || fix.kind === "categoria") && !settings.structureNotesAreFindings) {
-      throw new Error("Activa los hallazgos de notas de estructura antes de crearlas desde Reparar.");
+      throw new Error(t().fixEnableStructure);
     }
-    if (app.vault.getAbstractFileByPath(fix.path)) throw new Error(`${fix.path} ya existe.`);
+    if (app.vault.getAbstractFileByPath(fix.path)) throw new Error(t().pathExists(fix.path));
     const index = selectSystem(scanVault(app, settings), fix.system ?? "");
     const category = index.categories.find((entry) => entry.number === fix.category);
     const areaNumber = fix.kind === "area" ? Number(fix.number.slice(0, 2)) : Math.floor(Number(fix.category) / 10) * 10;
     const area = index.areas.find((entry) => entry.number === areaNumber);
-    if (!area || (fix.kind !== "area" && !category)) throw new Error(`${fix.path}: categoría o área ausente.`);
+    if (!area || (fix.kind !== "area" && !category)) throw new Error(t().fixMissingParent(fix.path));
     const template = await resolveTemplate(app, settings, fix.kind, { category: fix.category || undefined, area: area.code });
     const content = renderTemplate(template, { id: fix.number, title: fix.title, area: areaCode(area.number), areaTitle: area.label, category: fix.category, categoryTitle: category?.label ?? "", date: todayIso() });
     await app.vault.create(fix.path, content);
@@ -173,12 +187,12 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
     return;
   }
   if (fix.type === "trash") {
-    if (!isConflictCopyPath(fix.path)) throw new Error(`${fix.path}: no está identificada como copia de conflicto.`);
+    if (!isConflictCopyPath(fix.path)) throw new Error(t().fixNotConflictCopy(fix.path));
     const file = app.vault.getAbstractFileByPath(fix.path);
     const original = app.vault.getAbstractFileByPath(fix.identicalTo);
-    if (!(file instanceof TFile) || !(original instanceof TFile)) throw new Error(`${fix.path}: copia u original ausente.`);
+    if (!(file instanceof TFile) || !(original instanceof TFile)) throw new Error(t().fixCopyOrOriginalMissing(fix.path));
     const content = await app.vault.read(file);
-    if (content !== await app.vault.read(original)) throw new Error(`${fix.path}: la copia ya no es idéntica.`);
+    if (content !== await app.vault.read(original)) throw new Error(t().fixCopyDiffers(fix.path));
     await app.fileManager.trashFile(file);
     effects?.push({ kind: "trashed-note", path: fix.path, content });
     return;
@@ -186,8 +200,8 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
   const items = fix.type === "move" ? fix.items : [{ from: fix.from, to: fix.to }];
   for (const item of items) {
     const target = app.vault.getAbstractFileByPath(item.from);
-    if (!target) throw new Error(`${item.from} ya no existe.`);
-    if (app.vault.getAbstractFileByPath(item.to)) throw new Error(`${item.to} ya existe.`);
+    if (!target) throw new Error(t().pathGone(item.from));
+    if (app.vault.getAbstractFileByPath(item.to)) throw new Error(t().pathExists(item.to));
     await app.fileManager.renameFile(target, item.to);
     effects?.push({ kind: "moved", from: item.from, to: item.to, ...movedIdentity(target) });
   }

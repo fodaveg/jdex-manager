@@ -66,7 +66,7 @@ describe("Obsidian audit fixes", () => {
     const app = v.app;
     const settings = { ...DEFAULT_SETTINGS, jdexFolder: "JDex", systemRoot: "", templatesFolder: "" };
     const fix = { type: "create-note", path: "JDex/D01.20-29 Trabajo.md", number: "20-29", system: "D01", title: "Trabajo", kind: "area", category: "" } as const;
-    await expect(applyFix(app, fix, [], settings)).rejects.toThrow("Activa");
+    await expect(applyFix(app, fix, [], settings)).rejects.toThrow("Turn on the findings");
     const enabled = { ...settings, structureNotesAreFindings: true };
     const effects: Effect[] = [];
     await applyFix(app, fix, effects, enabled);
@@ -75,7 +75,7 @@ describe("Obsidian audit fixes", () => {
     expect(bodies.get("JDex/D01.21 Proyectos.md")).toContain("tipo: categoria");
     expect(bodies.get("JDex/D01.21 Proyectos.md")).toContain('area: "D01.20-29 Trabajo"');
     expect(effects).toHaveLength(2);
-    await expect(applyFix(app, { ...fix, path: "JDex/D02.20-29 Trabajo.md", system: "D02" }, effects, enabled)).rejects.toThrow("categoría o área ausente");
+    await expect(applyFix(app, { ...fix, path: "JDex/D02.20-29 Trabajo.md", system: "D02" }, effects, enabled)).rejects.toThrow("category or area missing");
   });
 
   it("keeps completed inverses persisted when a later inverse fails and retries only the remainder", async () => {
@@ -151,7 +151,7 @@ describe("Obsidian audit fixes", () => {
     expect(body).toContain("tipo: archivado");
     expect(effects).toHaveLength(1);
     expect(effects[0]).toEqual({ kind: "frontmatter-block", path, before: frontmatterBlock(before!), after: frontmatterBlock(body) });
-    expect(notices().join(" ")).toContain("descripcion porque cambió desde la auditoría");
+    expect(notices().join(" ")).toContain("skipped descripcion because it changed since the audit");
   });
 
   it("preselects only mechanical fields, leaving description, renames and folders unchecked", async () => {

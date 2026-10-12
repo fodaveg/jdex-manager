@@ -8,7 +8,7 @@ import { scanVault } from "../vault/scan";
 import { createJdexNote, ensureFolder } from "../vault/create";
 import { trackModal } from "./modal-registry";
 import type { Effect } from "../jd/journal";
-import { t } from "./i18n";
+import { t, uiLanguage } from "./i18n";
 
 export class AreaSuggestModal extends SuggestModal<AreaEntry> {
   private readonly areas: AreaEntry[];
@@ -150,7 +150,7 @@ export class CreateCategoryModal extends StructureModal {
     return this.number === "" ? t().noFreeCategory : t().nextFreeCategory;
   }
   protected validate(): string | null {
-    return validateNewCategory(this.index, this.area.number, this.number);
+    return validateNewCategory(this.index, this.area.number, this.number, uiLanguage());
   }
   protected toggleDefs(): { key: string; name: string; desc: string; initial: boolean }[] {
     return [
@@ -206,8 +206,8 @@ export class CreateAreaModal extends StructureModal {
   /** Re-reads the vault at confirm time: another device may have created this area. */
   protected prepareSubmit(): void {
     this.index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
-    const r = parseNewArea(this.index, this.number);
-    if ("error" in r && /already exists/.test(r.error)) {
+    const r = parseNewArea(this.index, this.number, uiLanguage());
+    if ("error" in r && /already exists|ya existe/.test(r.error)) {
       const next = nextFreeArea(this.index);
       this.number = next === null ? "" : areaCode(next);
       const input = this.contentEl.querySelector<HTMLInputElement>("input");
@@ -222,7 +222,7 @@ export class CreateAreaModal extends StructureModal {
     return this.number === "" ? t().noFreeArea : t().nextFreeArea;
   }
   protected validate(): string | null {
-    const r = parseNewArea(this.index, this.number);
+    const r = parseNewArea(this.index, this.number, uiLanguage());
     return "error" in r ? r.error : null;
   }
   protected toggleDefs(): { key: string; name: string; desc: string; initial: boolean }[] {
@@ -233,7 +233,7 @@ export class CreateAreaModal extends StructureModal {
     ];
   }
   protected async perform(): Promise<TFile | null> {
-    const r = parseNewArea(this.index, this.number);
+    const r = parseNewArea(this.index, this.number, uiLanguage());
     if ("error" in r) throw new Error(r.error);
     const code = areaCode(r.area);
     const name = jdexNoteName(code, this.title, namePrefix(this.settings));

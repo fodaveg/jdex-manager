@@ -81,6 +81,9 @@ export interface MalformedEntry {
   system?: string;
   path: string;
   message: string;
+  /** Name that was malformed and which problem, so a host can word the message in its language. */
+  name?: string;
+  problem?: "one-digit" | "square-on-non-zero";
 }
 
 export interface JdIndex {
@@ -159,11 +162,11 @@ function malformedNumber(path: string, name: string): MalformedEntry | null {
   const system = /^([A-Z]\d{2})\./.exec(name)?.[1];
   const identity = system ? { system } : {};
   if (/^(?:[A-Z]\d{2}\.)?\d{2}\.\d(?:\+)?(?:[\s_-]|$)/.test(name)) {
-    return { path, ...identity, message: `${name}: el ID necesita dos dígitos después del punto.` };
+    return { path, ...identity, message: `${name}: el ID necesita dos dígitos después del punto.`, name, problem: "one-digit" };
   }
   const prefix = extractJdPrefix(name);
   if (prefix?.number.kind === "id" && prefix.title.startsWith("■") && !prefix.number.id.endsWith("0")) {
-    return { path, ...identity, message: `${name}: ■ en un ID que no acaba en 0.` };
+    return { path, ...identity, message: `${name}: ■ en un ID que no acaba en 0.`, name, problem: "square-on-non-zero" };
   }
   return null;
 }

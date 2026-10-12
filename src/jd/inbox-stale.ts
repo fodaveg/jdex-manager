@@ -2,6 +2,7 @@
 import { inboxFolders } from "./files";
 import type { Finding } from "./audit";
 import type { JdIndex } from "./index";
+import type { MessageLanguage } from "./pair";
 
 export interface InboxAgeNote {
   path: string;
@@ -9,7 +10,7 @@ export interface InboxAgeNote {
   createdAt: number;
 }
 
-export function staleInboxFindings(index: JdIndex, notes: readonly InboxAgeNote[], days: number, now: number): Finding[] {
+export function staleInboxFindings(index: JdIndex, notes: readonly InboxAgeNote[], days: number, now: number, language: MessageLanguage = "es"): Finding[] {
   if (!Number.isInteger(days) || days < 1 || !Number.isFinite(now)) return [];
   const folders = new Set(inboxFolders(index).map((entry) => entry.folderPath));
   const threshold = days * 24 * 60 * 60 * 1000;
@@ -18,7 +19,7 @@ export function staleInboxFindings(index: JdIndex, notes: readonly InboxAgeNote[
   ).map((note) => ({
     kind: "inbox-stale",
     paths: [note.path],
-    message: `${note.path}: lleva más de ${days} días en el inbox.`,
+    message: language === "en" ? `${note.path}: has been in the inbox for more than ${days} days.` : `${note.path}: lleva más de ${days} días en el inbox.`,
     informative: true,
   }));
 }

@@ -7,6 +7,7 @@ import { titleForCompare } from "../jd/title";
 import { scanVault } from "./scan";
 import { resolveTemplate } from "./templates";
 import type { Effect } from "../jd/journal";
+import { t } from "../ui/i18n";
 
 /**
  * Every creator of a JDex note calls this first: a renamed or deleted JDex folder is never
@@ -14,7 +15,7 @@ import type { Effect } from "../jd/journal";
  */
 export function assertJdexFolderExists(app: App, settings: Pick<JdexManagerSettings, "jdexFolder">): void {
   if (settings.jdexFolder !== "" && !(app.vault.getAbstractFileByPath(normalizePath(settings.jdexFolder)) instanceof TFolder)) {
-    throw new Error(`The JDex folder (${settings.jdexFolder}) does not exist. Check the plugin settings; nothing was created.`);
+    throw new Error(t().jdexFolderMissing(settings.jdexFolder));
   }
 }
 
@@ -29,7 +30,7 @@ export async function createJdexNote(
   effects?: Effect[],
 ): Promise<TFile> {
   const path = normalizePath(`${settings.jdexFolder}/${name}.md`);
-  if (app.vault.getAbstractFileByPath(path)) throw new Error(`${path} already exists.`);
+  if (app.vault.getAbstractFileByPath(path)) throw new Error(t().pathExists(path));
   assertJdexFolderExists(app, settings);
   const template = await resolveTemplate(app, settings, type, { category: vars.category || undefined, area: vars.area || undefined });
   const content = renderTemplate(template, { date: todayIso(), ...vars }) + extra;
@@ -40,7 +41,7 @@ export async function createJdexNote(
     const existing = number.extension
       ? childrenPlus(index, number.id, number.system).find((entry) => titleForCompare(entry.title) === titleForCompare(parsed.title))
       : findId(index, number.id, number.system);
-    if (existing) throw new Error(`${name}: number already used by ${existing.label}.`);
+    if (existing) throw new Error(t().numberUsedBy(name, existing.label));
   } else if (parsed?.number.kind === "category" || parsed?.number.kind === "area") {
     // Categories and areas: the same number under another title is the same identity.
     const index = scanVault(app, settings);
@@ -52,7 +53,7 @@ export async function createJdexNote(
     // A folder with no note yet is the structure the note is being created for (same name):
     // `createMissingStructureNotes` and the repair fix do exactly that. Only a note, or the
     // same number under another name, is a conflict.
-    if (existing && (existing.notePath || existing.label !== name)) throw new Error(`${name}: number already used by ${existing.label}.`);
+    if (existing && (existing.notePath || existing.label !== name)) throw new Error(t().numberUsedBy(name, existing.label));
   }
   const note = await app.vault.create(path, content);
   effects?.push({ kind: "created-note", path, content });
@@ -64,7 +65,7 @@ export async function ensureFolder(app: App, path: string, effects?: Effect[]): 
   const p = normalizePath(path);
   const present = app.vault.getAbstractFileByPath(p);
   if (present instanceof TFolder) return false;
-  if (present instanceof TFile) throw new Error(`${p} exists and is a file.`);
+  if (present instanceof TFile) throw new Error(t().pathIsFile(p));
   await app.vault.createFolder(p);
   effects?.push({ kind: "created-folder", path: p });
   return true;

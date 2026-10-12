@@ -5,6 +5,7 @@
 
 import type { IdEntry, JdIndex } from "./index";
 import { zeroOf } from "./files";
+import type { MessageLanguage } from "./pair";
 
 export interface RetirePlan {
   id: string;
@@ -20,15 +21,22 @@ export interface RetirePlan {
 
 /** `archivedAt` is supplied by the host after reading the live JDex note. An empty
  * string means it is archived but has no recorded date. */
-export function retirePlan(index: JdIndex, entry: IdEntry, date: string, successor?: string, archivedAt?: string): RetirePlan | { error: string } {
-  if (!entry.notePath) return { error: `${entry.label} has no JDex note; there is nothing to mark as retired.` };
-  if (archivedAt !== undefined) return { error: archivedAt ? `Ya retirado el ${archivedAt}.` : 'Este ID ya está retirado.' };
+export function retirePlan(index: JdIndex, entry: IdEntry, date: string, successor?: string, archivedAt?: string, language?: MessageLanguage): RetirePlan | { error: string } {
+  // `language` omitted keeps the wording Hebra has always shown (English and Spanish mixed).
+  // The line written into the note is system content and stays Spanish.
+  const en = language === "en";
+  const es = language === "es";
+  if (!entry.notePath) return { error: es ? `${entry.label} no tiene nota JDex; no hay nada que marcar como retirado.` : `${entry.label} has no JDex note; there is nothing to mark as retired.` };
+  if (archivedAt !== undefined) {
+    if (en) return { error: archivedAt ? `Already retired on ${archivedAt}.` : "This ID is already retired." };
+    return { error: archivedAt ? `Ya retirado el ${archivedAt}.` : 'Este ID ya está retirado.' };
+  }
   const frontmatter: Record<string, string> = { tipo: "archivado", archivado: date };
   let move: RetirePlan["move"];
   let moveProblem: string | undefined;
   if (entry.folderPath) {
     const archive = zeroOf(index, entry.category, "09", entry.system);
-    if (!archive?.folderPath) moveProblem = `${entry.category}.09 has no folder; the ID folder stays where it is.`;
+    if (!archive?.folderPath) moveProblem = es ? `${entry.category}.09 no tiene carpeta; la carpeta del ID se queda donde está.` : `${entry.category}.09 has no folder; the ID folder stays where it is.`;
     else {
       const name = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
       move = { from: entry.folderPath, to: `${archive.folderPath}/${date} ${name}` };
