@@ -1,6 +1,6 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 import { FINDING_KINDS, type Finding, type Fix } from "../jd/audit";
-import { describeFix, KIND_TITLES } from "../jd/audit-report";
+import { t } from "./i18n";
 import { trackModal } from "./modal-registry";
 import type { JdexManagerSettings } from "../settings";
 import type { Effect } from "../jd/journal";
@@ -12,6 +12,15 @@ function fixOrder(fix: Fix): number {
   if (["rename", "frontmatter"].includes(fix.type)) return 1;
   if (fix.type === "move") return 2;
   return 3;
+}
+
+/** What a non-frontmatter fix will do, in the interface language (the report keeps `describeFix`). */
+function fixSummary(fix: Exclude<Fix, { type: "frontmatter" }>): string {
+  if (fix.type === "rename") return `${fix.from} → ${fix.to}`;
+  if (fix.type === "move") return fix.items.map(({ from, to }) => `${from} → ${to}`).join("; ");
+  if (fix.type === "trash") return t().fixTrash(fix.path);
+  if (fix.type === "create-note" || fix.type === "create-folder") return t().fixCreate(fix.path);
+  return t().fixCreate(fix.paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(", "));
 }
 
 /** Offers audit fixes, selecting only mechanical frontmatter fields by default. */
@@ -43,16 +52,16 @@ export class FixFindingsModal extends Modal {
     trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
-    // eslint-disable-next-line obsidianmd/ui/sentence-case
-    this.setTitle("Reparar JDex");
+    const s = t();
+    this.setTitle(s.cmdRepair);
 
     if (this.findings.length === 0) {
-      contentEl.createEl("p", { text: "La auditoría actual no tiene hallazgos con arreglo disponible." });
+      contentEl.createEl("p", { text: s.repairNone });
       return;
     }
 
     contentEl.createEl("p", {
-      text: `${this.findings.length} hallazgo(s) con arreglo disponible. Solo los campos jd, tipo, area y categoria están marcados por defecto; revisa los demás antes de seleccionarlos.`,
+      text: s.repairIntro(this.findings.length),
     });
     const selectionSummary = contentEl.createEl("p");
     let updateSelection: (() => void) | undefined;
@@ -60,13 +69,13 @@ export class FixFindingsModal extends Modal {
     for (const kind of FINDING_KINDS) {
       const indices = this.findings.flatMap((finding, i) => finding.kind === kind ? [i] : []);
       if (indices.length === 0) continue;
-      contentEl.createEl("h3", { text: `${KIND_TITLES[kind]} (${indices.length})` });
+      contentEl.createEl("h3", { text: `${s.kindTitles[kind]} (${indices.length})` });
       for (const i of indices) {
         const finding = this.findings[i];
         const fix = finding.fix!;
         new Setting(contentEl)
         .setName(finding.message)
-        .setDesc(fix.type === "frontmatter" ? fix.path : describeFix(fix))
+        .setDesc(fix.type === "frontmatter" ? fix.path : fixSummary(fix))
         .addToggle((toggle) =>
           toggle.setValue(this.selected.has(i)).onChange((value) => {
             if (value) this.selected.add(i);
@@ -79,10 +88,10 @@ export class FixFindingsModal extends Modal {
 
     new Setting(contentEl).addButton((button) => {
       updateSelection = () => {
-        button.setButtonText(`Aplicar (${this.selected.size})`).setDisabled(this.selected.size === 0);
+        button.setButtonText(s.repairApply(this.selected.size)).setDisabled(this.selected.size === 0);
         selectionSummary.textContent = this.selected.size === 0
-          ? "Selecciona los arreglos que quieres aplicar."
-          : `${this.selected.size} arreglo(s) seleccionado(s).`;
+          ? s.repairSelect
+          : s.repairSelected(this.selected.size);
       };
       updateSelection();
       button
@@ -93,7 +102,7 @@ export class FixFindingsModal extends Modal {
 
   private async apply(): Promise<void> {
     if (this.selected.size === 0) {
-      new Notice("Selecciona los arreglos que quieres aplicar.");
+      new Notice(t().repairSelect);
       return;
     }
     let ok = 0;
@@ -104,7 +113,7 @@ export class FixFindingsModal extends Modal {
         if (this.refreshFindings) {
           const current = await this.refreshFindings();
           if (!current.some((candidate) => candidate.kind === finding.kind && JSON.stringify(candidate.fix) === JSON.stringify(finding.fix))) {
-            throw new Error(`${finding.paths[0]}: el hallazgo cambió desde la vista previa; vuelve a abrir Reparar.`);
+            throw new Error(t().repairChanged(finding.paths[0]));
           }
         }
         const before = this.effects.length;
@@ -117,7 +126,7 @@ export class FixFindingsModal extends Modal {
       }
     }
     this.close();
-    new Notice(`Arreglos procesados: ${ok}; omitidos o fallidos: ${failed}.`);
+    new Notice(t().repairDone(ok, failed));
     await this.onDone();
   }
 }

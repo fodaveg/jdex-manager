@@ -8,6 +8,7 @@ import { scanVault } from "../vault/scan";
 import { createJdexNote, ensureFolder } from "../vault/create";
 import { trackModal } from "./modal-registry";
 import type { Effect } from "../jd/journal";
+import { t } from "./i18n";
 
 export class AreaSuggestModal extends SuggestModal<AreaEntry> {
   private readonly areas: AreaEntry[];
@@ -17,7 +18,7 @@ export class AreaSuggestModal extends SuggestModal<AreaEntry> {
     super(app);
     this.areas = index.areas;
     this.onPick = onPick;
-    this.setPlaceholder("Area for the new category");
+    this.setPlaceholder(t().areaPlaceholder);
   }
 
   getSuggestions(query: string): AreaEntry[] {
@@ -54,9 +55,10 @@ abstract class StructureModal extends Modal {
     trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
+    const s = t();
     this.setTitle(this.heading());
     new Setting(contentEl)
-      .setName("Number")
+      .setName(s.number)
       .setDesc(this.numberDesc())
       .addText((text) =>
         text.setValue(this.number).onChange((v) => {
@@ -64,7 +66,7 @@ abstract class StructureModal extends Modal {
           this.refresh();
         }),
       );
-    new Setting(contentEl).setName("Title").addText((text) => {
+    new Setting(contentEl).setName(s.title).addText((text) => {
       text.onChange((v) => {
         this.title = v;
         this.refresh();
@@ -81,7 +83,7 @@ abstract class StructureModal extends Modal {
     this.errorEl = contentEl.createDiv({ cls: "jdex-validation", attr: { role: "alert" } });
     new Setting(contentEl).addButton((b) => {
       this.submitButton = b.buttonEl;
-      b.setButtonText("Create")
+      b.setButtonText(s.create)
         .setCta()
         .onClick(() => void this.submit());
     });
@@ -91,7 +93,7 @@ abstract class StructureModal extends Modal {
   protected currentError(): string | null {
     const e = this.validate();
     if (e) return e;
-    if (this.title.trim() === "") return "Give it a title.";
+    if (this.title.trim() === "") return t().giveTitle;
     return null;
   }
 
@@ -138,23 +140,24 @@ export class CreateCategoryModal extends StructureModal {
       this.number = nextFreeCategory(this.area.number, this.index.categories.map((c) => c.number)) ?? "";
       const input = this.contentEl.querySelector<HTMLInputElement>("input");
       if (input) input.value = this.number;
-      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+      throw new Error(t().numberTaken(this.number || t().none));
     }
   }
   protected heading(): string {
-    return `New category in ${this.area.label}`;
+    return t().newCategoryIn(this.area.label);
   }
   protected numberDesc(): string {
-    return this.number === "" ? "No free category left in this area." : "Next free category; edit if you need another.";
+    return this.number === "" ? t().noFreeCategory : t().nextFreeCategory;
   }
   protected validate(): string | null {
     return validateNewCategory(this.index, this.area.number, this.number);
   }
   protected toggleDefs(): { key: string; name: string; desc: string; initial: boolean }[] {
     return [
-      { key: "folder", name: "Also create the folder", desc: "Inside the area folder of the system root.", initial: this.settings.createFolderByDefault },
-      { key: "inbox", name: "Create the inbox (.01)", desc: standardZeroNames("AC").inbox.title.replace("AC", this.number || "AC"), initial: true },
-      { key: "archive", name: "Create the archive (.09)", desc: standardZeroNames("AC").archive.title.replace("AC", this.number || "AC"), initial: true },
+      { key: "folder", name: t().alsoCreateFolder, desc: t().categoryFolderDesc, initial: this.settings.createFolderByDefault },
+      // The descriptions are the zero names written into the vault: system content, not translated.
+      { key: "inbox", name: t().createInbox, desc: standardZeroNames("AC").inbox.title.replace("AC", this.number || "AC"), initial: true },
+      { key: "archive", name: t().createArchive, desc: standardZeroNames("AC").archive.title.replace("AC", this.number || "AC"), initial: true },
     ];
   }
   protected async perform(): Promise<TFile | null> {
@@ -164,7 +167,7 @@ export class CreateCategoryModal extends StructureModal {
     const note = await createJdexNote(this.app, this.settings, "categoria", name, vars, "", this.effects);
     let folderPath: string | null = null;
     if (this.toggles.folder) {
-      if (!this.area.path) new Notice(`No folder for ${this.area.label} in the system root; category folder not created.`);
+      if (!this.area.path) new Notice(t().noAreaFolder(this.area.label));
       else {
         folderPath = normalizePath(`${this.area.path}/${name}`);
         await ensureFolder(this.app, folderPath, this.effects);
@@ -209,14 +212,14 @@ export class CreateAreaModal extends StructureModal {
       this.number = next === null ? "" : areaCode(next);
       const input = this.contentEl.querySelector<HTMLInputElement>("input");
       if (input) input.value = this.number;
-      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+      throw new Error(t().numberTaken(this.number || t().none));
     }
   }
   protected heading(): string {
-    return "New area";
+    return t().newArea;
   }
   protected numberDesc(): string {
-    return this.number === "" ? "No free area left." : "Next free area; edit if you need another.";
+    return this.number === "" ? t().noFreeArea : t().nextFreeArea;
   }
   protected validate(): string | null {
     const r = parseNewArea(this.index, this.number);
@@ -224,8 +227,9 @@ export class CreateAreaModal extends StructureModal {
   }
   protected toggleDefs(): { key: string; name: string; desc: string; initial: boolean }[] {
     return [
-      { key: "folder", name: "Also create the folder", desc: "In the system root.", initial: this.settings.createFolderByDefault },
-      { key: "management", name: "Create the management category (A0)", desc: "Gestión del área A0-A9.", initial: true },
+      { key: "folder", name: t().alsoCreateFolder, desc: t().areaFolderDesc, initial: this.settings.createFolderByDefault },
+      // The description is the name of the note it creates: system content, not translated.
+      { key: "management", name: t().createManagement, desc: `${managementCategoryName(0).title.replace(areaCode(0), "A0-A9")}.`, initial: true },
     ];
   }
   protected async perform(): Promise<TFile | null> {
@@ -271,31 +275,32 @@ export class CreateHeaderModal extends StructureModal {
       this.number = nextFreeHeader(this.index, this.category.number) ?? "";
       const input = this.contentEl.querySelector<HTMLInputElement>("input");
       if (input) input.value = this.number;
-      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+      throw new Error(t().numberTaken(this.number || t().none));
     }
   }
   protected heading(): string {
-    return `New header in ${this.category.label}`;
+    return t().newHeaderIn(this.category.label);
   }
   protected numberDesc(): string {
-    return this.number === "" ? "All nine headers exist already." : "Next free X0; edit if you need another.";
+    return this.number === "" ? t().allHeadersExist : t().nextFreeHeader;
   }
   onOpen(): void {
     super.onOpen();
-    const emojiSetting = new Setting(this.contentEl).setName("Emoji").setDesc("Optional, shown after the black square.");
+    const emojiSetting = new Setting(this.contentEl).setName(t().emoji).setDesc(t().emojiDesc);
     emojiSetting.addText((t) => t.onChange((v) => (this.emoji = v.trim())));
     // Put the emoji field right after the number field.
     this.contentEl.insertBefore(emojiSetting.settingEl, this.contentEl.children[1] ?? null);
   }
   protected validate(): string | null {
+    const s = t();
     const n = parseJdNumber(this.number);
-    if (!n || n.kind !== "id" || n.extension) return "Type a header number like 14.20.";
-    if (n.system && n.system !== (this.category.system ?? "")) return "The prefix must match the category system.";
-    if (n.category !== this.category.number) return `The header must belong to category ${this.category.number}.`;
+    if (!n || n.kind !== "id" || n.extension) return s.typeHeader;
+    if (n.system && n.system !== (this.category.system ?? "")) return s.prefixMismatch;
+    if (n.category !== this.category.number) return s.headerCategory(this.category.number);
     const last = Number(n.id.split(".")[1]);
-    if (last === 0 || last % 10 !== 0) return "A header ends in 0 (X0), from .10 to .90.";
+    if (last === 0 || last % 10 !== 0) return s.headerEndsInZero;
     const used = findId(this.index, n.id, this.category.system);
-    if (used) return `Already used by ${used.label}.`;
+    if (used) return s.alreadyUsedBy(used.label);
     return null;
   }
   protected toggleDefs(): { key: string; name: string; desc: string; initial: boolean }[] {
@@ -337,23 +342,23 @@ export class CreateChildModal extends StructureModal {
     this.index = selectCreationSystem(scanVault(this.app, this.settings), this.parent.system ?? "");
   }
   protected heading(): string {
-    return `New child of ${this.parent.label}`;
+    return t().newChildOf(this.parent.label);
   }
   protected numberDesc(): string {
-    return "Children share the parent number with a plus sign.";
+    return t().childNumberDesc;
   }
   protected validate(): string | null {
-    if (this.number !== `${this.parent.id}+`) return `The number is fixed: ${this.parent.id}+.`;
+    if (this.number !== `${this.parent.id}+`) return t().childNumberFixed(this.parent.id);
     const taken = this.index.ids.some((e) => e.id === this.number && sameSystem(e, this.parent) && titleForCompare(e.title) === titleForCompare(jdexNoteName("", this.title).trim()));
-    if (taken) return "A child with that title exists already.";
+    if (taken) return t().childExists;
     return null;
   }
   protected toggleDefs(): { key: string; name: string; desc: string; initial: boolean }[] {
     return [
       {
         key: "folder",
-        name: "Also create the folder",
-        desc: "A `+ Title` folder inside the parent ID folder, as the documentation suggests for file systems.",
+        name: t().alsoCreateFolder,
+        desc: t().childFolderDesc,
         initial: this.settings.createFolderByDefault,
       },
     ];
@@ -381,7 +386,7 @@ export class CreateChildModal extends StructureModal {
       this.effects,
     );
     if (this.toggles.folder) {
-      if (!this.parent.folderPath) new Notice(`${this.parent.label} has no folder; child folder not created.`);
+      if (!this.parent.folderPath) new Notice(t().parentHasNoFolder(this.parent.label));
       else await ensureFolder(this.app, `${this.parent.folderPath}/${jdexNoteName("+", title)}`, this.effects);
     }
     await this.afterCreate();

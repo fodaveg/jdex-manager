@@ -48,3 +48,5 @@ export class AbstractInputSuggest<T> {
     return [];
   }
 }
+/** Obsidian sets moment's locale to its interface language; tests run as an English Obsidian. */
+export const moment = { locale: (): string => "en" };

@@ -14,6 +14,7 @@ import { fileDate } from "./file-date";
 import { moveInto } from "./files";
 import { movedIdentity } from "./journal";
 import { scanVault } from "./scan";
+import { t } from "../ui/i18n";
 
 /** An undo journal operation that records each effect as it happens. */
 export type JournalSink = Effect[] & { flush(): Promise<void> };
@@ -53,7 +54,7 @@ export async function sendToZero(ports: FlowPorts, file: TFile, zero: "01" | "09
   }
   const target = zeroOf(index, category, zero);
   if (!target?.folderPath) {
-    ports.notice(`${category}.${zero} has no folder. Create the category zeros first (Create category, or make the folder by hand).`, 8000);
+    ports.notice(t().noZeroFolder(category, zero), 8000);
     return;
   }
   try {
@@ -65,8 +66,8 @@ export async function sendToZero(ports: FlowPorts, file: TFile, zero: "01" | "09
       target.folderPath,
       zero === "09" ? { when: fileDate(app, file), format: settings.dateFormat } : undefined,
     );
-    if (to !== from) await ports.record("move", `${zero === "09" ? "Archive" : "Send to inbox"} ${file.name}`, [{ kind: "moved", from, to, ...identity }]);
-    ports.notice(`Moved to ${to}.`);
+    if (to !== from) await ports.record("move", zero === "09" ? t().labelArchive(file.name) : t().labelSendToInbox(file.name), [{ kind: "moved", from, to, ...identity }]);
+    ports.notice(t().movedTo(to));
     ports.refreshInbox();
   } catch (error) {
     ports.logError("sendToZero", error);
@@ -78,17 +79,17 @@ export async function sendToZero(ports: FlowPorts, file: TFile, zero: "01" | "09
 export async function moveToId(ports: FlowPorts, file: TFile): Promise<void> {
   const { app, settings } = ports;
   const index = scanVault(app, settings);
-  const entry = await ports.pickEntry(index, `Move ${file.name} to…`, "move here");
+  const entry = await ports.pickEntry(index, t().moveToPlaceholder(file.name), t().moveHere);
   if (!entry) return;
-  const effects = ports.journal("move", `Move ${file.name} to ${entry.id}`);
+  const effects = ports.journal("move", t().labelMoveTo(file.name, entry.id));
   const plan = planMoveToId(index, settings, entry, file.name, { createMissingFolder: true, dateOnMove: settings.dateOnMove });
   if (plan.type === "no-folder") {
-    ports.notice(`${entry.label} has no folder and category ${entry.category} has no folder in the system root to create it in.`, 8000);
+    ports.notice(t().noFolderToCreateIn(entry.label, entry.category), 8000);
     return;
   }
   const folder = normalizePath(plan.folder);
   if (plan.type === "create-folder") {
-    const ok = await ports.confirm(`Create the folder of ${entry.id}?`, [`${entry.label} has no folder yet.`, `It will be created at ${folder}.`], "Create and move");
+    const ok = await ports.confirm(t().createFolderTitle(entry.id), [t().noFolderYet(entry.label), t().willBeCreatedAt(folder)], t().createAndMove);
     if (!ok) return;
     try {
       await ensureFolder(app, folder, effects);
@@ -105,7 +106,7 @@ export async function moveToId(ports: FlowPorts, file: TFile): Promise<void> {
     const to = await moveInto(app, file, folder, date);
     if (to !== from) effects.push({ kind: "moved", from, to, ...identity });
     await effects.flush().catch(() => undefined);
-    ports.notice(`Moved to ${to}.`);
+    ports.notice(t().movedTo(to));
     ports.refreshInbox();
   } catch (error) {
     ports.logError("moveToIdFlow", error);

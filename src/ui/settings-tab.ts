@@ -3,6 +3,7 @@ import { normalizeSystemId } from "../jd/parse";
 import { formatCategoryPatterns, parseCategoryPatterns } from "../jd/patterns";
 import type { JdexManagerSettings, JdexNoteType } from "../settings";
 import { FolderSuggest } from "./folder-suggest";
+import { t } from "./i18n";
 
 /** What the settings tab needs from the plugin: its settings and the actions of its buttons. */
 export interface SettingsHost {
@@ -24,38 +25,39 @@ export class JdexManagerSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    const s = t();
 
     this.folderSetting(
-      "JDex folder",
-      "Folder that holds one note per ID (00.00 by convention).",
+      s.setJdexFolder,
+      s.setJdexFolderDesc,
       () => this.plugin.settings.jdexFolder,
       (v) => (this.plugin.settings.jdexFolder = v),
     );
     this.folderSetting(
-      "System root",
-      "Folder that holds the area folders. Leave empty for the vault root.",
+      s.setSystemRoot,
+      s.setSystemRootDesc,
       () => this.plugin.settings.systemRoot,
       (v) => (this.plugin.settings.systemRoot = v),
-      "Empty = vault root",
+      s.setSystemRootPlaceholder,
     );
     this.folderSetting(
-      "Templates folder",
-      "Folder that holds the note templates (00.03 by convention).",
+      s.setTemplatesFolder,
+      s.setTemplatesFolderDesc,
       () => this.plugin.settings.templatesFolder,
       (v) => (this.plugin.settings.templatesFolder = v),
     );
     this.folderSetting(
-      "Reports folder",
-      "Folder where audit reports are written (00.02 by convention).",
+      s.setReportsFolder,
+      s.setReportsFolderDesc,
       () => this.plugin.settings.reportsFolder,
       (v) => (this.plugin.settings.reportsFolder = v),
     );
 
     new Setting(containerEl)
-      .setName("Detect folders")
-      .setDesc("Looks for 00.00, 00.02 and 00.03 under 00-09/00 and fills the empty fields above.")
+      .setName(s.setDetect)
+      .setDesc(s.setDetectDesc)
       .addButton((button) =>
-        button.setButtonText("Detect").onClick(async () => {
+        button.setButtonText(s.setDetectButton).onClick(async () => {
           await this.plugin.detectFolders(true);
           // Re-render so the filled fields show up (see the note on `display` above).
           // eslint-disable-next-line @typescript-eslint/no-deprecated
@@ -63,16 +65,16 @@ export class JdexManagerSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Several systems").setHeading();
+    new Setting(containerEl).setName(s.setSeveralSystems).setHeading();
 
     new Setting(containerEl)
-      .setName("System identifier")
-      .setDesc("Only with several Johnny.Decimal systems: a letter and two digits (D01). Names like D01.21.22 are then understood. Empty = single system.")
+      .setName(s.setSystemId)
+      .setDesc(s.setSystemIdDesc)
       .addText((text) => {
         // Typing `D01` passes through `D` and `D0`: saving on each keystroke is silent, and the
         // warning waits until the field loses focus, once.
         text
-          .setPlaceholder("Empty = single system")
+          .setPlaceholder(s.setSystemIdPlaceholder)
           .setValue(this.plugin.settings.systemId)
           .onChange(async (value) => {
             const id = normalizeSystemId(value);
@@ -82,15 +84,14 @@ export class JdexManagerSettingTab extends PluginSettingTab {
           });
         text.inputEl.addEventListener("blur", () => {
           if (normalizeSystemId(text.getValue()) === null) {
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
-            new Notice("A system identifier is a capital letter and two digits, like D01. The value was not saved.");
+            new Notice(s.setSystemIdInvalid);
           }
         });
       });
 
     new Setting(containerEl)
-      .setName("Prefix new names with the system identifier")
-      .setDesc("New notes and folders are named D01.21.22 Title instead of 21.22 Title.")
+      .setName(s.setPrefixNames)
+      .setDesc(s.setPrefixNamesDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.prefixNamesWithSystem).onChange(async (value) => {
           this.plugin.settings.prefixNamesWithSystem = value;
@@ -98,19 +99,13 @@ export class JdexManagerSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Templates").setHeading();
+    new Setting(containerEl).setName(s.setTemplates).setHeading();
 
-    const labels: Record<JdexNoteType, string> = {
-      id: "Template for IDs",
-      cabecera: "Template for headers",
-      categoria: "Template for categories",
-      area: "Template for areas",
-    };
+    const labels: Record<JdexNoteType, string> = s.setTemplateFor;
     for (const type of Object.keys(labels) as JdexNoteType[]) {
       new Setting(containerEl)
         .setName(labels[type])
-        // eslint-disable-next-line obsidianmd/ui/sentence-case
-        .setDesc("Note name inside the templates folder. A note named with a category or area suffix (JDex - id - 21, JDex - id - 20-29) wins for that scope; the built-in template is used when none exists.")
+        .setDesc(s.setTemplateDesc)
         .addText((text) =>
           text.setValue(this.plugin.settings.templateNames[type]).onChange(async (value) => {
             this.plugin.settings.templateNames[type] = value.trim();
@@ -120,23 +115,23 @@ export class JdexManagerSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName("Write built-in templates")
-      .setDesc("Creates the four built-in templates in the templates folder so you can edit them. Existing notes are kept.")
-      .addButton((button) => button.setButtonText("Write").onClick(() => void this.plugin.createTemplates()));
+      .setName(s.setWriteTemplates)
+      .setDesc(s.setWriteTemplatesDesc)
+      .addButton((button) => button.setButtonText(s.setWriteButton).onClick(() => void this.plugin.createTemplates()));
 
-    new Setting(containerEl).setName("Audit").setHeading();
+    new Setting(containerEl).setName(s.setAudit).setHeading();
 
     new Setting(containerEl)
-      .setName("Automatic maintenance")
-      .setDesc("After system changes, updates derived properties, header lists and the system index, with undo history.")
+      .setName(s.setMaintenance)
+      .setDesc(s.setMaintenanceDesc)
       .addToggle((toggle) => toggle.setValue(this.plugin.settings.automaticMaintenance).onChange(async (value) => {
         this.plugin.settings.automaticMaintenance = value;
         await this.plugin.saveSettings();
       }));
 
     new Setting(containerEl)
-      .setName("Inbox age in days")
-      .setDesc("Notes created more than this many days ago in an inbox appear as informative findings.")
+      .setName(s.setInboxAge)
+      .setDesc(s.setInboxAgeDesc)
       .addText((text) => text.setValue(String(this.plugin.settings.inboxStaleDays)).onChange(async (value) => {
         const days = Number(value);
         if (!Number.isInteger(days) || days < 1) return;
@@ -145,8 +140,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       }));
 
     new Setting(containerEl)
-      .setName("Audit on startup")
-      .setDesc("Runs the audit when the vault has loaded and writes the report without opening it.")
+      .setName(s.setAuditOnStartup)
+      .setDesc(s.setAuditOnStartupDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.auditOnStartup).onChange(async (value) => {
           this.plugin.settings.auditOnStartup = value;
@@ -155,9 +150,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Health report: files per ID")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("IDs holding more files than this are listed in the health report as candidates for a + child or subfolders.")
+      .setName(s.setHealthMaxFiles)
+      .setDesc(s.setHealthMaxFilesDesc)
       .addText((text) =>
         text.setValue(String(this.plugin.settings.healthMaxFiles)).onChange(async (value) => {
           const n = Number.parseInt(value, 10);
@@ -168,9 +162,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Notes without a folder count as findings")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Off by default: a JDex note without a system folder is listed for information only.")
+      .setName(s.setNoteWithoutFolder)
+      .setDesc(s.setNoteWithoutFolderDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.noteWithoutFolderIsFinding).onChange(async (value) => {
           this.plugin.settings.noteWithoutFolderIsFinding = value;
@@ -179,9 +172,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Empty descriptions count as findings")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("The audit lists JDex notes whose descripcion is empty and proposes the first sentence of the body.")
+      .setName(s.setDescriptionFinding)
+      .setDesc(s.setDescriptionFindingDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.descriptionIsFinding).onChange(async (value) => {
           this.plugin.settings.descriptionIsFinding = value;
@@ -190,8 +182,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Areas and categories without a note count as findings")
-      .setDesc("Off by default. Turn it on once the missing category and area notes have been created.")
+      .setName(s.setStructureFinding)
+      .setDesc(s.setStructureFindingDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.structureNotesAreFindings).onChange(async (value) => {
           this.plugin.settings.structureNotesAreFindings = value;
@@ -200,21 +192,21 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Debug log")
-      .setDesc("Off by default. Writes the date, place, path, error name and a sanitized stack of each error to a note in the reports folder (last 200 lines, no note content). Useful to report a failure on a phone.")
+      .setName(s.setDebugLog)
+      .setDesc(s.setDebugLogDesc)
       .addToggle((toggle) => toggle.setValue(this.plugin.settings.debugLog).onChange(async (value) => {
         this.plugin.settings.debugLog = value;
         await this.plugin.saveSettings();
       }));
 
-    new Setting(containerEl).setName("System index").setHeading();
+    new Setting(containerEl).setName(s.setSystemIndex).setHeading();
 
     new Setting(containerEl)
-      .setName("Index note")
-      .setDesc("Note that holds the whole system between jdex:indice markers. Empty = the note of 00.00.")
+      .setName(s.setIndexNote)
+      .setDesc(s.setIndexNoteDesc)
       .addText((text) =>
         text
-          .setPlaceholder("Empty = note of 00.00")
+          .setPlaceholder(s.setIndexNotePlaceholder)
           .setValue(this.plugin.settings.systemIndexNote)
           .onChange(async (value) => {
             this.plugin.settings.systemIndexNote = value.trim();
@@ -223,8 +215,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Update the index when an ID is created")
-      .setDesc("Regenerates the block after a new note appears in the index folder.")
+      .setName(s.setIndexOnCreate)
+      .setDesc(s.setIndexOnCreateDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.updateSystemIndexOnCreate).onChange(async (value) => {
           this.plugin.settings.updateSystemIndexOnCreate = value;
@@ -232,12 +224,11 @@ export class JdexManagerSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Editor").setHeading();
+    new Setting(containerEl).setName(s.setEditor).setHeading();
 
     new Setting(containerEl)
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setName("Autocomplete IDs while typing")
-      .setDesc("Typing 21.2 offers the IDs that start with it.")
+      .setName(s.setAutocomplete)
+      .setDesc(s.setAutocompleteDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autocomplete).onChange(async (value) => {
           this.plugin.settings.autocomplete = value;
@@ -246,13 +237,12 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Autocomplete inserts")
-      .setDesc("Enter inserts a link to the JDex note or the bare number; Shift+Enter always inserts the number.")
+      .setName(s.setAutocompleteInserts)
+      .setDesc(s.setAutocompleteInsertsDesc)
       .addDropdown((d) =>
         d
-          // eslint-disable-next-line obsidianmd/ui/sentence-case
-          .addOption("link", "Link to the JDex note")
-          .addOption("number", "Number only")
+          .addOption("link", s.setInsertLink)
+          .addOption("number", s.setInsertNumber)
           .setValue(this.plugin.settings.autocompleteInsert)
           .onChange(async (value) => {
             this.plugin.settings.autocompleteInsert = value === "number" ? "number" : "link";
@@ -261,8 +251,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Clickable numbers in reading view")
-      .setDesc("A bare 21.22 in reading view links to its JDex note. The file is not modified.")
+      .setName(s.setReadingLinks)
+      .setDesc(s.setReadingLinksDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.readingLinks).onChange(async (value) => {
           this.plugin.settings.readingLinks = value;
@@ -270,12 +260,11 @@ export class JdexManagerSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Coherence").setHeading();
+    new Setting(containerEl).setName(s.setCoherence).setHeading();
 
     new Setting(containerEl)
-      .setName("Rename pairs without asking")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("When a JDex note or an ID folder is renamed, rename its partner at once instead of showing a confirmation.")
+      .setName(s.setRenamePairs)
+      .setDesc(s.setRenamePairsDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.renamePairsWithoutAsking).onChange(async (value) => {
           this.plugin.settings.renamePairsWithoutAsking = value;
@@ -284,8 +273,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Live header lists")
-      .setDesc("Regenerate the children list between the jdex:hijos markers of header notes when an ID is created or renamed.")
+      .setName(s.setLiveHeaders)
+      .setDesc(s.setLiveHeadersDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.liveHeaders).onChange(async (value) => {
           this.plugin.settings.liveHeaders = value;
@@ -293,13 +282,14 @@ export class JdexManagerSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Files").setHeading();
+    new Setting(containerEl).setName(s.setFiles).setHeading();
 
     new Setting(containerEl)
-      .setName("Date format")
-      .setDesc("Prefix added when dating a file name and when archiving.")
+      .setName(s.setDateFormat)
+      .setDesc(s.setDateFormatDesc)
       .addDropdown((d) =>
         d
+          // A date format, the same in every language.
           // eslint-disable-next-line obsidianmd/ui/sentence-case
           .addOption("YYYY-MM-DD", "YYYY-MM-DD")
           // eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -312,8 +302,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Date files when they are created inside an ID")
-      .setDesc("Off by default. Never touches JDex notes or management folders (.00 to .09).")
+      .setName(s.setDateOnCreate)
+      .setDesc(s.setDateOnCreateDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.dateOnCreate).onChange(async (value) => {
           this.plugin.settings.dateOnCreate = value;
@@ -322,9 +312,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Date files when moving them to an ID")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Off by default. Applies to \"Move active file to an ID\" when the target is a content ID.")
+      .setName(s.setDateOnMove)
+      .setDesc(s.setDateOnMoveDesc(s.cmdMoveToId))
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.dateOnMove).onChange(async (value) => {
           this.plugin.settings.dateOnMove = value;
@@ -332,12 +321,11 @@ export class JdexManagerSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Subfolder pattern").setHeading();
+    new Setting(containerEl).setName(s.setPattern).setHeading();
 
     new Setting(containerEl)
-      .setName("Default pattern")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Folders created inside a new ID, one per line (for example 70 Adjuntos). Empty = none.")
+      .setName(s.setDefaultPattern)
+      .setDesc(s.setDefaultPatternDesc)
       .addTextArea((text) =>
         text.setValue(this.plugin.settings.subfolderPattern).onChange(async (value) => {
           this.plugin.settings.subfolderPattern = value;
@@ -346,9 +334,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Pattern per category")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("One line per category: 21: 40 Audits y revisiones, 70 Adjuntos. Overrides the default for that category.")
+      .setName(s.setCategoryPattern)
+      .setDesc(s.setCategoryPatternDesc)
       .addTextArea((text) =>
         text.setValue(formatCategoryPatterns(this.plugin.settings.subfolderPatternsByCategory)).onChange(async (value) => {
           this.plugin.settings.subfolderPatternsByCategory = parseCategoryPatterns(value);
@@ -356,16 +343,15 @@ export class JdexManagerSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Create ID").setHeading();
+    new Setting(containerEl).setName(s.cmdCreateId).setHeading();
 
     new Setting(containerEl)
-      .setName("After creating an ID with its folder")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Open the JDex note, or the note plus a notice with the folder path (Obsidian has no API to reveal a folder).")
+      .setName(s.setAfterCreate)
+      .setDesc(s.setAfterCreateDesc)
       .addDropdown((d) =>
         d
-          .addOption("note", "Open the note")
-          .addOption("folder", "Open the note and show the folder path")
+          .addOption("note", s.setOpenNote)
+          .addOption("folder", s.setOpenNoteAndFolder)
           .setValue(this.plugin.settings.afterCreateOpen)
           .onChange(async (value) => {
             this.plugin.settings.afterCreateOpen = value === "folder" ? "folder" : "note";
@@ -374,8 +360,8 @@ export class JdexManagerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Create the folder by default")
-      .setDesc("Initial state of the checkbox in the dialog that creates an ID. The dialog remembers your last choice.")
+      .setName(s.setFolderByDefault)
+      .setDesc(s.setFolderByDefaultDesc)
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.createFolderByDefault).onChange(async (value) => {
           this.plugin.settings.createFolderByDefault = value;
@@ -389,7 +375,7 @@ export class JdexManagerSettingTab extends PluginSettingTab {
     desc: string,
     get: () => string,
     set: (value: string) => void,
-    placeholder = "Path inside the vault",
+    placeholder = t().setFolderPlaceholder,
   ): void {
     new Setting(this.containerEl)
       .setName(name)
