@@ -10,6 +10,7 @@
  * cuerpo nuevo no da ninguno (`deriveNoteKeepingTitle`): el plugin ya no lo calcula.
  */
 import type { PluginNote, PluginNoteRewrite, PluginVault } from 'hebra-plugin-api';
+import { JdexJournalSaveError } from './jdex-journal';
 
 /** Lo que usa este fichero del `vault` de la API. */
 export type JdexRewriteLibrary = Pick<PluginVault, 'noteRead' | 'notesRewriteBatch'>;
@@ -41,9 +42,15 @@ export class JdexPartialRewriteError extends Error {
   readonly written: readonly string[];
   readonly unwritten: readonly string[];
   constructor(written: readonly string[], unwritten: readonly string[], cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
     super(
-      `Se escribieron ${written.length} nota(s) antes del fallo y ${unwritten.length} quedaron sin escribir. ` +
-        `Lo escrito queda en el diario y se puede deshacer. Causa: ${cause instanceof Error ? cause.message : String(cause)}`
+      // A journal that could not be saved is the cause: the last batch may even have been
+      // written, and nothing is undoable after a close until the journal is saved again.
+      cause instanceof JdexJournalSaveError
+        ? `Se escribieron al menos ${written.length} nota(s) antes del fallo y ${unwritten.length} quedaron sin confirmar. ` +
+            `El diario de deshacer no se pudo guardar: lo escrito sigue en el diario en memoria y se guardará con el próximo cambio; si cierras Hebra antes, no se podrá deshacer. Causa: ${reason}`
+        : `Se escribieron ${written.length} nota(s) antes del fallo y ${unwritten.length} quedaron sin escribir. ` +
+            `Lo escrito queda en el diario y se puede deshacer. Causa: ${reason}`
     );
     this.name = 'JdexPartialRewriteError';
     this.written = written;

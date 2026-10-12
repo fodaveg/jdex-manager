@@ -8,8 +8,8 @@ import { DEFAULT_SETTINGS, JOURNAL_VERSION, type Operation } from '../../src/heb
 import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { guardJdexJournal } from '../../src/hebra/jdex-lifecycle';
 import { createJdexFolderRenameGuard } from '../../src/hebra/jdex-folder-rename';
-import { rewriteJdexNotes } from '../../src/hebra/jdex-write';
-import { createJdexJournal, type JdexJournal, type JdexJournalEffect } from '../../src/hebra/jdex-journal';
+import { JDEX_REWRITE_BATCH_MAX, JdexPartialRewriteError, rewriteJdexNotes } from '../../src/hebra/jdex-write';
+import { createJdexJournal, JdexJournalSaveError, type JdexJournal, type JdexJournalEffect } from '../../src/hebra/jdex-journal';
 import { activateJdex } from './support/activate';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 
@@ -258,6 +258,37 @@ describe('FH 7: the journal fits in the settings Hebra syncs', () => {
     expect(trimmed).toEqual(['«A» ya no se puede deshacer: el diario de deshacer superaba el tamaño que Hebra sincroniza entre dispositivos.']);
     expect(JSON.stringify(await api.storage.settings.load()).length).toBeLessThanOrEqual(HOST_MAX_SYNCED_SETTINGS_CHARS);
     expect((await journal.undoLast(journal.entries()[1].id)).undone).toBe(1);
+  });
+});
+
+describe('FH 8: a partial rewrite says whether what was written can be undone', () => {
+  async function failSecondBatch(cause: Error): Promise<Error> {
+    const vault = new FakeJdexVault();
+    vault.seedFolder(fakeFolder('f1', null, '00.00 JDex'));
+    const ids = Array.from({ length: JDEX_REWRITE_BATCH_MAX + 1 }, (_, i) => `n${i}`);
+    for (const id of ids) vault.seedNote(fakeNote(id, 'f1', `# ${id}\n`));
+    let calls = 0;
+    const library = {
+      noteRead: (id: string) => vault.noteRead(id),
+      notesRewriteBatch: (...args: Parameters<FakeJdexVault['notesRewriteBatch']>) => {
+        calls += 1;
+        if (calls === 2) return Promise.reject(cause);
+        return vault.notesRewriteBatch(...args);
+      }
+    };
+    return rewriteJdexNotes(library, ids, ({ body }) => `${body}editado\n`).then(() => { throw new Error('no falló'); }, (error: Error) => error);
+  }
+
+  it('when the journal could not be saved, it does not promise an undo', async () => {
+    const error = await failSecondBatch(new JdexJournalSaveError(new Error('disco lleno')));
+    expect(error).toBeInstanceOf(JdexPartialRewriteError);
+    expect(error.message).not.toContain('se puede deshacer');
+    expect(error.message).toContain('no se pudo guardar');
+  });
+
+  it('control: any other cause keeps the undo hint', async () => {
+    const error = await failSecondBatch(new Error('host caído'));
+    expect(error.message).toContain('se puede deshacer');
   });
 });
 
