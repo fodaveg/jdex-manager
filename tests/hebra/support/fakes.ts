@@ -14,8 +14,8 @@
  *   `markdown.setProperty` de doble (el del host falso lanza «no implementado»).
  * - `fakeSetProperty`: LA parte que no es de este repo. El escritor de propiedades de
  *   verdad es el de Hebra (`setMarkdownProperty`, conserva el frontmatter byte a byte);
- *   aquí solo se imita su formato (`clave: "valor"`, JSON) para que las pruebas del
- *   adaptador vean el cuerpo que llegaría a Hebra.
+ *   aquí va su port fiel (`host-set-property.ts`), medido contra el host, para que las
+ *   pruebas del adaptador vean el cuerpo que llegaría a Hebra.
  */
 import { vi } from 'vitest';
 import type {
@@ -44,6 +44,7 @@ import type {
   PluginWorkspace
 } from 'hebra-plugin-api';
 import { createFakePluginApi, FAKE_ROOT_FOLDER_ID, type FakePluginApi } from 'hebra-plugin-api/testing';
+import { hostSetProperty } from './host-set-property';
 
 export { FAKE_ROOT_FOLDER_ID };
 
@@ -415,37 +416,18 @@ export class FakeJdexVault implements PluginVault {
 
 // ---- markdown ----
 
-/** El `markdown` del host falso: `frontmatterRange` y `withTitle` son aproximaciones del de Hebra. */
-const MARKDOWN: PluginMarkdown = createFakePluginApi().api.markdown;
-
 /**
- * Doble de `api.markdown.setProperty` (ver la cabecera): `clave: "valor"` en JSON, la línea
- * existente sustituida (o quitada con `null`) o una línea nueva antes del cierre del
- * frontmatter, que se crea si no hay. No imita los casos «no parcheable» de Hebra.
+ * Doble de `api.markdown.setProperty`: el port fiel de `setMarkdownProperty` de Hebra
+ * (`support/host-set-property.ts`), comprobado contra casos medidos en el host. Incluye
+ * los casos «no parcheable» (clave repetida, línea raíz no reconocida…), en los que el
+ * host devuelve el cuerpo sin cambios, y `null`, que deja la clave vacía.
  */
 export function fakeSetProperty(
   body: string,
   key: string,
   value: string | readonly string[] | null
 ): string {
-  const range = MARKDOWN.frontmatterRange(body);
-  const line = value === null ? null : `${key}: ${JSON.stringify(value)}`;
-  if (!range) {
-    return line === null ? body : `---\n${line}\n---\n${body}`;
-  }
-  const block = body.slice(0, range.end);
-  const rest = body.slice(range.end);
-  const lines = block.split('\n');
-  const existing = lines.findIndex((entry) => new RegExp(`^${key}\\s*:`, 'u').test(entry));
-  if (existing >= 0) {
-    if (line === null) lines.splice(existing, 1);
-    else lines[existing] = line;
-  } else if (line !== null) {
-    // Antes del delimitador de cierre: la última línea con contenido del bloque.
-    const closing = block.endsWith('\n') ? lines.length - 2 : lines.length - 1;
-    lines.splice(closing, 0, line);
-  }
-  return lines.join('\n') + rest;
+  return hostSetProperty(body, key, value);
 }
 
 // ---- workspace ----

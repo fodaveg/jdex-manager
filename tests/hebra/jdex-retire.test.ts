@@ -12,7 +12,8 @@ const markdown = {
   setProperty: fakeSetProperty,
   frontmatter(body: string): Record<string, unknown> | null {
     const block = /^---\r?\n([\s\S]*?)\r?\n---/u.exec(body)?.[1];
-    const value: unknown = block ? parseYaml(block) : null;
+    // Like the host projection, a repeated key does not throw: the last one wins.
+    const value: unknown = block ? parseYaml(block, { uniqueKeys: false }) : null;
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
   }
 };
@@ -142,6 +143,25 @@ describe('retireJdexId', () => {
     const library = new FakeJdexVault();
 
     await expect(retireJdexId(library, markdown, walk, index, entry, '2026-09-28')).rejects.toThrow();
+  });
+
+  it('a note with a repeated frontmatter key fails clearly without touching the note or the folder', async () => {
+    const { index, walk, entry, library } = fixture();
+    const body = '---\ntipo: id\ntipo: otro\n---\n# 21.11 Hebra\n\nDescripción del ID.\n';
+    library.saveElsewhere('n-2111', body);
+    const calls = library.rewriteCalls.length;
+    await expect(retireJdexId(library, markdown, walk, index, entry, '2026-09-28')).rejects.toThrow(/no se pudo escribir tipo/);
+    expect(library.rewriteCalls).toHaveLength(calls);
+    expect((await library.noteRead('n-2111'))?.body).toBe(body);
+    expect((await library.foldersList()).find((folder) => folder.id === 'f-2111')).toMatchObject({ name: '21.11 Hebra', parentId: 'f-cat21' });
+  });
+
+  it('control: the same note with a single tipo key is retired', async () => {
+    const { index, walk, entry, library } = fixture();
+    library.saveElsewhere('n-2111', '---\ntipo: id\n---\n# 21.11 Hebra\n\nDescripción del ID.\n');
+    const outcome = await retireJdexId(library, markdown, walk, index, entry, '2026-09-28');
+    expect(outcome.moved).toBe(true);
+    expect((await library.noteRead('n-2111'))?.body).toContain('tipo: "archivado"');
   });
 
   it('una nota bloqueada u obsoleta aborta sin tocar la carpeta', async () => {
