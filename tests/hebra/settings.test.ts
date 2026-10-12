@@ -38,7 +38,7 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       systemRoot: 'R',
       templatesFolder: 'T',
       reportsFolder: 'I',
-      systemId: 'S',
+      systemId: 'D01',
       systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
       createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
       automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD'
@@ -48,12 +48,49 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       systemRoot: 'R',
       templatesFolder: 'T',
       reportsFolder: 'I',
-      systemId: 'S',
+      systemId: 'D01',
       systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
       createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
       automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD',
-      autocomplete: true, autocompleteInsert: 'link'
+      autocomplete: true, autocompleteInsert: 'link',
+      prefixNamesWithSystem: false,
+      createFolderByDefault: false, descriptionIsFinding: true, noteWithoutFolderIsFinding: false, renamePairsWithoutAsking: false,
+      templateNames: DEFAULT_SETTINGS.templateNames
     });
+  });
+
+  it('persists the settings Hebra was missing: template names and four switches (263b284a)', async () => {
+    const storage = memoryStorage();
+    const next = {
+      ...DEFAULT_SETTINGS,
+      createFolderByDefault: true, descriptionIsFinding: false, noteWithoutFolderIsFinding: true, renamePairsWithoutAsking: true,
+      healthMaxFiles: 80,
+      templateNames: { ...DEFAULT_SETTINGS.templateNames, id: 'Mi plantilla de ID' }
+    };
+    await persistJdexSettings(storage, next);
+    expect(await loadJdexSettings(storage)).toEqual(next);
+  });
+
+  it('a stored template name that is empty or not text keeps the default of that type', async () => {
+    const storage = memoryStorage();
+    await storage.save({ templateNames: { id: '  ', area: 7, cabecera: 'Mi cabecera' } });
+    expect((await loadJdexSettings(storage)).templateNames).toEqual({ ...DEFAULT_SETTINGS.templateNames, cabecera: 'Mi cabecera' });
+  });
+
+  it('persists prefixNamesWithSystem and a valid system id, normalized (27d68243)', async () => {
+    const storage = memoryStorage();
+    await persistJdexSettings(storage, { ...DEFAULT_SETTINGS, systemId: 'D01', prefixNamesWithSystem: true });
+    expect(await loadJdexSettings(storage)).toMatchObject({ systemId: 'D01', prefixNamesWithSystem: true });
+    await storage.save({ systemId: ' d02 ' });
+    expect((await loadJdexSettings(storage)).systemId).toBe('D02');
+  });
+
+  it('drops a stored system id the parser cannot read (d1), keeping the default', async () => {
+    const storage = memoryStorage();
+    await storage.save({ systemId: 'd1', prefixNamesWithSystem: true });
+    const loaded = await loadJdexSettings(storage);
+    expect(loaded.systemId).toBe('');
+    expect(loaded.prefixNamesWithSystem).toBe(true);
   });
 
   it('el autocompletado de Hebra inserta el número por defecto y respeta lo guardado', async () => {

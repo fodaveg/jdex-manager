@@ -35,4 +35,16 @@ describe('mountJdexRenameWarningView', () => {
     (el2.querySelector('.hebra-jdex-dialog-secondary') as HTMLButtonElement).click();
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it('el botón que confirma lleva su propio verbo («Retirar») y sigue sin foco inicial (a03f9648)', () => {
+    const onContinue = vi.fn();
+    const el = document.createElement('div');
+    document.body.append(el);
+    mountJdexRenameWarningView(el, { message: 'x', confirmLabel: 'Retirar', onContinue, onCancel: vi.fn() });
+    const confirm = el.querySelector('.hebra-jdex-dialog-primary') as HTMLButtonElement;
+    expect(confirm.textContent).toBe('Retirar');
+    expect(document.activeElement).not.toBe(confirm);
+    confirm.click();
+    expect(onContinue).toHaveBeenCalledTimes(1);
+  });
 });

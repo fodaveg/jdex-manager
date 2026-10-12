@@ -1,14 +1,18 @@
 /**
  * El aviso de «JDex: avisar antes de renumerar un ID o cambiarlo de categoría al
  * renombrar o mover» (lote 3, tarea 1): el mensaje de `jdexRenameWarningMessage` con
- * «Cancelar» (foco inicial, la opción segura) y «Continuar». Nunca actúa sola: quien
- * la abre (`jdex-runtime.ts`) es quien deja pasar o no la escritura normal de Hebra
- * según qué botón se pulse.
+ * «Cancelar» (foco inicial, la opción segura) y el botón que confirma, con su propio
+ * verbo (`confirmLabel`). Nunca actúa sola: quien la abre decide qué hacer con cada
+ * botón (`jdex-folder-rename.ts` rehace el cambio solo al confirmar; retirar un ID
+ * retira solo al confirmar).
  */
 import { primaryButton } from './jdex-dialog-fields';
 
 export interface JdexRenameWarningViewOptions {
   message: string;
+  /** The verb of the confirming button («Retirar», «Renombrar igualmente»); «Continuar»
+   *  when absent. */
+  confirmLabel?: string;
   onContinue(): void;
   onCancel(): void;
 }
@@ -29,7 +33,7 @@ export function mountJdexRenameWarningView(
   cancel.className = 'hebra-jdex-dialog-secondary';
   cancel.textContent = 'Cancelar';
   cancel.addEventListener('click', () => options.onCancel());
-  const proceed = primaryButton('Continuar', () => options.onContinue());
+  const proceed = primaryButton(options.confirmLabel ?? 'Continuar', () => options.onContinue());
   actions.append(cancel, proceed);
   el.append(actions);
 

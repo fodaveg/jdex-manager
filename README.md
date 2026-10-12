@@ -53,6 +53,29 @@ What works today (0.4.1):
 
 Categories come from the folders under the system root (`20-29 …/21 …`) and from any `AC Title` notes in the JDex; IDs come from both the JDex notes and the ID folders.
 
+## Settings by host
+
+Both hosts share the engine defaults. Hebra stores its settings per library and device; "n/a" marks settings that have no meaning there.
+
+| Setting | Obsidian | Hebra |
+| --- | --- | --- |
+| JDex folder, system root, templates folder, reports folder | Yes | Yes |
+| System id (`D01`) and "put it in front of new names" | Yes | Yes (an invalid id such as `d1` is rejected) |
+| Template name per note type | Yes | Yes |
+| Write the built-in templates into the templates folder | Command | Button and command (existing notes are never overwritten) |
+| Create the folder too (initial value) | Yes | Yes |
+| Subfolder pattern, per-category patterns, create the pattern by default | Yes | Yes |
+| Live headers, automatic maintenance, system index note | Yes | Yes |
+| Empty description is a finding; JDex note without folder is a finding; areas and categories without note are findings | Yes | Yes |
+| Rename the note/folder partner without asking | Yes | Yes |
+| Archive date format, inbox age threshold, health report file limit | Yes | Yes |
+| Update the system index after creating | Yes | n/a (always refreshed after a JDex write) |
+| Audit on startup | Yes | n/a (the audit runs on every index rebuild) |
+| What to open after creating | Yes | n/a (the note opens) |
+| Date files on create or on move | Yes | n/a |
+| Clickable numbers in reading view | Yes | n/a |
+| Autocomplete and what it inserts | Yes (inserts a link by default) | Yes (inserts the number by default) |
+
 ## Install
 
 **BRAT**: add `fodaveg/jdex-manager` as a beta plugin.

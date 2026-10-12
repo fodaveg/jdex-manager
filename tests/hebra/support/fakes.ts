@@ -460,6 +460,11 @@ export function fakeSetProperty(
 
 // ---- workspace ----
 
+/** Hebra's per-guard deadline in `confirmFolderRename` (`src/lib/plugins/api/
+ *  workspace-bridge.ts`, `FOLDER_RENAME_GUARD_TIMEOUT_MS`): past it the guard counts as
+ *  allowing the change. Keep in step with the host. */
+export const FOLDER_RENAME_GUARD_TIMEOUT_MS = 5_000;
+
 /** `workspace` que el test dispara a mano (como Hebra al abrir una nota, cambiar carpetas…). */
 export class FakeWorkspace {
   active: PluginActiveNote | null = null;
@@ -507,12 +512,39 @@ export class FakeWorkspace {
     for (const listener of [...this.#titleListeners]) listener(event);
   }
 
-  /** Como Hebra antes de `folderRename`/`folderMove`: se pregunta a las guardias en orden y
-   *  basta un `false`. */
+  /** Faults the host would report (`workspace.onBeforeFolderRename`): a guard that threw or
+   *  did not answer in time. */
+  readonly guardFaults: unknown[] = [];
+
+  /** Like Hebra's `confirmFolderRename` (`workspace-bridge.ts`): the guards are asked in
+   *  order and one `false` is enough; each one gets `FOLDER_RENAME_GUARD_TIMEOUT_MS`, and a
+   *  guard that throws or does not answer in time is reported and counts as ALLOW. */
   async askFolderRename(event: PluginFolderRenameEvent): Promise<boolean> {
     for (const guard of [...this.#guards]) {
-      if (!(await guard(event))) return false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const deadline = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`la guardia no respondió en ${FOLDER_RENAME_GUARD_TIMEOUT_MS / 1000} s`)),
+            FOLDER_RENAME_GUARD_TIMEOUT_MS
+          );
+        });
+        if ((await Promise.race([guard(event), deadline])) === false) return false;
+      } catch (error) {
+        this.guardFaults.push(error);
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    return true;
+  }
+
+  /** Like Hebra's sidebar (`LibraryApp.svelte`, `onrenamefolder`/`onmovefolder`): asks the
+   *  guards and, if they allow it, renames or moves the folder in `vault`. */
+  async changeFolderAsHost(vault: PluginVault, event: PluginFolderRenameEvent): Promise<boolean> {
+    if (!(await this.askFolderRename(event))) return false;
+    if (event.kind === 'folder-rename') await vault.folderRename(event.folderId, event.newName);
+    else await vault.folderMove(event.folderId, event.newParentId);
     return true;
   }
 
@@ -534,7 +566,7 @@ function domUi(base: PluginUi): PluginUi {
       document.body.append(dialog);
       const cleanup = mount(dialog);
       let closed = false;
-      return {
+      const handle: PluginModalHandle = {
         close() {
           if (closed) return;
           closed = true;
@@ -543,6 +575,13 @@ function domUi(base: PluginUi): PluginUi {
           options?.onClosed?.();
         }
       };
+      // Escape on a `<dialog>` fires `cancel`; the host closes the modal (and calls
+      // `onClosed`) without any button. Tests dispatch `new Event('cancel')`.
+      dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        handle.close();
+      });
+      return handle;
     },
     notice(text, onClick) {
       base.notice(text, onClick);

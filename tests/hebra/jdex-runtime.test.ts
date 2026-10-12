@@ -398,7 +398,7 @@ describe('activate', () => {
       undo: vi.fn()
     });
 
-    expect(document.querySelector('.hebra-module-notice')?.textContent).toContain('Renombrar carpeta');
+    expect(document.querySelector('.hebra-module-notice')?.textContent).toContain('Pulsa aquí para renombrarla');
     expect(document.querySelector('.hebra-module-notice')?.textContent).not.toContain('pasaría');
   });
 
