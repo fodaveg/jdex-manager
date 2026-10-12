@@ -31,9 +31,13 @@ const MANIFEST_FILE = 'hebra.json';
  * Ranges declared in `hebra.json` for the shared modules the bundle actually imports
  * (spec section 3.2). They are the MINIMUM the plugin needs, not the version installed
  * here: Hebra checks them against its own copy at load time and turns the plugin off if
- * one is not satisfied. `assertInstalledSatisfies` keeps them honest at build time.
+ * one is not satisfied. `assertInstalledSatisfies` keeps them honest at build time, and
+ * tests/hebra/shared-minimums.test.ts justifies them: every symbol the plugin uses must exist
+ * in the declared minimum (devDependencies `codemirror-*-min`, pinned to these lower bounds;
+ * change both together). The symbols used exist since 6.0, so these floors are conservative,
+ * not required by the code; do not raise them without a symbol that needs it.
  */
-const SHARED_RANGES = {
+export const SHARED_RANGES = {
   '@codemirror/state': '^6.5.0',
   '@codemirror/view': '^6.30.0'
 };

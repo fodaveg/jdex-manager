@@ -28,7 +28,8 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
     const value = source[key];
     if (typeof value === 'string') (out as Record<string, unknown>)[key] = value;
   }
-  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'autocomplete'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  if (source.autocompleteInsert === 'link' || source.autocompleteInsert === 'number') out.autocompleteInsert = source.autocompleteInsert;
   if (source.dateFormat === 'YYYY-MM-DD' || source.dateFormat === 'YYYY-MM') out.dateFormat = source.dateFormat;
   if (typeof source.inboxStaleDays === 'number' && Number.isInteger(source.inboxStaleDays) && source.inboxStaleDays >= 1) out.inboxStaleDays = source.inboxStaleDays;
   if (typeof source.healthMaxFiles === 'number' && Number.isFinite(source.healthMaxFiles) && source.healthMaxFiles >= 0) out.healthMaxFiles = source.healthMaxFiles;
@@ -38,15 +39,19 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
   return out;
 }
 
+/** En Hebra el autocompletado inserta el número a secas (así lo hacía antes de existir el
+ *  ajuste); el `link` del motor es el valor por defecto de Obsidian y aquí es opt-in. */
+export const HEBRA_DEFAULTS: JdexManagerSettings = { ...DEFAULT_SETTINGS, autocompleteInsert: 'number' };
+
 /** Ajustes guardados de esta biblioteca, sobre los valores por defecto del motor; sin
- *  nada guardado (o corrupto), `DEFAULT_SETTINGS` tal cual. */
+ *  nada guardado (o corrupto), los valores por defecto (`HEBRA_DEFAULTS`). */
 export async function loadJdexSettings(storage: JdexSettingsStorage): Promise<JdexManagerSettings> {
   try {
     const raw = await storage.load<unknown>();
-    if (raw === null) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...normalizeStored(raw) };
+    if (raw === null) return HEBRA_DEFAULTS;
+    return { ...HEBRA_DEFAULTS, ...normalizeStored(raw) };
   } catch {
-    return DEFAULT_SETTINGS;
+    return HEBRA_DEFAULTS;
   }
 }
 

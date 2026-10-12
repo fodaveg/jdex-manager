@@ -34,3 +34,11 @@ export class EditorSuggest<T> {
 export class ItemView {
   constructor(_leaf: unknown) {}
 }
+export const Platform = { isMobile: false, isMacOS: false };
+export class AbstractInputSuggest<T> {
+  constructor(_app: unknown, _el: unknown) {}
+  close(): void {}
+  getSuggestions(_query: string): T[] {
+    return [];
+  }
+}

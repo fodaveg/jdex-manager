@@ -11,6 +11,7 @@ import { ensureFolder } from "./create";
 import { writeDailyReport } from "./report-write";
 import { patchFrontmatter, readFrontmatter } from "./frontmatter-lines";
 import { resolveTemplate } from "./templates";
+import { fileDate } from "./file-date";
 import type { Effect } from "../jd/journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
 import type { JdIndex } from "../jd/index";
@@ -69,7 +70,7 @@ export async function collectAudit(app: App, settings: JdexManagerSettings): Pro
     },
   });
   findings.push(...staleInboxFindings(index, app.vault.getAllLoadedFiles().filter((file): file is TFile => file instanceof TFile).map((file) => ({
-    path: file.path, folderPath: file.path.slice(0, file.path.lastIndexOf('/')), createdAt: file.stat.ctime,
+    path: file.path, folderPath: file.path.slice(0, file.path.lastIndexOf('/')), createdAt: fileDate(app, file).getTime(),
   })), settings.inboxStaleDays, Date.now()));
   return { index, findings, filePaths };
 }

@@ -3,6 +3,7 @@ import { categoryOfPath, type DateFormat, zeroOf } from "../jd/files";
 import type { JdIndex } from "../jd/index";
 import { confirm } from "./confirm";
 import { IdSuggestModal } from "./go-to-id";
+import { fileDate } from "../vault/file-date";
 import { moveInto } from "../vault/files";
 
 export interface InboxContext {
@@ -77,7 +78,7 @@ export class ProcessInboxModal extends Modal {
         b
           .setButtonText(archive?.folderPath ? `Archive to ${archive.id}` : "Archive")
           .setDisabled(!archive?.folderPath)
-          .onClick(() => void this.act(() => moveInto(this.app, file, archive!.folderPath!, { when: new Date(file.stat.ctime), format: this.ctx.dateFormat }))),
+          .onClick(() => void this.act(() => moveInto(this.app, file, archive!.folderPath!, { when: fileDate(this.app, file), format: this.ctx.dateFormat }))),
       )
       .addButton((b) =>
         b.setButtonText("Skip").onClick(() => {

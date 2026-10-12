@@ -2,6 +2,7 @@ import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import {
+  HEBRA_DEFAULTS,
   autodetectJdexSettings,
   loadJdexSettings,
   persistJdexSettings,
@@ -17,7 +18,7 @@ function memoryStorage() {
 
 describe('loadJdexSettings / persistJdexSettings', () => {
   it('sin nada guardado, los valores por defecto del motor', async () => {
-    expect(await loadJdexSettings(memoryStorage())).toEqual(DEFAULT_SETTINGS);
+    expect(await loadJdexSettings(memoryStorage())).toEqual(HEBRA_DEFAULTS);
   });
 
   it('guarda y relee solo los campos de esta versión, con el resto por defecto', async () => {
@@ -50,28 +51,38 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       systemId: 'S',
       systemIndexNote: '', subfolderPattern: '', subfolderPatternsByCategory: {},
       createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
-      automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD'
+      automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD',
+      autocomplete: true, autocompleteInsert: 'link'
     });
+  });
+
+  it('el autocompletado de Hebra inserta el número por defecto y respeta lo guardado', async () => {
+    expect(HEBRA_DEFAULTS.autocompleteInsert).toBe('number');
+    const storage = memoryStorage();
+    await storage.save({ autocomplete: false, autocompleteInsert: 'link' });
+    expect(await loadJdexSettings(storage)).toMatchObject({ autocomplete: false, autocompleteInsert: 'link' });
+    await storage.save({ autocomplete: 'no', autocompleteInsert: 'otro' });
+    expect(await loadJdexSettings(storage)).toMatchObject({ autocomplete: true, autocompleteInsert: 'number' });
   });
 
   it('un valor guardado que no es un objeto (o una lectura que falla) cae a los valores por defecto', async () => {
     for (const raw of ['texto', 42, [1, 2], true]) {
       const storage = memoryStorage();
       await storage.save(raw);
-      expect(await loadJdexSettings(storage)).toEqual(DEFAULT_SETTINGS);
+      expect(await loadJdexSettings(storage)).toEqual(HEBRA_DEFAULTS);
     }
     const broken: JdexSettingsStorage = {
       load: () => Promise.reject(new Error('almacén caído')),
       save: async () => {}
     };
-    expect(await loadJdexSettings(broken)).toEqual(DEFAULT_SETTINGS);
+    expect(await loadJdexSettings(broken)).toEqual(HEBRA_DEFAULTS);
   });
 
   it('un campo que no es de esta versión (un valor ajeno) se descarta', async () => {
     const storage = memoryStorage();
     await storage.save({ jdexFolder: 42, otraCosa: 'x' });
     const loaded = await loadJdexSettings(storage);
-    expect(loaded).toEqual(DEFAULT_SETTINGS);
+    expect(loaded).toEqual(HEBRA_DEFAULTS);
   });
 });
 
