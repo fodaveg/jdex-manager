@@ -1,4 +1,4 @@
-import { type App, normalizePath, Notice, TFile, TFolder } from "obsidian";
+import { type App, normalizePath, Notice, TFile } from "obsidian";
 import { auditSystem, isConflictCopyPath, type Finding, type Fix, type NoteMeta } from "../jd/audit";
 import { renderReport, reportFileName } from "../jd/audit-report";
 import { relativeTo } from "../jd/detect";
@@ -8,6 +8,7 @@ import type { JdexManagerSettings } from "../settings";
 import { patternFor } from "../jd/patterns";
 import { allFolderPaths, scanVault } from "./scan";
 import { ensureFolder } from "./create";
+import { writeDailyReport } from "./report-write";
 import { resolveTemplate } from "./templates";
 import { durableEffect, type Effect } from "../jd/journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
@@ -88,15 +89,9 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
   const date = todayIso();
   const reportPath = normalizePath(`${settings.reportsFolder}/${reportFileName(date)}`);
   const content = renderReport(findings, date);
-  const existing = app.vault.getAbstractFileByPath(reportPath);
-  if (existing instanceof TFile) await app.vault.modify(existing, content);
-  else if (existing) throw new Error(`${reportPath} exists and is not a note.`);
-  else {
-    const folder = app.vault.getAbstractFileByPath(settings.reportsFolder);
-    if (!(folder instanceof TFolder)) await app.vault.createFolder(settings.reportsFolder);
-    await app.vault.create(reportPath, content);
-  }
-  return { findings, reportPath };
+  // A report of the day edited by hand is kept; the new one goes to «(2)».
+  const written = await writeDailyReport(app, settings.reportsFolder, reportPath, content);
+  return { findings, reportPath: written.path };
 }
 
 /**
