@@ -72,3 +72,27 @@ describe("debug log note body", () => {
     expect(noMarker).toBe("# Mi nota\n\nTexto.\n\n<!-- jdex:registro -->\n- c\n");
   });
 });
+
+describe("sanitizeStack with spaces and other hosts", () => {
+  const at = (location: string) => `Error\n    at fn (${location})`;
+  it.each([
+    [`/Users/Ana Lopez/Mi Vault/.${"obsidian"}/plugins/jdex/main.js:10:5`, "main.js:10:5"],
+    ["C:\\Users\\Ana Lopez\\Vault\\main.js:3:4", "main.js:3:4"],
+    ["file:///Users/ana/My Notes/x.js:7:8", "x.js:7:8"],
+    ["app://obsidian.md/plugins/Mi Vault/main.js:1:2", "main.js:1:2"],
+  ])("V8 location %s keeps only the file name", (location, expected) => {
+    const out = sanitizeStack(at(location));
+    expect(out).toBe(`at fn (${expected})`);
+    expect(out).not.toMatch(/Ana|Lopez|Vault|Notes|Users/u);
+  });
+
+  it("JavaScriptCore frames (iOS) lose the scheme and directories", () => {
+    const out = sanitizeStack("run@capacitor://localhost/Mi Vault/plugins/main.js:10:5\nother@app://obsidian.md/x y/main.js:1:2");
+    expect(out).toBe("run@main.js:10:5 < other@main.js:1:2");
+  });
+
+  it("keeps a bare file name and an anonymous frame", () => {
+    expect(sanitizeStack("Error\n    at main.js:1:2")).toBe("at main.js:1:2");
+    expect(sanitizeStack("Error\n    at new Foo (<anonymous>)")).toBe("at new Foo (<anonymous>)");
+  });
+});
