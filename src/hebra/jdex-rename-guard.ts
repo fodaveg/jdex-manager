@@ -17,7 +17,7 @@
  * de la carpeta se ha completado) y «none» no cambia nada del sistema JDex.
  */
 import type { PluginFolderRenameEvent } from 'hebra-plugin-api';
-import { pairAction, type JdIndex, type PairAction } from './engine';
+import { pairAction, pairBlockedByRepeat, type JdIndex, type PairAction } from './engine';
 import { jdexNoteFileStem, type JdexLibraryWalk } from './library-index';
 
 /**
@@ -103,6 +103,22 @@ export function jdexFolderPairRename(
   if (oldPath === newPath) return null;
   const action = pairAction({ oldPath, newPath, isFolder: true }, index, settings);
   return action.type === 'rename-partner' ? action : null;
+}
+
+/** A folder rename whose note would have followed but the number is repeated (`pairAction` stays
+ *  silent then): the caller says why instead of doing nothing. */
+export function jdexFolderPairBlockedByRepeat(
+  event: PluginFolderRenameEvent,
+  walk: JdexLibraryWalk,
+  index: JdIndex,
+  settings: { jdexFolder: string; systemRoot: string }
+): boolean {
+  if (event.kind !== 'folder-rename') return false;
+  const oldPath = walk.folderPaths.get(event.folderId);
+  if (oldPath === undefined) return false;
+  const parent = parentPath(oldPath);
+  const newPath = parent ? `${parent}/${event.newName}` : event.newName;
+  return oldPath !== newPath && pairBlockedByRepeat({ oldPath, newPath, isFolder: true }, index, settings);
 }
 
 /**
