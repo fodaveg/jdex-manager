@@ -36,6 +36,7 @@ import { registerReadingLinks } from "./vault/reading-links";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
 import { maintainSystem } from "./vault/maintenance";
+import { DebugLogWriter, isDebugLogPath } from "./vault/debug-log";
 import { MaintenanceGate, onceNotifier } from "./vault/maintenance-gate";
 import { createSystemReport } from "./vault/system-report";
 
@@ -52,6 +53,13 @@ export default class JdexManagerPlugin extends Plugin {
   private maintenanceRunning = false;
   private maintenanceGate = new MaintenanceGate();
   private maintenanceWarn = onceNotifier((message) => void new Notice(message));
+  private debugWriter?: DebugLogWriter;
+
+  /** Adds an error to the optional debug log; nothing happens while the setting is off. */
+  logError(where: string, error: unknown, path?: string): void {
+    this.debugWriter ??= new DebugLogWriter(this.app);
+    void this.debugWriter.record(this.settings, where, error, path);
+  }
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -385,6 +393,8 @@ export default class JdexManagerPlugin extends Plugin {
   /** Coalesces vault changes; the pass's own writes never enqueue another pass, foreign ones during it enqueue one. */
   private queueMaintenance(file: TAbstractFile, oldPath?: string): void {
     if (!this.settings.automaticMaintenance || !this.app.workspace.layoutReady) return;
+    // The debug log is written by the plugin itself: its modify must not start a pass.
+    if (isDebugLogPath(this.settings, file.path) || isDebugLogPath(this.settings, oldPath)) return;
     const relevant = (path: string) => relativeTo(this.settings.systemRoot, path) !== null || relativeTo(this.settings.jdexFolder, path) !== null;
     if (!relevant(file.path) && !(oldPath && relevant(oldPath))) return;
     if (this.maintenanceRunning) {
@@ -412,6 +422,7 @@ export default class JdexManagerPlugin extends Plugin {
     try {
       await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn);
     } catch (error) {
+      this.logError("maintainAutomatically", error);
       new Notice(`Automatic maintenance stopped: ${String(error)}`);
     } finally {
       try { await this.record("fix", "Automatic JDex maintenance", effects); }
@@ -435,6 +446,7 @@ export default class JdexManagerPlugin extends Plugin {
       const note = await createSystemReport(this.app, this.settings, effects);
       await this.app.workspace.getLeaf(false).openFile(note);
     } catch (error) {
+      this.logError("systemReport", error);
       new Notice(error instanceof Error ? error.message : String(error));
     } finally { await this.record("fix", "Create system report", effects); }
   }
@@ -482,6 +494,7 @@ export default class JdexManagerPlugin extends Plugin {
       this.refreshInboxCount();
       await this.refreshHeaders(undefined, false);
     } catch (error) {
+      this.logError("undoLast", error);
       new Notice(`Undo stopped: ${error instanceof Error ? error.message : String(error)}. The operation stays in the journal.`, 10000);
     }
   }
@@ -516,6 +529,7 @@ export default class JdexManagerPlugin extends Plugin {
         if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
       }
     } catch (error) {
+      this.logError("audit", error);
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -667,6 +681,7 @@ export default class JdexManagerPlugin extends Plugin {
         try {
           await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath });
         } catch (error) {
+          this.logError("handleRename", error);
           new Notice(error instanceof Error ? error.message : String(error));
         } finally {
           this.ownRenames?.delete(action.partnerPath);
@@ -718,6 +733,7 @@ export default class JdexManagerPlugin extends Plugin {
       new Notice(`Moved to ${to}.`);
       this.refreshInboxCount();
     } catch (error) {
+      this.logError("sendToZero", error);
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -746,6 +762,7 @@ export default class JdexManagerPlugin extends Plugin {
       try {
         await ensureFolder(this.app, wanted);
       } catch (error) {
+        this.logError("moveToIdFlow", error);
         new Notice(error instanceof Error ? error.message : String(error));
         return;
       }
@@ -759,6 +776,7 @@ export default class JdexManagerPlugin extends Plugin {
       new Notice(`Moved to ${to}.`);
       this.refreshInboxCount();
     } catch (error) {
+      this.logError("moveToIdFlow", error);
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -800,6 +818,7 @@ export default class JdexManagerPlugin extends Plugin {
       const { file } = await writeDailyReport(this.app, this.settings.reportsFolder, path, content);
       await this.app.workspace.getLeaf(false).openFile(file);
     } catch (error) {
+      this.logError("healthReport", error);
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -814,6 +833,7 @@ export default class JdexManagerPlugin extends Plugin {
       const to = await dateFile(this.app, file, this.settings.dateFormat);
       new Notice(to ? `Renamed to ${to.slice(to.lastIndexOf("/") + 1)}.` : "Already dated.");
     } catch (error) {
+      this.logError("dateActive", error);
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -939,6 +959,7 @@ export default class JdexManagerPlugin extends Plugin {
       const created = await createMissingStructureNotes(this.app, this.settings, index);
       new Notice(`${created} note(s) created.`);
     } catch (error) {
+      this.logError("createStructureNotes", error);
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -1003,6 +1024,7 @@ export default class JdexManagerPlugin extends Plugin {
       new Notice(done.join(" · "), 8000);
       await this.refreshHeaders(entry.category, false);
     } catch (error) {
+      this.logError("retireFlow", error);
       if (!recorded && effects.length > 0) {
         try {
           await this.record("retire", `Retire ${entry.id} (partial)`, effects);
@@ -1062,6 +1084,7 @@ export default class JdexManagerPlugin extends Plugin {
             await this.app.workspace.getLeaf(false).openFile(note);
           }
         } catch (error) {
+          this.logError("createIdFlow", error);
           new Notice(error instanceof Error ? error.message : String(error));
         }
       }).open();
@@ -1255,6 +1278,14 @@ class JdexManagerSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }),
       );
+
+    new Setting(containerEl)
+      .setName("Debug log")
+      .setDesc("Off by default. Writes the date, place, path, error name and a sanitized stack of each error to a note in the reports folder (last 200 lines, no note content). Useful to report a failure on a phone.")
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.debugLog).onChange(async (value) => {
+        this.plugin.settings.debugLog = value;
+        await this.plugin.saveSettings();
+      }));
 
     new Setting(containerEl).setName("System index").setHeading();
 

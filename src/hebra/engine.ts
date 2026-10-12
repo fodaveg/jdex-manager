@@ -100,7 +100,8 @@ export {
   entriesByNumber,
   pushOperation, JOURNAL_MAX, patternFor, parseCategoryPatterns, formatCategoryPatterns,
   healthFileName, renderHealthReport,
-  systemReportName, renderSystemReport, previousSystemSnapshot
+  systemReportName, renderSystemReport, previousSystemSnapshot,
+  DEBUG_LOG_TITLE, formatDebugEntry, appendDebugEntry
 } from '../jd/public';
 
 export type {

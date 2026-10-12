@@ -64,6 +64,8 @@ export interface JdexManagerSettings {
   systemId: string;
   /** Put the system identifier in front of new note and folder names (`D01.21.22 Title`). */
   prefixNamesWithSystem: boolean;
+  /** Write errors to the rolling debug log note in the reports folder. Off by default. */
+  debugLog: boolean;
 }
 
 export const DEFAULT_SETTINGS: JdexManagerSettings = {
@@ -101,6 +103,7 @@ export const DEFAULT_SETTINGS: JdexManagerSettings = {
   createPatternByDefault: true,
   systemId: "",
   prefixNamesWithSystem: false,
+  debugLog: false,
 };
 
 /** Merge stored data over the defaults, one level deep for `templateNames`. */
@@ -108,6 +111,7 @@ export function mergeSettings(stored: Partial<JdexManagerSettings> | null | unde
   const base = { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
   if (!Number.isInteger(base.inboxStaleDays) || base.inboxStaleDays < 1) base.inboxStaleDays = DEFAULT_SETTINGS.inboxStaleDays;
   base.automaticMaintenance = base.automaticMaintenance === true;
+  base.debugLog = base.debugLog === true;
   base.templateNames = { ...DEFAULT_SETTINGS.templateNames, ...(stored?.templateNames ?? {}) };
   base.subfolderPatternsByCategory = { ...(stored?.subfolderPatternsByCategory ?? {}) };
   return base;
