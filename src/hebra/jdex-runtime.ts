@@ -871,6 +871,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             `«${entry.label}» se retira: se marca archivado con la fecha de hoy y, si ` +
             `tiene carpeta, se mueve a la .09 de su categoría. El número NUNCA se ` +
             `reutiliza. ¿Confirmas?`,
+          confirmLabel: 'Retirar',
           onContinue: () => {
             handle?.close();
             void runRetireEntry(entry, currentWalk, currentIndex);
@@ -954,7 +955,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           onCopyPath: (entry) => {
             handle?.close();
             const path = entry.folderPath ?? entry.notePath;
-            if (path !== undefined) void copyToClipboard(path, 'Ruta copiada.');
+            if (path !== undefined) void copyToClipboard(path, entry.folderPath ? 'Ruta de la carpeta copiada.' : 'Ruta de la nota copiada.');
+          },
+          onCopyJdPath: (entry) => {
+            handle?.close();
+            const path = entry.notePath ?? entry.folderPath;
+            const text = path ? locate(currentIndex, { jdexFolder: settings.jdexFolder }, path)?.text : undefined;
+            void copyToClipboard(text ?? `${entry.category} › ${entry.label}`, 'Ruta JD copiada.');
           },
           onRetire: (entry) => {
             handle?.close();

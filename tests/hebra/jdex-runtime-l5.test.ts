@@ -4,7 +4,7 @@
 // prefixed systems (D01, D02) from the Create ID dialog.
 import type { PluginFolder } from 'hebra-plugin-api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JDEX_COMMAND_CREATE_CHILD, JDEX_COMMAND_CREATE_ID, activateJdex } from '../../src/hebra/jdex-runtime';
+import { JDEX_COMMAND_CREATE_CHILD, JDEX_COMMAND_CREATE_ID, JDEX_COMMAND_GOTO_ID, activateJdex } from '../../src/hebra/jdex-runtime';
 import * as guard from '../../src/hebra/jdex-rename-guard';
 import { FOLDER_RENAME_GUARD_TIMEOUT_MS, FakeJdexVault, createJdexTestApi, fakeFolder, fakeNote } from './support/fakes';
 
@@ -270,6 +270,44 @@ describe('renombrado en pareja en las dos direcciones (88fc7c95)', () => {
     workspace.emitFolders(await vault.foldersList());
     expect(fake.recorded.notices.some((notice) => notice.includes('D01.21.12'))).toBe(false);
     expect((await vault.noteRead('n-d01-12'))?.title).toBe('D01.21.12 Sin prefijo');
+  });
+});
+
+describe('retirar con verbo propio y copiar la ruta JD (a03f9648)', () => {
+  async function openActions() {
+    const vault = renameFixture();
+    const test = await createJdexTestApi({ vault, settings: { jdexFolder: 'JDex', systemRoot: '' } });
+    await activateJdex(test.api);
+    void test.fake.recorded.commands.find((c) => c.id === JDEX_COMMAND_GOTO_ID)!.run();
+    click([...document.querySelectorAll('dialog [role="option"]')].find((o) => o.textContent?.includes('21.11 Hebra')));
+    const action = (label: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>('.hebra-jdex-goto-action')].find((b) => b.textContent === label)!;
+    return { ...test, vault, action };
+  }
+
+  it('la confirmación de retirar dice «Retirar» y Escape la cierra sin retirar', async () => {
+    const { vault, action } = await openActions();
+    action('Retirar este ID').click();
+    const dialog = document.querySelector('dialog.hebra-module-modal')!;
+    expect(dialog.querySelector('.hebra-jdex-dialog-primary')?.textContent).toBe('Retirar');
+    expect([...dialog.querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Continuar');
+    dialog.dispatchEvent(new Event('cancel'));
+    expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
+    expect((await vault.noteRead('n-id'))?.body).not.toContain('archivado');
+  });
+
+  it('«Copiar ruta JD» copia el texto `categoría › ID`, no una ruta de carpeta', async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { action, fake } = await openActions();
+    action('Copiar ruta JD').click();
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('21 Software › 21.11 Hebra'));
+    expect(fake.recorded.notices).toContain('Ruta JD copiada.');
+    expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
+    const second = await openActions();
+    second.action('Copiar ruta de carpeta').click();
+    await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('20-29 Productos/21 Software/21.11 Hebra'));
+    expect(second.fake.recorded.notices).toContain('Ruta de la carpeta copiada.');
   });
 });
 

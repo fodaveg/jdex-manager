@@ -26,6 +26,7 @@ function noop() {
     onSearchWithin: vi.fn(),
     onCopyId: vi.fn(),
     onCopyPath: vi.fn(),
+    onCopyJdPath: vi.fn(),
     onRetire: vi.fn()
   };
 }
@@ -57,7 +58,7 @@ describe('mountJdexGotoView', () => {
     expect(el.textContent).toContain('Ningún ID coincide');
   });
 
-  it('elegir un ID abre sus seis acciones; «Ir a este ID» llama a onGoto', () => {
+  it('elegir un ID abre sus siete acciones; «Ir a este ID» llama a onGoto', () => {
     const callbacks = noop();
     const el = document.createElement('div');
     const target = entry();
@@ -67,7 +68,7 @@ describe('mountJdexGotoView', () => {
     const actionButtons = [
       ...el.querySelectorAll('.hebra-jdex-goto-action')
     ] as HTMLButtonElement[];
-    expect(actionButtons).toHaveLength(6);
+    expect(actionButtons).toHaveLength(7);
     const goto = actionButtons.find((b) => b.textContent === 'Ir a este ID')!;
     goto.click();
     expect(callbacks.onGoto).toHaveBeenCalledWith(target);
@@ -100,7 +101,22 @@ describe('mountJdexGotoView', () => {
     expect(byLabel('Mover la nota abierta aquí').disabled).toBe(true);
     expect(byLabel('Buscar dentro de este ID').disabled).toBe(true);
     expect(byLabel('Copiar ID').disabled).toBe(false);
-    expect(byLabel('Copiar ruta').disabled).toBe(false); // cae al notePath
+    expect(byLabel('Copiar ruta de la nota').disabled).toBe(false); // cae al notePath, y lo dice
+    expect(byLabel('Copiar ruta de carpeta')).toBeUndefined();
+  });
+
+  it('«Copiar ruta JD» (texto) es distinta de «Copiar ruta de carpeta» (a03f9648)', () => {
+    const el = document.createElement('div');
+    const handlers = noop();
+    mountJdexGotoView(el, { entries: [entry()], hasActiveNote: true, ...handlers });
+    (el.querySelector('[role="option"]') as HTMLButtonElement).click();
+    const byLabel = (label: string) =>
+      [...el.querySelectorAll('.hebra-jdex-goto-action')].find((b) => b.textContent === label) as HTMLButtonElement;
+    byLabel('Copiar ruta JD').click();
+    expect(handlers.onCopyJdPath).toHaveBeenCalledWith(expect.objectContaining({ id: '21.11' }));
+    expect(handlers.onCopyPath).not.toHaveBeenCalled();
+    byLabel('Copiar ruta de carpeta').click();
+    expect(handlers.onCopyPath).toHaveBeenCalledTimes(1);
   });
 
   it('un ID sin nota JDex deshabilita «Retirar este ID» con su motivo', () => {
