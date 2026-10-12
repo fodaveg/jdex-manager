@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { auditSystem } from "../src/jd/audit";
+import { auditSystem, FINDING_KINDS } from "../src/jd/audit";
 import { renderReport, reportFileName } from "../src/jd/audit-report";
 import { buildIndex } from "../src/jd/index";
 import { FILES, FOLDERS, JDEX, NOTES } from "./fixtures-audit";
@@ -13,7 +13,7 @@ describe("renderReport", () => {
   it("has frontmatter, title, summary table and one section per kind", () => {
     expect(report.startsWith("---\ntipo: auditoria\nfecha: 2026-09-10\nhallazgos: ")).toBe(true);
     expect(report).toContain("# Auditoría JD - 2026-09-10");
-    expect(report).toContain("| Carpetas con ID sin nota en el JDex | 2 |");
+    expect(report).toContain("| Carpetas con ID sin nota en el JDex | 1 |");
     expect(report).toContain("| IDs duplicados | 2 |");
     expect(report).toContain("## Notas sin carpeta (informativo)");
     expect(report.indexOf("## Notas sin carpeta (informativo)")).toBeGreaterThan(report.indexOf("## Números fuera de su padre"));
@@ -30,7 +30,7 @@ describe("renderReport", () => {
     const clean = renderReport([], "2026-09-10");
     expect(clean).toContain("hallazgos: 0");
     expect(clean).toContain("Sin problemas.");
-    expect(clean.match(/Ninguno\./g)).toHaveLength(14);
+    expect(clean.match(/Ninguno\./g)).toHaveLength(FINDING_KINDS.length);
   });
 
   it("names the report file by date", () => {

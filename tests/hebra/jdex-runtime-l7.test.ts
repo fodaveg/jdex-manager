@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
-import { activateJdex, JDEX_AUDIT_VIEW_ID, JDEX_COMMAND_CREATE_ID, JDEX_COMMAND_HEALTH, JDEX_COMMAND_NORMALIZE_ALL, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
+import { JDEX_AUDIT_VIEW_ID, JDEX_COMMAND_CREATE_ID, JDEX_COMMAND_HEALTH, JDEX_COMMAND_NORMALIZE_ALL, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 import { jdexNoteFileStem } from '../../src/hebra/library-index';
 

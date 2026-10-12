@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   JDEX_COMMAND_GOTO_ID,
   JDEX_COMMAND_TOGGLE,
-  activateJdex
 } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import { FakeJdexVault, createJdexTestApi, fakeFolder, fakeNote } from './support/fakes';
 
 /** Two children share an ID but have distinct folders and JDex notes. */

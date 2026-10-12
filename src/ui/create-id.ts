@@ -1,6 +1,7 @@
 import { type App, Modal, Notice, normalizePath, Setting, SuggestModal, TFile, TFolder } from "obsidian";
 import { areaCode, areaOfCategory, type CategoryEntry, categoryUsage, findId, selectCreationSystem, type JdIndex, knownIds } from "../jd/index";
 import { isReserved, jdexNoteName, nextFreeId, parseJdNumber } from "../jd/parse";
+import { trackModal } from "./modal-registry";
 import { renderTemplate, todayIso } from "../jd/template";
 import { type JdexManagerSettings, namePrefix } from "../settings";
 import { resolveTemplate } from "../vault/templates";
@@ -94,6 +95,7 @@ export class CreateIdModal extends Modal {
   }
 
   onOpen(): void {
+    trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(`New ID in ${this.category.label}`);

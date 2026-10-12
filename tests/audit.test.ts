@@ -61,8 +61,9 @@ describe("auditSystem", () => {
       ].map((k) => [k, of(k as FindingKind).length]),
     );
     expect(counts).toEqual({
-      "folder-without-note": 2,
-      "note-without-folder": 3,
+      // 11.15 (two folders) and 11.17 (two notes) are repeated: only duplicate-id for them.
+      "folder-without-note": 1,
+      "note-without-folder": 2,
       "name-mismatch": 1,
       "frontmatter-mismatch": 1,
       "duplicate-id": 2,
@@ -73,12 +74,12 @@ describe("auditSystem", () => {
   });
 
   it("folder without note and note without folder point at the right paths", () => {
-    // 11.12 has no note; 11.15 is the duplicated folder pair, also without a note.
-    expect(of("folder-without-note").map((f) => f.number).sort()).toEqual(["11.12", "11.15"]);
+    // 11.12 has no note; 11.15 is the duplicated folder pair, reported only as duplicate-id.
+    expect(of("folder-without-note").map((f) => f.number).sort()).toEqual(["11.12"]);
     expect(of("folder-without-note")[0].paths).toEqual(["10-19 Vida/11 Salud/11.12 Sin nota"]);
-    // 11.14 on purpose; 11.16 and 11.17 are the frontmatter and duplicate cases, which have no folder either.
+    // 11.14 on purpose; 11.16 is the frontmatter case, which has no folder either (11.17 is repeated).
     const info = of("note-without-folder");
-    expect(info.map((f) => f.number)).toEqual(["11.14", "11.16", "11.17"]);
+    expect(info.map((f) => f.number)).toEqual(["11.14", "11.16"]);
     expect(info[0].paths).toEqual([`${JDEX}/11.14 Solo nota.md`]);
     expect(info.every((f) => f.informative)).toBe(true);
   });
@@ -158,8 +159,8 @@ describe("auditSystem", () => {
 
   it("counts problems without the informative ones, and can promote them", () => {
     const informative = findings.filter((f) => f.informative).length;
-    // Missing structure notes are opt-in; only the three notes without folder are informative.
-    expect(informative).toBe(3);
+    // Missing structure notes are opt-in; only the two notes without folder are informative.
+    expect(informative).toBe(2);
     expect(countProblems(findings)).toBe(findings.length - informative);
     const strict = auditSystem({
       index,

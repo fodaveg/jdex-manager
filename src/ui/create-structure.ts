@@ -6,6 +6,7 @@ import { type JdexManagerSettings, namePrefix } from "../settings";
 import { titleForCompare } from "../jd/title";
 import { scanVault } from "../vault/scan";
 import { createJdexNote, ensureFolder } from "../vault/create";
+import { trackModal } from "./modal-registry";
 import type { Effect } from "../jd/journal";
 
 export class AreaSuggestModal extends SuggestModal<AreaEntry> {
@@ -50,6 +51,7 @@ abstract class StructureModal extends Modal {
   protected abstract perform(): Promise<TFile | null>;
 
   onOpen(): void {
+    trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(this.heading());
@@ -129,6 +131,16 @@ export class CreateCategoryModal extends StructureModal {
     super(app);
     this.number = nextFreeCategory(area.number, index.categories.map((c) => c.number)) ?? "";
   }
+  /** Re-reads the vault at confirm time: another device may have created this category. */
+  protected prepareSubmit(): void {
+    this.index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
+    if (this.index.categories.some((c) => c.number === this.number)) {
+      this.number = nextFreeCategory(this.area.number, this.index.categories.map((c) => c.number)) ?? "";
+      const input = this.contentEl.querySelector<HTMLInputElement>("input");
+      if (input) input.value = this.number;
+      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+    }
+  }
   protected heading(): string {
     return `New category in ${this.area.label}`;
   }
@@ -187,6 +199,18 @@ export class CreateAreaModal extends StructureModal {
     super(app);
     const next = nextFreeArea(index);
     this.number = next === null ? "" : areaCode(next);
+  }
+  /** Re-reads the vault at confirm time: another device may have created this area. */
+  protected prepareSubmit(): void {
+    this.index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
+    const r = parseNewArea(this.index, this.number);
+    if ("error" in r && /already exists/.test(r.error)) {
+      const next = nextFreeArea(this.index);
+      this.number = next === null ? "" : areaCode(next);
+      const input = this.contentEl.querySelector<HTMLInputElement>("input");
+      if (input) input.value = this.number;
+      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+    }
   }
   protected heading(): string {
     return "New area";

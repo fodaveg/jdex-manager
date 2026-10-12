@@ -17,6 +17,8 @@ import {
   jdexNoteName,
   managementCategoryName,
   namePrefix,
+  nextFreeArea,
+  nextFreeCategory,
   parseJdNumber,
   patternFor,
   renderTemplate,
@@ -255,6 +257,11 @@ export async function createJdexCategory(
   const system = request.area.system ?? namePrefix(settings);
   const name = jdexNoteName(category, request.title, system);
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
+  // Same number with another title is still the same category: never two of them.
+  if (index.categories.some((entry) => entry.number === category)) {
+    const free = nextFreeCategory(request.area.number, index.categories.map((entry) => entry.number));
+    throw new Error(`La categoría ${category} ya existe. Siguiente libre: ${free ?? 'ninguna'}.`);
+  }
 
   const template = await resolveJdexTemplate(library, walk, settings, 'categoria', {
     area: areaCode(request.area.number)
@@ -326,12 +333,19 @@ export async function createJdexArea(
   markdown: JdexCreateMarkdown,
   walk: JdexLibraryWalk,
   settings: CreateSettings,
-  request: CreateAreaRequest
+  request: CreateAreaRequest,
+  /** Live index read right before writing; with it, an area number taken under another
+   *  title is rejected too. */
+  index?: JdIndex
 ): Promise<JdexCreateOutcome> {
   const jdexFolderId = requireJdexFolder(walk, settings);
   const code = areaCode(request.area);
   const name = jdexNoteName(code, request.title, namePrefix(settings));
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
+  if (index?.areas.some((entry) => entry.number === request.area)) {
+    const free = nextFreeArea(index);
+    throw new Error(`El área ${code} ya existe. Siguiente libre: ${free === null ? 'ninguna' : areaCode(free)}.`);
+  }
 
   const template = await resolveJdexTemplate(library, walk, settings, 'area');
   const content = renderTemplate(template, {

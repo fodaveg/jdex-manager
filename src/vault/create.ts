@@ -20,6 +20,10 @@ export async function createJdexNote(
 ): Promise<TFile> {
   const path = normalizePath(`${settings.jdexFolder}/${name}.md`);
   if (app.vault.getAbstractFileByPath(path)) throw new Error(`${path} already exists.`);
+  // Never recreate a renamed or deleted JDex folder (empty) at its old path.
+  if (settings.jdexFolder !== "" && !(app.vault.getAbstractFileByPath(normalizePath(settings.jdexFolder)) instanceof TFolder)) {
+    throw new Error(`The JDex folder (${settings.jdexFolder}) does not exist. Check the plugin settings; nothing was created.`);
+  }
   const template = await resolveTemplate(app, settings, type, { category: vars.category || undefined, area: vars.area || undefined });
   const content = renderTemplate(template, { date: todayIso(), ...vars }) + extra;
   const parsed = extractJdPrefix(name);
@@ -29,6 +33,15 @@ export async function createJdexNote(
     const existing = number.extension
       ? childrenPlus(index, number.id, number.system).find((entry) => titleForCompare(entry.title) === titleForCompare(parsed.title))
       : findId(index, number.id, number.system);
+    if (existing) throw new Error(`${name}: number already used by ${existing.label}.`);
+  } else if (parsed?.number.kind === "category" || parsed?.number.kind === "area") {
+    // Categories and areas: the same number under another title is the same identity.
+    const index = scanVault(app, settings);
+    const number = parsed.number;
+    const system = number.system ?? "";
+    const existing = number.kind === "category"
+      ? index.categories.find((entry) => entry.number === number.category && (entry.system ?? "") === system)
+      : index.areas.find((entry) => entry.number === number.area && (entry.system ?? "") === system);
     if (existing) throw new Error(`${name}: number already used by ${existing.label}.`);
   }
   const note = await app.vault.create(path, content);

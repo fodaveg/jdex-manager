@@ -4,7 +4,8 @@
 // prefixed systems (D01, D02) from the Create ID dialog.
 import type { PluginFolder } from 'hebra-plugin-api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JDEX_COMMAND_CREATE_CHILD, JDEX_COMMAND_CREATE_ID, JDEX_COMMAND_GOTO_ID, activateJdex } from '../../src/hebra/jdex-runtime';
+import { JDEX_COMMAND_CREATE_CHILD, JDEX_COMMAND_CREATE_ID, JDEX_COMMAND_GOTO_ID } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import * as guard from '../../src/hebra/jdex-rename-guard';
 import { FOLDER_RENAME_GUARD_TIMEOUT_MS, FakeJdexVault, createJdexTestApi, fakeFolder, fakeNote } from './support/fakes';
 
