@@ -98,7 +98,7 @@ export {
   // enlace y ofrece las sugerencias (`jdex-editor-extension.ts`).
   findJdNumbers,
   entriesByNumber,
-  pushOperation, JOURNAL_MAX, patternFor, parseCategoryPatterns, formatCategoryPatterns,
+  pushOperation, appendOperation, JOURNAL_MAX, JOURNAL_VERSION, JOURNAL_REMOVED_MAX, mergeJournals, withJournalIds, newJournalId, journalOperationId, patternFor, parseCategoryPatterns, formatCategoryPatterns,
   healthFileName, renderHealthReport,
   systemReportName, renderSystemReport, previousSystemSnapshot
 } from '../jd/public';

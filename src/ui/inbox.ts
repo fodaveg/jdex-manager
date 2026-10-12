@@ -5,11 +5,15 @@ import { confirm } from "./confirm";
 import { IdSuggestModal } from "./go-to-id";
 import { fileDate } from "../vault/file-date";
 import { moveInto } from "../vault/files";
+import type { Effect } from "../jd/journal";
+import { movedIdentity } from "../vault/journal";
 
 export interface InboxContext {
   index: JdIndex;
   systemRoot: string;
   dateFormat: DateFormat;
+  /** Opens an undo journal operation; each move or Markdown deletion is one operation. */
+  journal?: (kind: "move", label: string) => Effect[];
 }
 
 /** Walks the inbox files one by one: move to an ID, archive, skip or delete. */
@@ -68,7 +72,7 @@ export class ProcessInboxModal extends Modal {
                   new Notice(`${entry.label} has no folder. Create it first.`);
                   return;
                 }
-                void this.act(() => moveInto(this.app, file, entry.folderPath!));
+                void this.act(() => this.recordMove(file, `Move ${file.name} to ${entry.id}`, () => moveInto(this.app, file, entry.folderPath!)));
               },
               "Move to which ID?",
             ).open();
@@ -78,7 +82,7 @@ export class ProcessInboxModal extends Modal {
         b
           .setButtonText(archive?.folderPath ? `Archive to ${archive.id}` : "Archive")
           .setDisabled(!archive?.folderPath)
-          .onClick(() => void this.act(() => moveInto(this.app, file, archive!.folderPath!, { when: fileDate(this.app, file), format: this.ctx.dateFormat }))),
+          .onClick(() => void this.act(() => this.recordMove(file, `Archive ${file.name}`, () => moveInto(this.app, file, archive!.folderPath!, { when: fileDate(this.app, file), format: this.ctx.dateFormat })))),
       )
       .addButton((b) =>
         b.setButtonText("Skip").onClick(() => {
@@ -91,7 +95,11 @@ export class ProcessInboxModal extends Modal {
           const ok = await confirm(this.app, "Delete this file?", [file.path, "It goes to the trash, following your Obsidian deletion setting."], "Delete");
           if (!ok) return;
           await this.act(async () => {
+            // Markdown is journaled with its content; other files are recovered from the trash.
+            const content = file.extension === "md" ? await this.app.vault.read(file) : null;
+            const path = file.path;
             await this.app.fileManager.trashFile(file);
+            if (content !== null) this.ctx.journal?.("move", `Delete ${file.name} from the inbox`).push({ kind: "trashed-note", path, content });
             return "";
           }, false);
         }),
@@ -104,6 +112,15 @@ export class ProcessInboxModal extends Modal {
         }),
       );
     }
+  }
+
+  /** Runs a move and records it, with the identity of the moved file, as one journal operation. */
+  private async recordMove(file: TFile, label: string, move: () => Promise<string>): Promise<string> {
+    const from = file.path;
+    const identity = movedIdentity(file);
+    const to = await move();
+    if (to !== from) this.ctx.journal?.("move", label).push({ kind: "moved", from, to, ...identity });
+    return to;
   }
 
   private async act(fn: () => Promise<string>, counts = true): Promise<void> {

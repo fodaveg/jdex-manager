@@ -20,8 +20,11 @@ export class FixFindingsModal extends Modal {
   private readonly refreshFindings?: () => Promise<Finding[]>;
   private readonly settings?: JdexManagerSettings;
   private readonly selected = new Set<number>();
-  /** What the applied fixes did, for the undo journal; the caller reads it in `onDone`. */
-  readonly effects: Effect[] = [];
+  /**
+   * What the applied fixes did, for the undo journal. The caller may replace it with a recording
+   * list (`JdexManagerPlugin.journalOperation`) so each effect is saved as soon as it happens.
+   */
+  effects: Effect[] = [];
 
   constructor(app: App, findings: Finding[], onDone: () => Promise<void>, refreshFindings?: () => Promise<Finding[]>, settings?: JdexManagerSettings) {
     super(app);

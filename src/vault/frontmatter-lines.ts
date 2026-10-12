@@ -203,6 +203,19 @@ export function setFrontmatterProperty(markdown: string, name: string, value: Fr
   return replaceField(markdown, normalizedName, value === null ? '' : JSON.stringify(value));
 }
 
+/**
+ * Removes one root key with its continuation lines, touching nothing else. The markdown
+ * unchanged when the key (or the frontmatter) is absent; `null` when the block is not safe
+ * to patch (same rules as `setFrontmatterProperty`).
+ */
+export function removeFrontmatterProperty(markdown: string, name: string): string | null {
+  const frontmatter = frontmatterAtStart(markdown);
+  if (!frontmatter) return /^(?:\uFEFF)?---(?:\r?\n|$)/.test(markdown) ? null : markdown;
+  if (!frontmatter.safeToPatch) return null;
+  const existing = frontmatter.fields.get(name.trim().toLowerCase());
+  return existing ? splice(markdown, existing.from, existing.to, '') : markdown;
+}
+
 /** Writes every key of `set`, or none: `refused` lists the keys that could not be written safely. */
 export function patchFrontmatter(markdown: string, set: Readonly<Record<string, FrontmatterLineValue>>): { body: string; refused: string[] } {
   let body = markdown;

@@ -13,6 +13,7 @@ import { patchFrontmatter, readFrontmatter } from "./frontmatter-lines";
 import { resolveTemplate } from "./templates";
 import { fileDate } from "./file-date";
 import type { Effect } from "../jd/journal";
+import { movedIdentity } from "./journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
 import type { JdIndex } from "../jd/index";
 
@@ -170,6 +171,6 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
     if (!target) throw new Error(`${item.from} ya no existe.`);
     if (app.vault.getAbstractFileByPath(item.to)) throw new Error(`${item.to} ya existe.`);
     await app.fileManager.renameFile(target, item.to);
-    effects?.push({ kind: "moved", from: item.from, to: item.to });
+    effects?.push({ kind: "moved", from: item.from, to: item.to, ...movedIdentity(target) });
   }
 }

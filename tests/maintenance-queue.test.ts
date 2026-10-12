@@ -38,7 +38,7 @@ describe("automatic maintenance queue", () => {
     plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as JdexManagerPlugin, {
       app,
       settings: mergeSettings({ jdexFolder: "J", systemRoot: "Sys", automaticMaintenance: true }),
-      journal: [],
+      loadData: async () => null,
       saveData: vi.fn(async () => {}),
       maintenanceGate: new MaintenanceGate(),
       maintenanceRunning: false,
@@ -123,7 +123,7 @@ describe("paired renames", () => {
     plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as JdexManagerPlugin, {
       app,
       settings: mergeSettings({ jdexFolder: "JDex", renamePairsWithoutAsking: true, liveHeaders: false }),
-      journal: [],
+      loadData: async () => null,
       saveData: vi.fn(async () => {}),
       refreshInboxCount: vi.fn(),
     });
