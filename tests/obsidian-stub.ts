@@ -211,6 +211,11 @@ export class Setting {
   setHeading(): this { this.heading = true; return this; }
   private add<C extends Setting["controls"][number]>(control: C, callback: (control: C) => unknown): this {
     this.controls.push(control);
+    // Like the app, text fields and buttons live inside the setting's element (so a dialog can query them).
+    if (typeof document !== "undefined") {
+      if (control instanceof TextComponent) this.settingEl.appendChild(control.inputEl);
+      if (control instanceof ButtonComponent) this.settingEl.appendChild(control.buttonEl);
+    }
     callback(control);
     return this;
   }

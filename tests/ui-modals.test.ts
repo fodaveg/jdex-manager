@@ -366,7 +366,8 @@ describe("IdPanelView", () => {
     const v = panelVault();
     const view = viewFor(v);
     await view.onOpen();
-    expect(registeredEvents(view)).toHaveLength(4);
+    // file-open, create, delete, rename, and the metadata cache repaint (the description comes from it).
+    expect(registeredEvents(view)).toHaveLength(5);
     expect(view.contentEl.textContent).toBe("Open a file inside an ID.");
     v.setActiveFile(v.app.vault.getAbstractFileByPath("J/21.12 Lumbre.md") as TFile);
     v.emitWorkspace("file-open");
@@ -376,6 +377,43 @@ describe("IdPanelView", () => {
     v.emit("delete", v.app.vault.getAbstractFileByPath("J/21.12 Lumbre.md"));
     expect(view.contentEl.querySelectorAll(".jdex-panel-path")).toHaveLength(1);
     expect(view.getViewType()).toBe("jdex-id-panel");
+  });
+
+  it("with an index-changed source it listens to the plugin instead of the vault, and cleans up", async () => {
+    const v = panelVault();
+    const listeners = new Set<() => void>();
+    const config = settings();
+    const view = new IdPanelView({ app: v.app } as unknown as WorkspaceLeaf, {
+      index: () => scanVault(v.app, config),
+      settings: () => config,
+      onIndexChanged: (listener) => { listeners.add(listener); return () => void listeners.delete(listener); },
+    });
+    v.setActiveFile(v.app.vault.getAbstractFileByPath("J/21.12 Lumbre.md") as TFile);
+    await view.onOpen();
+    expect(v.listeners("create") + v.listeners("rename") + v.listeners("delete")).toBe(0);
+    expect(listeners.size).toBe(1);
+    v.file("J/21.13 New.md");
+    v.folder("20-29 Area/21 Cat/21.13 New");
+    expect(view.contentEl.textContent).not.toContain("21.13 New"); // nothing redraws until the plugin says so
+    [...listeners].forEach((listener) => listener());
+    expect(view.contentEl.textContent).toContain("21.13 New");
+    ((view as unknown as { registered: Array<() => void> }).registered).forEach((cleanup) => cleanup());
+    expect(listeners.size).toBe(0);
+  });
+
+  it("repaints the description when the metadata cache reparses the shown note, not before", async () => {
+    const v = new FakeObsidianVault({ cacheDelay: true });
+    v.folder("20-29 Area/21 Cat/21.11 Hebra");
+    const note = v.file("J/21.11 Hebra.md", "---\ndescripcion: Old\n---\n");
+    const view = viewFor(v);
+    v.setActiveFile(note);
+    await view.onOpen();
+    expect(view.contentEl.textContent).toContain("Old");
+    await v.app.vault.process(note, (text) => text.replace("Old", "New"));
+    expect(view.contentEl.textContent).toContain("Old"); // the cache still holds the old frontmatter (assumption A1)
+    v.flushCache();
+    expect(view.contentEl.textContent).toContain("New");
+    expect(view.contentEl.textContent).not.toContain("Old");
   });
 });
 
@@ -560,15 +598,34 @@ describe("structure dialogs", () => {
     }
   });
 
+  it("re-reads the vault at confirm time: a number taken meanwhile is re-proposed and nothing is created", async () => {
+    const { v, index, config } = setup();
+    const modal = new CreateAreaModal(v.app, index, config, vi.fn(async () => {}));
+    modal.open();
+    expect(textFields()[0].value).toBe("10-19");
+    type(1, "Personal");
+    v.file("J/10-19 Another device.md"); // another device took the number after the dialog opened
+    const before = v.bodies.size;
+    button("Create").click();
+    await tick();
+    expect(message(modal)).toBe("That number was taken. Next free: 30-39.");
+    expect(textFields()[0].inputEl.value).toBe("30-39");
+    expect((modal as unknown as { isOpen: boolean }).isOpen).toBe(true);
+    expect(v.bodies.size).toBe(before);
+    button("Create").click();
+    await vi.waitFor(() => expect(v.exists("J/30-39 Personal.md")).toBe(true));
+  });
+
   it("a failure while creating is shown as a notice and the dialog stays closed", async () => {
     const { v, index, config } = setup();
-    v.file("J/10-19 Personal.md"); // appears after the dialog validated: createJdexNote refuses to overwrite
     const modal = new CreateAreaModal(v.app, index, config, vi.fn(async () => {}));
     modal.open();
     type(1, "Personal");
+    await v.app.fileManager.trashFile(v.app.vault.getAbstractFileByPath("J")!); // the JDex folder vanishes meanwhile
     button("Create").click();
     await vi.waitFor(() => expect(notices().length).toBeGreaterThan(0));
-    expect(notices()[0]).toContain("already exists");
+    expect(notices()[0]).toContain("The JDex folder (J) does not exist");
     expect((modal as unknown as { isOpen: boolean }).isOpen).toBe(false);
+    expect(v.exists("J/10-19 Personal.md")).toBe(false);
   });
 });

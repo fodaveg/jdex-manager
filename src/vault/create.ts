@@ -42,7 +42,10 @@ export async function createJdexNote(
     const existing = number.kind === "category"
       ? index.categories.find((entry) => entry.number === number.category && (entry.system ?? "") === system)
       : index.areas.find((entry) => entry.number === number.area && (entry.system ?? "") === system);
-    if (existing) throw new Error(`${name}: number already used by ${existing.label}.`);
+    // A folder with no note yet is the structure the note is being created for (same name):
+    // `createMissingStructureNotes` and the repair fix do exactly that. Only a note, or the
+    // same number under another name, is a conflict.
+    if (existing && (existing.notePath || existing.label !== name)) throw new Error(`${name}: number already used by ${existing.label}.`);
   }
   const note = await app.vault.create(path, content);
   effects?.push({ kind: "created-note", path, content });
