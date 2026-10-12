@@ -111,7 +111,18 @@ export function mergeJournals<E>(local: JournalState<E>, stored: JournalState<E>
   const entries = [...byId.values()]
     .filter((op) => Array.isArray(op.effects) && op.effects.length > 0)
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-  return { entries: entries.length > max ? entries.slice(entries.length - max) : entries, removed };
+  if (entries.length <= max) return { entries, removed };
+  // What falls off the end is remembered as removed, so an older copy does not bring it back.
+  const evicted = entries.slice(0, entries.length - max).map((op) => op.id!);
+  return { entries: entries.slice(entries.length - max), removed: [...removed, ...evicted].slice(-JOURNAL_REMOVED_MAX) };
+}
+
+/** Appends `op` like `pushOperation` and returns the identities that fell off the end. */
+export function appendOperation<E>(state: JournalState<E>, op: Operation<E>, max = JOURNAL_MAX): JournalState<E> {
+  const next = [...state.entries, op];
+  if (next.length <= max) return { entries: next, removed: state.removed };
+  const evicted = next.slice(0, next.length - max).map((entry) => journalOperationId(entry));
+  return { entries: next.slice(next.length - max), removed: [...state.removed, ...evicted].slice(-JOURNAL_REMOVED_MAX) };
 }
 
 const KNOWN_EFFECTS = new Set(["note-rewrite", "created-note", "trashed-note", "created-folder", "moved", "frontmatter", "line"]);

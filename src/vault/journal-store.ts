@@ -13,6 +13,7 @@
 import type { App } from "obsidian";
 import {
   describeUndo,
+  appendOperation,
   durableEffect,
   type Effect,
   JOURNAL_MAX,
@@ -213,7 +214,7 @@ export class JournalStore {
       if (this.future) return;
       if (!op) {
         op = { id: newJournalId(), device: this.device, kind, label, at: new Date().toISOString(), effects: [], rev: 0 };
-        this.entries = [...this.entries, op].slice(-JOURNAL_MAX);
+        ({ entries: this.entries, removed: this.removed } = appendOperation({ entries: this.entries, removed: this.removed }, op));
       }
       op.effects.push(...items.map(durableEffect));
       op.rev = (op.rev ?? 0) + 1;
