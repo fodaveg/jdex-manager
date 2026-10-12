@@ -3,6 +3,7 @@ import { formatDate, locate } from "../jd/files";
 import { childrenOf } from "../jd/headers";
 import { childrenPlus, sameSystem, type IdEntry, type JdIndex } from "../jd/index";
 import { openEntry } from "./go-to-id";
+import { makeKeyboardLink } from "./keyboard-link";
 
 export const ID_PANEL_VIEW = "jdex-id-panel";
 
@@ -85,7 +86,7 @@ export class IdPanelView extends ItemView {
 
   private link(parent: HTMLElement, text: string, onClick: (() => void) | null): void {
     const el = parent.createEl(onClick ? "a" : "span", { text, cls: onClick ? "jdex-panel-link" : "jdex-panel-muted" });
-    if (onClick) el.addEventListener("click", onClick);
+    if (onClick) makeKeyboardLink(el, onClick);
   }
 
   private section(parent: HTMLElement, title: string, rows: HTMLElement[]): void {
@@ -100,7 +101,7 @@ export class IdPanelView extends ItemView {
       const li = createEl("li");
       if (child instanceof TFile) {
         const a = li.createEl("a", { text: child.name, cls: "jdex-panel-link" });
-        a.addEventListener("click", () => void this.app.workspace.getLeaf(false).openFile(child));
+        makeKeyboardLink(a, () => void this.app.workspace.getLeaf(false).openFile(child));
         li.createSpan({ text: ` · ${formatDate(new Date(child.stat.mtime), "YYYY-MM-DD")}`, cls: "jdex-panel-muted" });
       } else {
         li.createSpan({ text: `${child.name}/`, cls: "jdex-panel-muted" });
@@ -114,7 +115,7 @@ export class IdPanelView extends ItemView {
     if (current) li.addClass("jdex-panel-current");
     if (entry.notePath) {
       const a = li.createEl("a", { text: entry.label, cls: "jdex-panel-link" });
-      a.addEventListener("click", () => void openEntry(this.app, entry, false));
+      makeKeyboardLink(a, () => void openEntry(this.app, entry, false));
     } else li.createSpan({ text: entry.label });
     return li;
   }

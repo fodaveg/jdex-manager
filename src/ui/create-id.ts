@@ -131,7 +131,7 @@ export class CreateIdModal extends Modal {
         .addToggle((toggle) => toggle.setValue(this.createPattern).onChange((value) => (this.createPattern = value)));
     }
 
-    this.errorEl = contentEl.createDiv({ cls: "jdex-validation" });
+    this.errorEl = contentEl.createDiv({ cls: "jdex-validation", attr: { role: "alert" } });
 
     new Setting(contentEl).addButton((button) => {
       this.submitButton = button.buttonEl;
@@ -160,7 +160,8 @@ export class CreateIdModal extends Modal {
 
   private refreshValidation(): void {
     const error = this.currentError();
-    if (this.errorEl) this.errorEl.setText(error ?? "");
+    // Only on a change: a live region re-reads whatever is written into it.
+    if (this.errorEl && this.errorEl.textContent !== (error ?? "")) this.errorEl.setText(error ?? "");
     if (this.submitButton) this.submitButton.disabled = error !== null;
   }
 

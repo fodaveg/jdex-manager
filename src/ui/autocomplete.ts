@@ -8,6 +8,7 @@ import {
   type TFile,
 } from "obsidian";
 import { systemKey, type IdEntry, type JdIndex } from "../jd/index";
+import { autocompleteInstructions, currentPlatform } from "./platform-hints";
 
 export type InsertMode = "link" | "number";
 
@@ -22,10 +23,7 @@ export class IdEditorSuggest extends EditorSuggest<IdEntry> {
     this.getIndex = getIndex;
     this.getMode = getMode;
     this.enabled = enabled;
-    this.setInstructions([
-      { command: "↵", purpose: "insert" },
-      { command: "⇧ ↵", purpose: "insert the number only" },
-    ]);
+    this.setInstructions(autocompleteInstructions(currentPlatform()));
   }
 
   onTrigger(cursor: EditorPosition, editor: Editor, _file: TFile | null): EditorSuggestTriggerInfo | null {
