@@ -12,8 +12,9 @@
  *
  * Tres resultados de `pairAction` justifican preguntar:
  * «unnumbered» (se pierde el número), «renumbered» (el número cambia) y «moved» (el ID cambiaría de categoría
- * o área). «rename-partner» es la sincronización de la pareja nota/carpeta — otra
- * tarea, no esta — y «none» no cambia nada del sistema JDex.
+ * o área). «rename-partner» es la sincronización de la pareja nota/carpeta
+ * (`jdexFolderPairRename`, que `jdex-folder-rename.ts` ofrece solo cuando el renombrado
+ * de la carpeta se ha completado) y «none» no cambia nada del sistema JDex.
  */
 import type { PluginFolderRenameEvent } from 'hebra-plugin-api';
 import { pairAction, type JdIndex, type PairAction } from './engine';
@@ -84,6 +85,36 @@ export function jdexRenameWarning(
   if (oldPath === newPath) return null;
   const action = pairAction({ oldPath, newPath, isFolder }, index, settings);
   return action.type === 'renumbered' || action.type === 'moved' || action.type === 'unnumbered' ? action : null;
+}
+
+/** A folder rename whose JDex note should follow (`rename-partner`, folder to note):
+ *  same number, new title. `null` for anything else, moves included. */
+export function jdexFolderPairRename(
+  event: PluginFolderRenameEvent,
+  walk: JdexLibraryWalk,
+  index: JdIndex,
+  settings: { jdexFolder: string; systemRoot: string }
+): Extract<PairAction, { type: 'rename-partner' }> | null {
+  if (event.kind !== 'folder-rename') return null;
+  const oldPath = walk.folderPaths.get(event.folderId);
+  if (oldPath === undefined) return null;
+  const parent = parentPath(oldPath);
+  const newPath = parent ? `${parent}/${event.newName}` : event.newName;
+  if (oldPath === newPath) return null;
+  const action = pairAction({ oldPath, newPath, isFolder: true }, index, settings);
+  return action.type === 'rename-partner' ? action : null;
+}
+
+/**
+ * The clickable notice that offers to rename the partner. Hebra turns only the text after
+ * the LAST full stop into the button (`moduleNoticeActionLabel` in `host-ui.ts`), so the
+ * names (which contain full stops, `21.22`) go before it and the action, with no full
+ * stop, goes last: the button reads «Pulsa aquí para renombrarla».
+ */
+export function jdexPairNoticeMessage(partner: 'folder' | 'note', oldName: string, newName: string): string {
+  return partner === 'folder'
+    ? `El título cambió y la carpeta sigue como «${oldName}»; su nombre nuevo sería «${newName}». Pulsa aquí para renombrarla`
+    : `La carpeta cambió de nombre y la nota sigue como «${oldName}»; su nombre nuevo sería «${newName}». Pulsa aquí para renombrarla`;
 }
 
 /** El texto del aviso, uno por tipo de `PairAction`, con sus datos exactos. */

@@ -190,6 +190,89 @@ describe('guardia de renombrado frente al host (a17a3b63)', () => {
   });
 });
 
+/** Hebra's `moduleNoticeActionLabel` (`src/lib/modules/host-ui.ts`): only the text after
+ *  the LAST full stop becomes the button of a clickable notice. */
+function hostButtonLabel(text: string): string {
+  const sentences = text.split('.').map((part) => part.trim()).filter((part) => part.length > 0);
+  return sentences.length > 1 ? sentences[sentences.length - 1] : text;
+}
+
+describe('renombrado en pareja en las dos direcciones (88fc7c95)', () => {
+  async function setup(settings: object = {}) {
+    const vault = renameFixture();
+    const test = await createJdexTestApi({ vault, settings: { jdexFolder: 'JDex', systemRoot: '', ...settings } });
+    await activateJdex(test.api);
+    return { ...test, vault };
+  }
+  const RETITLE = { kind: 'folder-rename', folderId: 'f-id', newName: '21.11 Hebra app' } as const;
+  const pairNotice = (): HTMLButtonElement | undefined =>
+    [...document.querySelectorAll<HTMLButtonElement>('.hebra-module-notice button')].find((b) => b.textContent?.includes('la nota sigue como «21.11 Hebra»'));
+
+  it('carpeta a nota: se ofrece renombrar la nota solo cuando el renombrado de la carpeta se ha completado', async () => {
+    const { vault, workspace, fake } = await setup();
+    expect(await workspace.changeFolderAsHost(vault, RETITLE)).toBe(true);
+    // Hebra has renamed it, but the plugin has not seen it yet: nothing offered.
+    expect(pairNotice()).toBeUndefined();
+    workspace.emitFolders(await vault.foldersList());
+    const text = fake.recorded.notices.at(-1)!;
+    expect(text).toBe('La carpeta cambió de nombre y la nota sigue como «21.11 Hebra»; su nombre nuevo sería «21.11 Hebra app». Pulsa aquí para renombrarla');
+    expect(hostButtonLabel(text)).toBe('Pulsa aquí para renombrarla');
+    pairNotice()!.click();
+    await vi.waitFor(async () => expect((await vault.noteRead('n-id'))?.title).toBe('21.11 Hebra app'));
+    // Offered once.
+    workspace.emitFolders(await vault.foldersList());
+    expect(fake.recorded.notices.filter((notice) => notice.includes('sería «21.11 Hebra app»'))).toHaveLength(1);
+  });
+
+  it('no se ofrece si el renombrado de la carpeta se canceló o no llegó a hacerse', async () => {
+    const { vault, workspace, api, fake } = await setup();
+    // Another plugin's guard cancels it after ours let it through.
+    api.workspace.onBeforeFolderRename(async () => false);
+    expect(await workspace.changeFolderAsHost(vault, RETITLE)).toBe(false);
+    workspace.emitFolders(await vault.foldersList());
+    workspace.emitFolders(await vault.foldersList());
+    expect(fake.recorded.notices.some((notice) => notice.includes('Pulsa aquí'))).toBe(false);
+    expect((await vault.noteRead('n-id'))?.title).toBe('21.11 Hebra');
+  });
+
+  it('con «renombrar la pareja sin preguntar», la nota sigue a la carpeta sin aviso', async () => {
+    const { vault, workspace, fake } = await setup({ renamePairsWithoutAsking: true });
+    expect(await workspace.changeFolderAsHost(vault, RETITLE)).toBe(true);
+    workspace.emitFolders(await vault.foldersList());
+    await vi.waitFor(async () => expect((await vault.noteRead('n-id'))?.title).toBe('21.11 Hebra app'));
+    expect(fake.recorded.notices.some((notice) => notice.includes('Pulsa aquí'))).toBe(false);
+  });
+
+  it('nota a carpeta: el aviso dice que es pulsable y, con el ajuste, renombra sin preguntar', async () => {
+    const asked = await setup();
+    asked.vault.saveElsewhere('n-id', '# 21.11 Hebra app\n');
+    asked.workspace.emitTitleRenamed({ noteId: 'n-id', folderId: 'f-jdex', oldTitle: '21.11 Hebra', newTitle: '21.11 Hebra app', undo: vi.fn() });
+    const text = asked.fake.recorded.notices.at(-1)!;
+    expect(text).toBe('El título cambió y la carpeta sigue como «21.11 Hebra»; su nombre nuevo sería «21.11 Hebra app». Pulsa aquí para renombrarla');
+    expect(hostButtonLabel(text)).toBe('Pulsa aquí para renombrarla');
+    expect(await folderName(asked.vault, 'f-id')).toBe('21.11 Hebra');
+    document.body.replaceChildren();
+
+    const silent = await setup({ renamePairsWithoutAsking: true });
+    silent.vault.saveElsewhere('n-id', '# 21.11 Hebra app\n');
+    silent.workspace.emitTitleRenamed({ noteId: 'n-id', folderId: 'f-jdex', oldTitle: '21.11 Hebra', newTitle: '21.11 Hebra app', undo: vi.fn() });
+    await vi.waitFor(async () => expect(await folderName(silent.vault, 'f-id')).toBe('21.11 Hebra app'));
+    expect(silent.fake.recorded.notices.some((notice) => notice.includes('Pulsa aquí'))).toBe(false);
+  });
+
+  it('una nota con prefijo no se empareja con una carpeta sin prefijo ni al revés', async () => {
+    const vault = renameFixture();
+    vault.seedFolder(fakeFolder('f-plain', 'f-d01-cat', '21.12 Sin prefijo'));
+    vault.seedNote(fakeNote('n-d01-12', 'f-jdex', '# D01.21.12 Sin prefijo\n'));
+    const { api, workspace, fake } = await createJdexTestApi({ vault, settings: { jdexFolder: 'JDex', systemRoot: '' } });
+    await activateJdex(api);
+    expect(await workspace.changeFolderAsHost(vault, { kind: 'folder-rename', folderId: 'f-plain', newName: '21.12 Otro título' })).toBe(true);
+    workspace.emitFolders(await vault.foldersList());
+    expect(fake.recorded.notices.some((notice) => notice.includes('D01.21.12'))).toBe(false);
+    expect((await vault.noteRead('n-d01-12'))?.title).toBe('D01.21.12 Sin prefijo');
+  });
+});
+
 describe('el doble de la guardia imita al host (a17a3b63)', () => {
   it('una guardia que no responde cuenta como «sí» pasados FOLDER_RENAME_GUARD_TIMEOUT_MS, y una que lanza también', async () => {
     const vault = renameFixture();

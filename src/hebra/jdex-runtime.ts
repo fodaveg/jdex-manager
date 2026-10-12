@@ -117,6 +117,7 @@ import { applyJdexWrap, findJdexWrapCandidates } from './jdex-wrap-headers';
 import { mountJdexWrapHeadersView } from './jdex-wrap-headers-view';
 import {
   jdexRenameNoticeMessage,
+  jdexPairNoticeMessage,
   jdexRenameWarning
 } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
@@ -739,8 +740,9 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
    *  redone by the plugin only if the user confirms (`jdex-folder-rename.ts`): Hebra lets
    *  a guard through after 5 s, so waiting for the answer is not safe. Sin índice aún
    *  cargado, deja pasar. */
-  const confirmRename = createJdexFolderRenameGuard({
+  const folderRenameGuard = createJdexFolderRenameGuard({
     ui: host,
+    markdown: api.markdown,
     snapshot: () => (walk && index ? { walk, index, settings } : null),
     write: (label, action) => journal.run('move', label, async (vault) => {
       await action(vault);
@@ -748,6 +750,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     }),
     report
   });
+  const confirmRename = folderRenameGuard.confirm;
 
   // ---- Lote 5: avisar tras renombrar el TÍTULO de una nota JDex, sin bloquear
   // el guardado (encargo de David, 29 sep 2026) ---------------------------------
@@ -780,7 +783,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const expectedParentId = jdexResolveFolderId(walk, parentPath);
     const oldName = action.partnerPath.slice(action.partnerPath.lastIndexOf('/') + 1);
     const newName = action.newPartnerPath.slice(action.newPartnerPath.lastIndexOf('/') + 1);
-    host.notice(`El título cambió. Renombrar carpeta «${oldName}» a «${newName}».`, () => {
+    const renamePartnerFolder = (): void => {
       void journal.run('move', `Renombrar carpeta ${oldName}`, async (vault) => {
         const note = await vault.noteRead(event.noteId);
         const folders = await vault.foldersList();
@@ -790,7 +793,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         await vault.folderRename(folderId, newName);
         await afterJdexWrite(true, vault);
       }).catch((error: unknown) => host.notice(error instanceof Error ? error.message : String(error)));
-    });
+    };
+    // The title is already saved here (this event comes after the save), so the folder
+    // follows a rename that really happened. The setting skips the question.
+    if (settings.renamePairsWithoutAsking) renamePartnerFolder();
+    else host.notice(jdexPairNoticeMessage('folder', oldName, newName), renamePartnerFolder);
   }
 
   // ---- Lote 3, tarea 2: ir a un ID, mover la nota a un ID, buscar dentro de un
@@ -1168,6 +1175,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const paths = jdexFolderPaths(folders.filter((folder) => folder.id !== api.vault.rootFolderId()), api.vault.rootFolderId());
     pendingFolderPaths = paths;
     scheduleRebuild();
+    folderRenameGuard.foldersChanged(folders);
   });
   const offNotes = api.workspace.onNotesChange(onNotesChanged);
 
