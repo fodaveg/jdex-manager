@@ -64,27 +64,49 @@ export async function loadJdexSettings(storage: JdexSettingsStorage): Promise<Jd
   try {
     const raw = await storage.load<unknown>();
     if (raw === null) return HEBRA_DEFAULTS;
-    return { ...HEBRA_DEFAULTS, ...normalizeStored(raw) };
+    return jdexSettingsFromStored(raw);
   } catch {
     return HEBRA_DEFAULTS;
   }
 }
 
+/** Ajustes a partir de un valor guardado (el de `storage.settings.onChange`, por ejemplo). */
+export function jdexSettingsFromStored(raw: unknown): JdexManagerSettings {
+  return raw === null ? HEBRA_DEFAULTS : { ...HEBRA_DEFAULTS, ...normalizeStored(raw) };
+}
+
+/**
+ * Guarda los ajustes. Con `baseline` (los ajustes antes del cambio) escribe SOLO las claves
+ * que cambiaron aquí: una clave cambiada desde otra pestaña o dispositivo y no tocada aquí
+ * conserva el valor que llegó, en vez de pisarse con la copia en memoria.
+ */
 export async function persistJdexSettings(
   storage: JdexSettingsStorage,
-  settings: JdexManagerSettings
+  settings: JdexManagerSettings,
+  baseline?: JdexManagerSettings
 ): Promise<void> {
-  await updateJdexStoredSettings(storage, normalizeStored(settings));
+  const next = normalizeStored(settings) as Record<string, unknown>;
+  if (!baseline) {
+    await updateJdexStoredSettings(storage, next);
+    return;
+  }
+  const before = normalizeStored(baseline) as Record<string, unknown>;
+  const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(before[key])));
+  if (Object.keys(patch).length > 0) await updateJdexStoredSettings(storage, patch);
 }
 
 const storageTails = new WeakMap<JdexSettingsStorage, Promise<void>>();
 
-/** Serializes settings and journal merges, reading the latest stored value before each save. */
-export function updateJdexStoredSettings(storage: JdexSettingsStorage, patch: object): Promise<void> {
+/**
+ * Serializes settings and journal merges, reading the latest stored value before each save.
+ * `patch` may be a function of that value, so a journal can be joined with the stored one
+ * inside the same serialized write.
+ */
+export function updateJdexStoredSettings(storage: JdexSettingsStorage, patch: object | ((current: Record<string, unknown>) => object)): Promise<void> {
   const next = (storageTails.get(storage) ?? Promise.resolve()).catch(() => undefined).then(async () => {
     const raw = await storage.load<unknown>();
-    const current = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {};
-    await storage.save({ ...current, ...patch });
+    const current = (typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+    await storage.save({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) });
   });
   storageTails.set(storage, next);
   return next;

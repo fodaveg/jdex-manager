@@ -82,10 +82,11 @@ describe("Obsidian live number validation", () => {
   it("reports removal of the number and journals the rename for undo", async () => {
     const f = fixture();
     const saveData = vi.fn(async () => {});
-    const plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as object, { app: f.app, settings, journal: [], saveData }) as unknown as JdexManagerPlugin;
+    const plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as object, { app: f.app, settings, loadData: async () => JSON.parse(JSON.stringify(settings)) as unknown, saveData }) as unknown as JdexManagerPlugin;
+    await plugin.loadSettings();
     const renamed = file("Parent");
     await plugin.onRename(renamed, "JDex/21.11 Parent.md");
     expect(notices.at(-1)).toBe("«21.11» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.");
-    expect(saveData).toHaveBeenCalledWith(expect.objectContaining({ journal: [expect.objectContaining({ effects: [{ kind: "moved", from: "JDex/21.11 Parent.md", to: "JDex/Parent.md" }] })] }));
+    expect(saveData).toHaveBeenCalledWith(expect.objectContaining({ journal: [expect.objectContaining({ effects: [expect.objectContaining({ kind: "moved", from: "JDex/21.11 Parent.md", to: "JDex/Parent.md", type: "file" })] })] }));
   });
 });

@@ -10,18 +10,24 @@ export const JDEX_DISPOSED_MESSAGE = 'JDex Manager está apagado: no se ha escri
 
 /** Same journal, but an operation (or undo) that starts after disposal throws instead. */
 export function guardJdexJournal(journal: JdexJournal, isDisposed: () => boolean): JdexJournal {
-  return {
-    entries: () => journal.entries(),
-    run: (kind, label, action) =>
-      journal.run(kind, label, async (vault) => {
-        if (isDisposed()) throw new Error(JDEX_DISPOSED_MESSAGE);
-        return action(vault);
-      }),
-    undoLast: async () => {
+  const run: JdexJournal['run'] = (kind, label, action) =>
+    journal.run(kind, label, async (vault) => {
       if (isDisposed()) throw new Error(JDEX_DISPOSED_MESSAGE);
-      return journal.undoLast();
-    }
+      return action(vault);
+    });
+  const undoLast: JdexJournal['undoLast'] = async () => {
+    if (isDisposed()) throw new Error(JDEX_DISPOSED_MESSAGE);
+    return journal.undoLast();
   };
+  // Everything else (status, discard, merge…) goes to the journal unchanged.
+  return new Proxy(journal, {
+    get(target, key, receiver) {
+      if (key === 'run') return run;
+      if (key === 'undoLast') return undoLast;
+      const value: unknown = Reflect.get(target, key, receiver);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    }
+  });
 }
 
 /** The host UI with `openModal` tracked: `closeAll` closes every dialog still open. */

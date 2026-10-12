@@ -63,7 +63,7 @@ describe("Obsidian: the renamed JDex folder keeps the index (061b492e)", () => {
   function plugin(app: App, jdexFolder: string) {
     const saveData = vi.fn(async () => {});
     const instance = Object.assign(Object.create(JdexManagerPlugin.prototype) as object, {
-      app, settings: mergeSettings({ jdexFolder }), journal: [], saveData, renaming: false, followingSettingPaths: new Set<string>(),
+      app, settings: mergeSettings({ jdexFolder }), journal: [], saveData, loadData: async () => null, renaming: false, followingSettingPaths: new Set<string>(),
     }) as unknown as JdexManagerPlugin;
     return { instance, saveData };
   }

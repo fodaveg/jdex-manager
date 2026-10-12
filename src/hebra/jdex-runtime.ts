@@ -90,7 +90,7 @@ import {
 } from './library-index';
 import { mountJdexAuditView } from './jdex-audit-view';
 import { mountJdexSettingsPanel } from './jdex-settings-panel';
-import { autodetectJdexSettings, loadJdexSettings, persistJdexSettings } from './settings';
+import { autodetectJdexSettings, jdexSettingsFromStored, loadJdexSettings, persistJdexSettings } from './settings';
 import {
   followedFolderNotice,
   followTrackedFolders,
@@ -154,7 +154,7 @@ export {
 import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
 import { jdexEditorExtension } from './jdex-editor-extension';
-import { createJdexJournal } from './jdex-journal';
+import { createJdexJournal, jdexDeviceId } from './jdex-journal';
 import { guardJdexJournal, trackJdexModals } from './jdex-lifecycle';
 import { mountJdexJournalView } from './jdex-journal-view';
 import { createJdexHealthReport } from './jdex-health';
@@ -217,7 +217,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   let settings = await loadJdexSettings(api.storage.settings);
   let folderIds = await loadTrackedFolderIds(api.storage.settings);
   // Operations still queued when the module is turned off do not write.
-  const journal = guardJdexJournal(await createJdexJournal(api.vault, api.storage.settings), () => disposed);
+  const journal = guardJdexJournal(
+    await createJdexJournal(api.vault, api.storage.settings, { device: jdexDeviceId(api.storage.device) }),
+    () => disposed
+  );
 
   let walk: JdexLibraryWalk | null = null;
   let index: JdIndex | null = null;
@@ -483,7 +486,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   /** Manual JDex and folder changes refresh managed blocks; unchanged bodies do not write. */
   async function syncLiveHeaders(): Promise<void> {
     if (disposed || !(settings.liveHeaders || settings.automaticMaintenance) || !walk || !index) return;
-    const result = await journal.run('fix', 'Actualizar cabeceras e índice vivos', (vault) => refreshJdexHeadersAndIndex(vault, walk!, index!, settings.systemIndexNote));
+    const result = await journal.run('fix', 'Actualizar cabeceras e índice vivos', (vault) => refreshJdexHeadersAndIndex(vault, walk!, index!, settings.systemIndexNote), { automatic: true });
     if (result.written.length > 0) await refreshNotes(result.written);
   }
 
@@ -501,7 +504,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       return [{ ...finding, fix: { ...finding.fix, set, expected } }];
     });
     if (chosen.length === 0) return;
-    const result = await journal.run('fix', 'Mantenimiento automático JDex', (vault) => applyJdexFrontmatterFixes(vault, api.markdown, chosen, noteIdByPath));
+    const result = await journal.run('fix', 'Mantenimiento automático JDex', (vault) => applyJdexFrontmatterFixes(vault, api.markdown, chosen, noteIdByPath), { automatic: true });
     for (const warning of result.warnings) host.notice(warning);
     if (result.written.length > 0) await refreshNotes(result.written);
   }
@@ -1327,6 +1330,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   ]);
 
   function onNotesChanged(event: PluginNotesChange): void {
+    // After an undo settles, a change to a note it restored lifts its protection.
+    journal.observe(event.ids);
     if (IRRELEVANT_REASONS.has(event.reason)) return;
     if (!INCREMENTAL_REASONS.has(event.reason)) {
       scheduleRebuild();
@@ -1358,6 +1363,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     folderRenameGuard.foldersChanged(folders);
   });
   const offNotes = api.workspace.onNotesChange(onNotesChanged);
+  // Settings or journal saved elsewhere (another tab; later, sync): adopt the settings and
+  // join the journal by identity, then rebuild with them.
+  const offSettingsChange = api.storage.settings.onChange((value) => {
+    if (disposed) return;
+    settings = jdexSettingsFromStored(value);
+    journal.absorb(value);
+    scheduleRebuild();
+  });
 
   // Activation does not wait for the first walk (the host abandons a slow activation): the
   // bar shows «JD: …» until it lands. A failure enters the normal retry path.
@@ -1479,14 +1492,21 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     run: () => {
       const entries = journal.entries();
       const operation = entries[entries.length - 1];
+      // The identity confirmed in the dialog; the journal checks it inside its queue.
+      const operationId = operation?.id;
       let handle: PluginModalHandle | undefined;
       handle = host.openModal((el) => mountJdexJournalView(el, {
         entries,
+        status: journal.status(),
+        onDiscard: async () => {
+          if (!operationId) return;
+          const discarded = await journal.discardLast(operationId);
+          host.notice(discarded ? `«${operation.label}» se quitó del diario; no se tocó ninguna nota.` : 'El diario cambió desde que se abrió; no se descartó nada.');
+          handle?.close();
+        },
         onUndo: async () => {
           try {
-            const latest = journal.entries();
-            if (latest[latest.length - 1] !== operation) throw new Error('El diario cambió desde que se abrió; vuelve a abrirlo antes de deshacer.');
-            const result = await journal.undoLast();
+            const result = await journal.undoLast(operationId);
             for (const warning of result.warnings) host.notice(warning);
             if (result.undone > 0) host.notice(`${result.undone} paso(s) deshecho(s).`);
             handle?.close();
@@ -1744,8 +1764,9 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       save: (next) => {
         // A path changed by hand stops following the folder it pointed at before.
         for (const key of TRACKED_FOLDER_KEYS) if (next[key] !== settings[key]) delete folderIds[key];
+        const baseline = settings;
         settings = next;
-        void persistJdexSettings(api.storage.settings, settings).catch((error: unknown) =>
+        void persistJdexSettings(api.storage.settings, settings, baseline).catch((error: unknown) =>
           report(error, 'guardar-ajustes')
         );
         void rebuild().catch((error: unknown) => report(error, 'rebuild-ajustes'));
@@ -1771,6 +1792,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const cleanup: PluginCleanup = () => {
     disposed = true;
     modals.closeAll();
+    offSettingsChange();
     if (rebuildTimer !== null) clearTimeout(rebuildTimer);
     rebuildTimer = null;
     offActiveNote();
