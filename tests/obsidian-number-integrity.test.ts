@@ -87,6 +87,6 @@ describe("Obsidian live number validation", () => {
     const renamed = file("Parent");
     await plugin.onRename(renamed, "JDex/21.11 Parent.md");
     expect(notices.at(-1)).toBe("«21.11» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.");
-    expect(saveData).toHaveBeenCalledWith(expect.objectContaining({ journal: [expect.objectContaining({ effects: [{ kind: "moved", from: "JDex/21.11 Parent.md", to: "JDex/Parent.md" }] })] }));
+    expect(saveData).toHaveBeenCalledWith(expect.objectContaining({ journal: [expect.objectContaining({ effects: [expect.objectContaining({ kind: "moved", from: "JDex/21.11 Parent.md", to: "JDex/Parent.md", type: "file" })] })] }));
   });
 });

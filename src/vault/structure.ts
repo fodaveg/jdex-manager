@@ -21,12 +21,12 @@ export function missingStructureNotes(index: JdIndex): MissingStructure {
 }
 
 /** Creates the JDex notes of every area and category folder that lacks one. Returns how many were created. */
-export async function createMissingStructureNotes(app: App, settings: JdexManagerSettings, index: JdIndex): Promise<number> {
+export async function createMissingStructureNotes(app: App, settings: JdexManagerSettings, index: JdIndex, effects?: Effect[]): Promise<number> {
   const missing = missingStructureNotes(index);
   let created = 0;
   for (const a of missing.areas) {
     const code = areaCode(a.number);
-    await createJdexNote(app, settings, "area", jdexNoteName(code, a.title, a.system), { id: code, title: a.title, area: code, areaTitle: a.label, category: "", categoryTitle: "" });
+    await createJdexNote(app, settings, "area", jdexNoteName(code, a.title, a.system), { id: code, title: a.title, area: code, areaTitle: a.label, category: "", categoryTitle: "" }, "", effects);
     created += 1;
   }
   for (const c of missing.categories) {
@@ -38,7 +38,7 @@ export async function createMissingStructureNotes(app: App, settings: JdexManage
       areaTitle: area?.label ?? areaCode(c.areaNumber),
       category: c.number,
       categoryTitle: c.label,
-    });
+    }, "", effects);
     created += 1;
   }
   return created;

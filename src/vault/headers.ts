@@ -3,11 +3,15 @@ import { childrenOf, headerEntries, renderChildren, replaceChildrenBlock, wrapFi
 import type { JdIndex } from "../jd/index";
 import type { Effect } from "../jd/journal";
 
-/** Regenerates the children block of every header note that has markers. Returns how many notes changed. */
-export async function updateHeaders(app: App, index: JdIndex, onlyCategory?: string, effects?: Effect[]): Promise<number> {
+/**
+ * Regenerates the children block of every header note that has markers. Returns how many notes changed.
+ * `skip` leaves out notes an undo just restored.
+ */
+export async function updateHeaders(app: App, index: JdIndex, onlyCategory?: string, effects?: Effect[], skip?: (path: string) => boolean): Promise<number> {
   let changed = 0;
   for (const header of headerEntries(index)) {
     if (onlyCategory && header.category !== onlyCategory) continue;
+    if (skip?.(header.notePath!)) continue;
     const file = app.vault.getAbstractFileByPath(header.notePath!);
     if (!(file instanceof TFile)) continue;
     const content = await app.vault.read(file);
