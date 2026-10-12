@@ -27,7 +27,7 @@ export async function maintainSystem(app: App, settings: JdexManagerSettings, ef
     await applyFix(app, { ...fix, set, expected }, effects, undefined, warn);
   }
   if (stopped()) return;
-  await updateHeaders(app, index, undefined, effects, skip);
+  await updateHeaders(app, index, undefined, effects, skip, stopped);
   if (stopped()) return;
   const indexNote = systemIndexFile(app, settings, index);
   if (!indexNote || !skip(indexNote.path)) await updateSystemIndex(app, settings, index, false, effects, warn);

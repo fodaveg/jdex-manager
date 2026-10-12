@@ -659,10 +659,10 @@ export default class JdexManagerPlugin extends Plugin {
    * changed. Header notes an undo just restored are left alone until they change again.
    */
   async refreshHeaders(onlyCategory: string | undefined, announce: boolean): Promise<void> {
-    if (this.settings.jdexFolder === "") return;
+    if (this.unloaded || this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
     const effects = this.journalOperation("fix", onlyCategory ? t().labelHeadersOf(onlyCategory) : t().cmdUpdateHeaders, !announce);
-    const changed = await updateHeaders(this.app, index, onlyCategory, effects, (path) => this.undoShield.protects(path));
+    const changed = await updateHeaders(this.app, index, onlyCategory, effects, (path) => this.undoShield.protects(path), () => this.unloaded);
     await effects.flush().catch(() => undefined);
     if (announce) new Notice(t().headerListsUpdated(changed));
   }
@@ -961,7 +961,7 @@ export default class JdexManagerPlugin extends Plugin {
 
   async onCreate(file: TAbstractFile): Promise<void> {
     // Obsidian fires "create" for every file while the vault loads; only react to files created afterwards.
-    if (!this.app.workspace.layoutReady) return;
+    if (!this.app.workspace.layoutReady || this.unloaded) return;
     if (this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
     this.refreshInboxCount();
     // A note an undo restores is not new: it is not dated, indexed or listed again.
@@ -976,13 +976,15 @@ export default class JdexManagerPlugin extends Plugin {
         }
       }
     }
+    // Unloaded while awaiting: no further write.
+    if (this.unloaded) return;
     if (this.settings.updateSystemIndexOnCreate) {
       const inJdex = relativeTo(this.settings.jdexFolder, file.path);
       if (inJdex !== null && inJdex !== "" && !inJdex.includes("/") && extractJdPrefix(file.basename)) {
         await this.refreshSystemIndex(false);
       }
     }
-    if (!this.settings.liveHeaders) return;
+    if (!this.settings.liveHeaders || this.unloaded) return;
     const rel = relativeTo(this.settings.jdexFolder, file.path);
     if (rel === null || rel === "" || rel.includes("/")) return;
     const parsed = extractJdPrefix(file.basename);
