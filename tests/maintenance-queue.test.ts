@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn members of the vault double are read as values to assert on. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type App, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { type TAbstractFile, TFile } from "obsidian";
 import JdexManagerPlugin from "../src/main";
 import type { Effect } from "../src/jd/journal";
 import { mergeSettings } from "../src/settings";
 import { MaintenanceGate, onceNotifier } from "../src/vault/maintenance-gate";
 import { maintainSystem } from "../src/vault/maintenance";
+import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 
 const notices = vi.hoisted(() => [] as string[]);
 vi.mock("obsidian", async (importOriginal) => ({
@@ -18,7 +20,7 @@ const file = (path: string): TFile => Object.assign(new TFile(), { path, name: p
 type Private = { queueMaintenance(file: TAbstractFile, oldPath?: string): void };
 
 describe("automatic maintenance queue", () => {
-  const bodies = new Map<string, string>();
+  let v: FakeObsidianVault;
   const run = vi.mocked(maintainSystem);
   let plugin: JdexManagerPlugin;
 
@@ -26,15 +28,9 @@ describe("automatic maintenance queue", () => {
     vi.useFakeTimers();
     // eslint-disable-next-line obsidianmd/prefer-active-window-timers -- this IS the activeWindow stub.
     vi.stubGlobal("activeWindow", { setTimeout: (f: () => void, ms: number) => setTimeout(f, ms), clearTimeout: (id: number) => clearTimeout(id) });
-    bodies.clear();
+    v = new FakeObsidianVault();
     run.mockReset();
-    const app = {
-      workspace: { layoutReady: true },
-      vault: {
-        getAbstractFileByPath: (path: string) => (bodies.has(path) ? file(path) : null),
-        read: async (f: TFile) => bodies.get(f.path) ?? "",
-      },
-    } as unknown as App;
+    const { app } = v;
     plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as JdexManagerPlugin, {
       app,
       settings: mergeSettings({ jdexFolder: "J", systemRoot: "Sys", automaticMaintenance: true }),
@@ -56,7 +52,7 @@ describe("automatic maintenance queue", () => {
 
   it("the pass's own writes (path and content) do not provoke another pass", async () => {
     run.mockImplementationOnce(async (_app, _settings, effects) => {
-      bodies.set("J/00.00 Index.md", "new");
+      v.file("J/00.00 Index.md", "new");
       effects.push(rewrite("J/00.00 Index.md", "new"));
       queue("J/00.00 Index.md");
     });
@@ -74,7 +70,7 @@ describe("automatic maintenance queue", () => {
 
   it("an edit of a note the pass wrote, with other content, counts as foreign; an unrelated path does not", async () => {
     run.mockImplementationOnce(async (_app, _settings, effects) => {
-      bodies.set("J/00.00 Index.md", "edited by someone else");
+      v.file("J/00.00 Index.md", "edited by someone else");
       effects.push(rewrite("J/00.00 Index.md", "new"));
       queue("J/00.00 Index.md");
     });
@@ -101,25 +97,20 @@ describe("automatic maintenance queue", () => {
 describe("paired renames", () => {
   it("a foreign rename during the pair's own rename still gets its warning; the plugin's own rename is ignored", async () => {
     notices.length = 0;
-    const folder = (path: string): TFolder => Object.assign(new TFolder(), { path, name: path.slice(path.lastIndexOf("/") + 1), children: [] as TAbstractFile[] });
+    const v = new FakeObsidianVault();
     const parent = "20-29 Trabajo/21 Productos/21.22 JDex Manager";
-    const childA = folder(`${parent}/+ A`);
-    const noteA = file("JDex/21.22+ A #ayuda.md");
-    const files = [folder("20-29 Trabajo"), folder("20-29 Trabajo/21 Productos"), folder(parent), childA, noteA];
-    const pending: Promise<void>[] = [];
+    const childA = v.folder(`${parent}/+ A`);
+    const noteA = v.file("JDex/21.22+ A #ayuda.md");
+    v.setActiveFile(noteA);
+    const { app } = v;
+    const { renameFile } = app.fileManager;
     let plugin: JdexManagerPlugin;
-    const renameFile = vi.fn(async (f: TAbstractFile, path: string) => {
-      const old = f.path;
-      f.path = path;
-      pending.push(plugin.onRename(f, old)); // the plugin's own event
-      const foreign = file("JDex/Parent.md");
-      pending.push(plugin.onRename(foreign, "JDex/21.11 Parent.md")); // someone else's, at the same time
-    });
-    const app = {
-      vault: { getAllLoadedFiles: () => files, getAbstractFileByPath: (path: string) => files.find((f) => f.path === path) ?? null },
-      workspace: { getActiveFile: () => noteA },
-      fileManager: { renameFile },
-    } as unknown as App;
+    // The app tells the plugin about every rename, its own folder rename included; someone else
+    // renames a note at the same time as the pair's folder.
+    v.app.vault.on("rename", (f, old) => Promise.all([
+      plugin.onRename(f, old),
+      f === childA ? plugin.onRename(v.file("JDex/Parent.md"), "JDex/21.11 Parent.md") : undefined,
+    ]));
     plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as JdexManagerPlugin, {
       app,
       settings: mergeSettings({ jdexFolder: "JDex", renamePairsWithoutAsking: true, liveHeaders: false }),
@@ -127,11 +118,9 @@ describe("paired renames", () => {
       saveData: vi.fn(async () => {}),
       refreshInboxCount: vi.fn(),
     });
-    const oldPath = noteA.path;
-    noteA.path = "JDex/21.22+ Z #ayuda.md";
-    await plugin.onRename(noteA, oldPath);
-    await Promise.all(pending);
-    expect(renameFile).toHaveBeenCalledTimes(1);
+    await renameFile(noteA, "JDex/21.22+ Z #ayuda.md");
+    await v.settle();
+    expect(vi.mocked(renameFile).mock.calls.filter(([node]) => node === childA)).toHaveLength(1);
     expect(notices.some((n) => n.includes("«21.11» ha perdido su número"))).toBe(true);
   });
 });

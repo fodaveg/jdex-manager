@@ -1,33 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { type App, TFile } from "obsidian";
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn members of the vault double are read as values to assert on. */
+import { describe, expect, it, vi } from "vitest";
 import { buildIndex } from "../src/jd/index";
+import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 import { applyHeaderWraps, headersToMigrate } from "../src/vault/headers";
 
 const JDEX = "00.00 JDex";
 const HEADER_PATH = `${JDEX}/21.10 ■ Cabecera.md`;
 const BODY = "# 21.10 ■ Cabecera\n\n- [[21.11 Hebra]]\n";
 
-function file(path: string): TFile {
-  return Object.assign(new TFile(), { path, basename: path.slice(path.lastIndexOf("/") + 1, -3) });
-}
-
 /** A vault with one note whose content `edit` can change between preview and apply. */
 function vaultWith(content: string) {
-  const header = file(HEADER_PATH);
-  const state = { content };
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => (path === HEADER_PATH ? header : null),
-      read: async () => state.content,
-      process: async (_file: TFile, update: (current: string) => string) => {
-        state.content = update(state.content);
-        return state.content;
-      },
-      modify: async () => {
-        throw new Error("migrateHeaders must not call vault.modify");
-      },
-    },
-  } as unknown as App;
+  const v = new FakeObsidianVault();
+  v.file(HEADER_PATH, content);
+  // A rewrite goes through `process`; `modify` would replace the file without the atomic check.
+  vi.mocked(v.app.vault.modify).mockRejectedValue(new Error("migrateHeaders must not call vault.modify"));
+  const { app } = v;
+  const state = { get content() { return v.bodies.get(HEADER_PATH)!; }, set content(value: string) { v.bodies.set(HEADER_PATH, value); } };
   const index = buildIndex({ systemRoot: "", jdexFolder: JDEX, folderPaths: [JDEX, "20-29 Productos", "20-29 Productos/21 Productos de software"], notePaths: [HEADER_PATH] });
   return { app, index, state };
 }
