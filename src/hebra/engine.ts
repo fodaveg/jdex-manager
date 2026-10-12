@@ -94,6 +94,7 @@ export {
   // JD son clicables… y autocompletado»). El motor solo ENCUENTRA; el host pinta el
   // enlace y ofrece las sugerencias (`jdex-editor-extension.ts`).
   findJdNumbers,
+  entriesByNumber,
   pushOperation, JOURNAL_MAX, patternFor, parseCategoryPatterns, formatCategoryPatterns,
   healthFileName, renderHealthReport,
   systemReportName, renderSystemReport, previousSystemSnapshot

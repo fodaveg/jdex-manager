@@ -75,7 +75,7 @@ abstract class StructureModal extends Modal {
         .setDesc(def.desc)
         .addToggle((t) => t.setValue(def.initial).onChange((v) => (this.toggles[def.key] = v)));
     }
-    this.errorEl = contentEl.createDiv({ cls: "jdex-validation" });
+    this.errorEl = contentEl.createDiv({ cls: "jdex-validation", attr: { role: "alert" } });
     new Setting(contentEl).addButton((b) => {
       this.submitButton = b.buttonEl;
       b.setButtonText("Create")
@@ -94,7 +94,7 @@ abstract class StructureModal extends Modal {
 
   private refresh(): void {
     const e = this.currentError();
-    this.errorEl?.setText(e ?? "");
+    if (this.errorEl && this.errorEl.textContent !== (e ?? "")) this.errorEl.setText(e ?? "");
     if (this.submitButton) this.submitButton.disabled = e !== null;
   }
 

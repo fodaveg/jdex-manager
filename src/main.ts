@@ -17,6 +17,7 @@ import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
 import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
 import { IdSuggestModal, openEntry } from "./ui/go-to-id";
 import { ProcessInboxModal } from "./ui/inbox";
+import { FolderSuggest } from "./ui/folder-suggest";
 import { IdEditorSuggest } from "./ui/autocomplete";
 import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
@@ -84,6 +85,13 @@ export default class JdexManagerPlugin extends Plugin {
     registerReadingLinks(this, {
       index: () => this.cachedIndex(),
       enabled: () => this.settings.readingLinks && this.settings.jdexFolder !== "",
+      choose: (entries) =>
+        new Promise<IdEntry | null>((resolve) => {
+          const modal = new IdSuggestModal(this.app, { ...this.cachedIndex(), ids: entries }, (e) => resolve(e), "Which one?");
+          modal.setInstructions([{ command: "↵", purpose: "open the note" }]);
+          modal.onClose = () => resolve(null);
+          modal.open();
+        }),
     });
 
     // Folders are only known once the vault has loaded; detect then, and only into empty fields.
@@ -1121,21 +1129,25 @@ class JdexManagerSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("System identifier")
       .setDesc("Only with several Johnny.Decimal systems: a letter and two digits (D01). Names like D01.21.22 are then understood. Empty = single system.")
-      .addText((text) =>
+      .addText((text) => {
+        // Typing `D01` passes through `D` and `D0`: saving on each keystroke is silent, and the
+        // warning waits until the field loses focus, once.
         text
           .setPlaceholder("Empty = single system")
           .setValue(this.plugin.settings.systemId)
           .onChange(async (value) => {
             const id = normalizeSystemId(value);
-            if (id === null) {
-              // eslint-disable-next-line obsidianmd/ui/sentence-case
-              new Notice("A system identifier is a capital letter and two digits, like D01.");
-              return;
-            }
+            if (id === null) return;
             this.plugin.settings.systemId = id;
             await this.plugin.saveSettings();
-          }),
-      );
+          });
+        text.inputEl.addEventListener("blur", () => {
+          if (normalizeSystemId(text.getValue()) === null) {
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
+            new Notice("A system identifier is a capital letter and two digits, like D01. The value was not saved.");
+          }
+        });
+      });
 
     new Setting(containerEl)
       .setName("Prefix new names with the system identifier")
@@ -1435,14 +1447,16 @@ class JdexManagerSettingTab extends PluginSettingTab {
     new Setting(this.containerEl)
       .setName(name)
       .setDesc(desc)
-      .addText((text) =>
-        text
+      .addText((text) => {
+        // The suggestions are a help; the field stays free text.
+        new FolderSuggest(this.app, text.inputEl);
+        return text
           .setPlaceholder(placeholder)
           .setValue(get())
           .onChange(async (value) => {
             set(value.trim().replace(/^\/+|\/+$/g, ""));
             await this.plugin.saveSettings();
-          }),
-      );
+          });
+      });
   }
 }

@@ -120,6 +120,7 @@ import {
 } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import { mountJdexGotoView } from './jdex-goto-view';
+import { mountJdexIdPicker } from './jdex-id-picker';
 import { retireJdexId } from './jdex-retire';
 import { archiveJdexInboxNote, jdexInboxArchiveTarget, jdexInboxQueue, moveJdexInboxNote } from './jdex-inbox-process';
 import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
@@ -820,8 +821,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   /** «Ir a este ID»: la carpeta si la tiene (como `toggleNoteAndFolder`), si no la
    *  nota JDex. */
-  function gotoJdexEntry(entry: IdEntry, currentWalk: JdexLibraryWalk): void {
-    if (entry.folderPath) {
+  function gotoJdexEntry(entry: IdEntry, currentWalk: JdexLibraryWalk, preferNote = false): void {
+    if (!preferNote && entry.folderPath) {
       const folderId = jdexResolveFolderId(currentWalk, entry.folderPath);
       if (folderId) {
         api.workspace.selectFolder(folderId);
@@ -832,6 +833,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       const ref = currentWalk.systemNotes.find((note) => note.path === entry.notePath);
       if (ref) {
         api.workspace.openNote(ref.id);
+        return;
+      }
+    }
+    if (preferNote && entry.folderPath) {
+      const folderId = jdexResolveFolderId(currentWalk, entry.folderPath);
+      if (folderId) {
+        api.workspace.selectFolder(folderId);
         return;
       }
     }
@@ -1486,9 +1494,32 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offEditorExtension = api.editor.registerExtension(
       jdexEditorExtension({
         ids: () => index?.ids ?? [],
-        onNavigate: (entry) => {
-          if (walk) gotoJdexEntry(entry, walk);
-        }
+        // Un número del texto lleva a su NOTA; la carpeta es la alternativa (⌘/Ctrl+Alt+clic).
+        onNavigate: (entry, options) => {
+          if (walk) gotoJdexEntry(entry, walk, !options?.folder);
+        },
+        // Varios hijos `+` con el mismo número: se pregunta cuál, con el mismo buscador.
+        onAmbiguous: (entries, options) => {
+          if (!walk) return;
+          const currentWalk = walk;
+          let handle: PluginModalHandle | undefined;
+          handle = host.openModal(
+            (el) => {
+              const picker = mountJdexIdPicker(el, {
+                entries,
+                placeholder: 'Varios IDs comparten este número: elige uno…',
+                onSelect: (entry) => {
+                  handle?.close();
+                  gotoJdexEntry(entry, currentWalk, !options.folder);
+                }
+              });
+              picker.focus();
+            },
+            { title: 'JDex: ¿cuál?' }
+          );
+        },
+        autocomplete: () => settings.autocomplete,
+        autocompleteInsert: () => settings.autocompleteInsert
       })
     );
   } catch (error) {
