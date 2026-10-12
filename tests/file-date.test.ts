@@ -1,19 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
-import { type App, TFile } from "obsidian";
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn members of the vault double are read as values to assert on. */
+import { describe, expect, it } from "vitest";
+import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 import { fileDate, parseDateValue } from "../src/vault/file-date";
 import { dateFile } from "../src/vault/files";
 
 const CTIME = new Date(2026, 9, 12, 8, 0).getTime();
 
 function fixture(frontmatter: Record<string, unknown> | undefined, extension = "md") {
-  const file = Object.assign(new TFile(), { path: `Inbox/note.${extension}`, name: `note.${extension}`, extension, parent: { path: "Inbox" }, stat: { ctime: CTIME, mtime: CTIME } });
-  const renameFile = vi.fn();
-  const app = {
-    metadataCache: { getFileCache: () => ({ frontmatter }) },
-    vault: { getAbstractFileByPath: () => null },
-    fileManager: { renameFile },
-  } as unknown as App;
-  return { app, file, renameFile };
+  const v = new FakeObsidianVault();
+  const file = v.file(`Inbox/note.${extension}`, "", frontmatter, CTIME);
+  return { app: v.app, file, v, renameFile: v.app.fileManager.renameFile };
 }
 
 describe("parseDateValue", () => {
@@ -45,6 +41,7 @@ describe("fileDate: the date a file is dated or archived with", () => {
     const { app, file, renameFile } = fixture({ fecha: "2021-05-06" });
     expect(await dateFile(app, file, "YYYY-MM-DD")).toBe("Inbox/2021-05-06 note.md");
     expect(renameFile).toHaveBeenCalledWith(file, "Inbox/2021-05-06 note.md");
+    expect(file.path).toBe("Inbox/2021-05-06 note.md");
     const fallback = fixture({});
     expect(await dateFile(fallback.app, fallback.file, "YYYY-MM-DD")).toBe("Inbox/2026-10-12 note.md");
   });
