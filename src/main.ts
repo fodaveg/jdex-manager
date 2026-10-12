@@ -443,6 +443,8 @@ export default class JdexManagerPlugin extends Plugin {
   /** A deleted JDex ID note leaves its header list (live headers on, the default). */
   async onDelete(file: TAbstractFile): Promise<void> {
     if (this.unloaded || !this.settings.liveHeaders || this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
+    // A note an undo trashes (undoing «Create ID»): its header lists are the undo's to restore.
+    if (this.undoShield.settling && this.undoShield.protects(file.path)) return;
     const rel = relativeTo(this.settings.jdexFolder, file.path);
     if (rel === null || rel === "" || rel.includes("/")) return;
     const parsed = extractJdPrefix(rel.replace(/\.md$/, ""));
