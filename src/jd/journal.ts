@@ -21,8 +21,9 @@ export type Effect =
   /**
    * A rename or move. `type`, `ctime` (files) and `children` (folders, first level) identify what
    * was moved, so undo does not move back another item that reused the path. Older entries lack them.
+   * `size` (files) lets undo accept a file whose ctime changed (Android) when path, name and size match.
    */
-  | { kind: "moved"; from: string; to: string; type?: "file" | "folder"; ctime?: number; children?: string[] }
+  | { kind: "moved"; from: string; to: string; type?: "file" | "folder"; ctime?: number; size?: number; children?: string[] }
   /**
    * Prior values plus absent keys, which must survive JSON dropping `undefined`. `written` holds the
    * values the plugin wrote: undo compares every key against them before touching the note.

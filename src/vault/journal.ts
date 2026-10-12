@@ -43,20 +43,36 @@ export function folderChildren(folder: TFolder): string[] {
 }
 
 /** What identifies a moved file or folder at undo time; recorded with the `moved` effect. */
-export function movedIdentity(target: TAbstractFile): Pick<Extract<Effect, { kind: "moved" }>, "type" | "ctime" | "children"> {
-  if (target instanceof TFile) return typeof target.stat?.ctime === "number" ? { type: "file", ctime: target.stat.ctime } : { type: "file" };
+export function movedIdentity(target: TAbstractFile): Pick<Extract<Effect, { kind: "moved" }>, "type" | "ctime" | "size" | "children"> {
+  if (target instanceof TFile) {
+    return {
+      type: "file",
+      ...(typeof target.stat?.ctime === "number" ? { ctime: target.stat.ctime } : {}),
+      ...(typeof target.stat?.size === "number" ? { size: target.stat.size } : {}),
+    };
+  }
   if (target instanceof TFolder) return { type: "folder", children: folderChildren(target) };
   return {};
 }
 
-function sameMovedItem(e: Extract<Effect, { kind: "moved" }>, target: TAbstractFile): boolean {
-  if (!e.type) return true;
-  if (e.type === "file") return target instanceof TFile && (e.ctime === undefined || target.stat.ctime === e.ctime);
-  if (!(target instanceof TFolder)) return false;
+/**
+ * `same`, `different`, or `by-size`: a file whose ctime changed (Android, where ctime follows
+ * mtime) but whose path, name and size are the ones recorded. The path and name hold because the
+ * target was looked up at the recorded destination.
+ */
+function sameMovedItem(e: Extract<Effect, { kind: "moved" }>, target: TAbstractFile): "same" | "by-size" | "different" {
+  if (!e.type) return "same";
+  if (e.type === "file") {
+    if (!(target instanceof TFile)) return "different";
+    if (e.ctime === undefined || target.stat.ctime === e.ctime) return "same";
+    const name = e.to.slice(e.to.lastIndexOf("/") + 1);
+    return e.size !== undefined && target.stat.size === e.size && target.name === name ? "by-size" : "different";
+  }
+  if (!(target instanceof TFolder)) return "different";
   const recorded = e.children ?? [];
-  if (recorded.length === 0) return true;
+  if (recorded.length === 0) return "same";
   const now = new Set(folderChildren(target));
-  return recorded.some((name) => now.has(name));
+  return recorded.some((name) => now.has(name)) ? "same" : "different";
 }
 
 async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<string> {
@@ -107,10 +123,13 @@ async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<st
     case "moved": {
       const target = app.vault.getAbstractFileByPath(e.to);
       if (!target) throw new Error(`${e.to} is not there any more; nothing to move back.`);
-      if (!sameMovedItem(e, target)) throw new Error(`${e.to} is not the item that was moved there; review manually.`);
+      const identity = sameMovedItem(e, target);
+      if (identity === "different") throw new Error(`${e.to} is not the item that was moved there; review manually.`);
       if (app.vault.getAbstractFileByPath(e.from)) throw new Error(`${e.from} exists again; cannot move ${e.to} back.`);
       await app.fileManager.renameFile(target, e.from);
-      return `Moved ${e.to} back to ${e.from}.`;
+      return identity === "by-size"
+        ? `Moved ${e.to} back to ${e.from}. Its creation time changed after the move (as on Android); it was recognised by its path, name and size.`
+        : `Moved ${e.to} back to ${e.from}.`;
     }
     case "frontmatter": {
       const state = frontmatterUndoState(e);
