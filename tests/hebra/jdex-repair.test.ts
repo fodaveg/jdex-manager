@@ -2,7 +2,7 @@ import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIndex, DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import { applyJdexRepair } from '../../src/hebra/jdex-repair';
-import { FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
+import { FakeJdexVault, fakeFolder, fakeNote, fakeSetProperty } from './support/fakes';
 import type { JdexLibraryWalk } from '../../src/hebra/library-index';
 
 const jdex = '00.00 JDex';
@@ -37,6 +37,34 @@ function setup(notePaths: string[] = []) {
 }
 
 describe('Hebra unified repair executor', () => {
+  describe('frontmatter fixes check that the property was written', () => {
+    const notePath = `${jdex}/21.22 Proyecto.md`;
+    const fix = { type: 'frontmatter' as const, path: notePath, set: { jd: '21.22', tipo: 'id' } };
+    function noteState(body: string) {
+      const state = setup();
+      state.vault.seedNote(fakeNote('jdex-note', 'jdex', body));
+      const walk = { ...state.walk, systemNotes: [{ id: 'jdex-note', folderId: 'jdex', title: '21.22 Proyecto', path: notePath }] };
+      const markdown = { ...state.markdown, setProperty: fakeSetProperty };
+      return { ...state, walk, markdown };
+    }
+
+    it('a repeated key is not reported as repaired: it warns and leaves the note untouched', async () => {
+      const body = '---\njd: 21.20\njd: 21.21\ntipo: id\n---\n# 21.22 Proyecto\n';
+      const state = noteState(body);
+      const result = await applyJdexRepair(state.vault, state.markdown, state.walk, state.index, state.settings, fix);
+      expect(result.applied).toBe(false);
+      expect(result.warnings.join(' ')).toMatch(/no se pudo escribir jd/);
+      expect((await state.vault.noteRead('jdex-note'))?.body).toBe(body);
+    });
+
+    it('control: the same note with a single key is repaired', async () => {
+      const state = noteState('---\njd: 21.20\ntipo: id\n---\n# 21.22 Proyecto\n');
+      const result = await applyJdexRepair(state.vault, state.markdown, state.walk, state.index, state.settings, fix);
+      expect(result).toEqual({ applied: true, warnings: [] });
+      expect((await state.vault.noteRead('jdex-note'))?.body).toContain('jd: "21.22"');
+    });
+  });
+
   it('preserves a concurrent folder rename instead of applying the stale repair', async () => {
     const state = setup();
     const renameIfUnchanged = state.vault.folderRenameIfUnchanged.bind(state.vault);
