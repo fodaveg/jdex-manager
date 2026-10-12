@@ -22,9 +22,9 @@ import {
   JDEX_COMMAND_REPAIR,
   JDEX_COMMAND_SYSTEM_REPORT,
   JDEX_COMMAND_UNDO,
-  JDEX_COMMAND_WRAP_HEADERS,
-  activateJdex
+  JDEX_COMMAND_WRAP_HEADERS
 } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import { FakeJdexVault, createJdexTestApi, fakeFolder, fakeNote } from './support/fakes';
 
 const JDEX = '00-09 Sistema/00 Sistema/00.00 JDex';
@@ -334,12 +334,13 @@ describe('the journal command', () => {
   it('refuses to undo when the journal changed after the dialog was opened', async () => {
     const { command, notices, vault, cleanup } = await setup();
     await command(JDEX_COMMAND_REFRESH_INDEX).run();
-    await vi.waitFor(async () => expect(await body(vault, 'n-index')).toContain('21.11 Hebra'));
+    // The notice comes after the journal entry is committed: open the dialog only then.
+    await vi.waitFor(() => expect(notices()).toContain('Índice del sistema actualizado.'));
     await command(JDEX_COMMAND_UNDO).run();
     await command(JDEX_COMMAND_REFRESH_HEADERS).run();
-    await vi.waitFor(async () => expect(await body(vault, 'n-header')).toContain('[[21.11 Hebra]]'));
-    primary()?.click();
-    await vi.waitFor(() => expect(notices().some((text) => text.includes('El diario cambió'))).toBe(true));
+    await vi.waitFor(() => expect(notices()).toContain('1 cabecera(s) actualizada(s).'));
+    primary().click();
+    await vi.waitFor(() => expect(notices().join(' | ')).toContain('El diario cambió'));
     expect(await body(vault, 'n-index')).toContain('21.11 Hebra');
     await cleanup();
   });
