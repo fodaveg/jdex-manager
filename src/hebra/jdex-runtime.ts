@@ -114,8 +114,13 @@ import {
   createJdexChild,
   createJdexHeader,
   createJdexId,
-  type JdexCreateOutcome
+  type CreateAreaRequest,
+  type CreateCategoryRequest,
+  type CreateChildRequest,
+  type CreateHeaderRequest,
+  type CreateIdRequest
 } from './jdex-create-write';
+import { openJdexCreateDialog, type JdexCreateDialogPorts } from './jdex-create-dialog';
 import { applyJdexFrontmatterFixes, frontmatterFindingsFor } from './jdex-normalize';
 import { mountJdexNormalizeView } from './jdex-normalize-view';
 import {
@@ -497,8 +502,29 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     await syncLiveHeaders();
   }
 
-  function reportCreateOutcome(outcome: JdexCreateOutcome): void {
-    if (outcome.folderNotice) host.notice(outcome.folderNotice);
+  /** The five create dialogs (`./jdex-create-dialog.ts`): the library is revalidated right
+   *  before writing, after the notices still pending are applied. */
+  const createPorts: JdexCreateDialogPorts = {
+    ui: host,
+    journal,
+    isDisposed: () => disposed,
+    live: async () => {
+      await scheduler.settle();
+      if (!walk || !index) throw new Error('El índice JDex aún no está listo.');
+      return { walk, index };
+    },
+    afterWrite: (vault) => afterJdexWrite(true, vault),
+    openNote: (id) => api.workspace.openNote(id)
+  };
+
+  /** The creation system is the one chosen when the dialog opened, even if the settings
+   *  change before it writes (Codex review of the 12 Oct audit); the rest is read live. */
+  type ChosenSystem = Pick<typeof settings, 'systemId' | 'prefixNamesWithSystem'>;
+  function chosenSystem(): ChosenSystem {
+    return { systemId: settings.systemId, prefixNamesWithSystem: settings.prefixNamesWithSystem };
+  }
+  function withSystem(chosen: ChosenSystem): typeof settings {
+    return { ...settings, ...chosen };
   }
 
   function openCreateIdDialog(): void {
@@ -507,43 +533,25 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
-    let handle: PluginModalHandle | undefined;
-    handle = host.openModal(
-      (el) =>
+    const chosen = chosenSystem();
+    const prefix = namePrefix(chosen);
+    const currentIndex = jdexCreationIndex(index, prefix);
+    openJdexCreateDialog<CreateIdRequest>(createPorts, {
+      title: 'JDex: crear ID',
+      kind: 'create-id',
+      label: 'Crear ID',
+      mount: (el, onSubmit) =>
         mountCreateIdDialog(el, {
           index: currentIndex,
-          refreshIndex: async () => {
-            return jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
-          },
+          refreshIndex: async () => jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), prefix),
           categories: currentIndex.categories,
           createFolderDefault: settings.createFolderByDefault,
           createPatternDefault: settings.createPatternByDefault,
           patternFor: (category) => patternFor(settings, category),
-          onSubmit: async (request) => {
-            try {
-              const outcome = await journal.run('create-id', 'Crear ID', async (vault) => {
-                const created = await createJdexId(
-                  vault,
-                  api.markdown,
-                  walk!,
-                  settings,
-                  index!,
-                  request
-                );
-                await afterJdexWrite(true, vault);
-                return created;
-              });
-              handle?.close();
-              reportCreateOutcome(outcome);
-              api.workspace.openNote(outcome.note.id);
-            } catch (error) {
-              host.notice(error instanceof Error ? error.message : String(error));
-            }
-          }
+          onSubmit
         }),
-      { title: 'JDex: crear ID' }
-    );
+      write: (vault, request, live) => createJdexId(vault, api.markdown, live.walk, withSystem(chosen), live.index, request)
+    });
   }
 
   function openCreateCategoryDialog(): void {
@@ -552,84 +560,50 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna área en el sistema: crea una primero.');
       return;
     }
-    const currentWalk = walk;
-    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
-    let handle: PluginModalHandle | undefined;
-    handle = host.openModal(
-      (el) =>
+    const chosen = chosenSystem();
+    const prefix = namePrefix(chosen);
+    const currentIndex = jdexCreationIndex(index, prefix);
+    openJdexCreateDialog<CreateCategoryRequest>(createPorts, {
+      title: 'JDex: crear categoría',
+      kind: 'create-structure',
+      label: 'Crear categoría',
+      mount: (el, onSubmit) =>
         mountCreateCategoryDialog(el, {
           index: currentIndex,
-          refreshIndex: async () => {
-            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
-          },
+          refreshIndex: async () => selectCreationSystem(await readJdexCreationIndex(api.vault, settings), prefix),
           areas: currentIndex.areas,
           createFolderDefault: settings.createFolderByDefault,
-          onSubmit: async (request) => {
-            try {
-              const outcome = await journal.run('create-structure', 'Crear categoría', async (vault) => {
-                // Re-read at the write: the number may have been taken while the dialog was open.
-                const liveIndex = selectCreationSystem(await readJdexCreationIndex(vault, settings), namePrefix(settings));
-                const created = await createJdexCategory(
-                  vault,
-                  api.markdown,
-                  walk ?? currentWalk,
-                  settings,
-                  liveIndex,
-                  request
-                );
-                await afterJdexWrite(true, vault);
-                return created;
-              });
-              handle?.close();
-              reportCreateOutcome(outcome);
-              api.workspace.openNote(outcome.note.id);
-            } catch (error) {
-              host.notice(error instanceof Error ? error.message : String(error));
-            }
-          }
+          onSubmit
         }),
-      { title: 'JDex: crear categoría' }
-    );
+      write: async (vault, request, live) => {
+        // Re-read at the write: the number may have been taken while the dialog was open.
+        const liveIndex = selectCreationSystem(await readJdexCreationIndex(vault, settings), prefix);
+        return createJdexCategory(vault, api.markdown, live.walk, withSystem(chosen), liveIndex, request);
+      }
+    });
   }
 
   function openCreateAreaDialog(): void {
     if (!walk || !index) return;
-    const currentWalk = walk;
-    const currentIndex = selectCreationSystem(index, namePrefix(settings));
-    let handle: PluginModalHandle | undefined;
-    handle = host.openModal(
-      (el) =>
+    const chosen = chosenSystem();
+    const prefix = namePrefix(chosen);
+    const currentIndex = selectCreationSystem(index, prefix);
+    openJdexCreateDialog<CreateAreaRequest>(createPorts, {
+      title: 'JDex: crear área',
+      kind: 'create-structure',
+      label: 'Crear área',
+      mount: (el, onSubmit) =>
         mountCreateAreaDialog(el, {
           index: currentIndex,
-          refreshIndex: async () => {
-            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
-          },
+          refreshIndex: async () => selectCreationSystem(await readJdexCreationIndex(api.vault, settings), prefix),
           createFolderDefault: settings.createFolderByDefault,
-          onSubmit: async (request) => {
-            try {
-              const outcome = await journal.run('create-structure', 'Crear área', async (vault) => {
-                const liveIndex = selectCreationSystem(await readJdexCreationIndex(vault, settings), namePrefix(settings));
-                const created = await createJdexArea(
-                  vault,
-                  api.markdown,
-                  walk ?? currentWalk,
-                  settings,
-                  request,
-                  liveIndex
-                );
-                await afterJdexWrite(true, vault);
-                return created;
-              });
-              handle?.close();
-              reportCreateOutcome(outcome);
-              api.workspace.openNote(outcome.note.id);
-            } catch (error) {
-              host.notice(error instanceof Error ? error.message : String(error));
-            }
-          }
+          onSubmit
         }),
-      { title: 'JDex: crear área' }
-    );
+      write: async (vault, request, live) => {
+        const liveIndex = selectCreationSystem(await readJdexCreationIndex(vault, settings), prefix);
+        return createJdexArea(vault, api.markdown, live.walk, withSystem(chosen), request, liveIndex);
+      }
+    });
   }
 
   function openCreateHeaderDialog(): void {
@@ -638,40 +612,22 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
-    let handle: PluginModalHandle | undefined;
-    handle = host.openModal(
-      (el) =>
+    const chosen = chosenSystem();
+    const prefix = namePrefix(chosen);
+    const currentIndex = jdexCreationIndex(index, prefix);
+    openJdexCreateDialog<CreateHeaderRequest>(createPorts, {
+      title: 'JDex: crear cabecera',
+      kind: 'create-id',
+      label: 'Crear cabecera',
+      mount: (el, onSubmit) =>
         mountCreateHeaderDialog(el, {
           index: currentIndex,
-          refreshIndex: async () => {
-            return jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
-          },
+          refreshIndex: async () => jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), prefix),
           categories: currentIndex.categories,
-          onSubmit: async (request) => {
-            try {
-              const outcome = await journal.run('create-id', 'Crear cabecera', async (vault) => {
-                const created = await createJdexHeader(
-                  vault,
-                  api.markdown,
-                  walk!,
-                  settings,
-                  index!,
-                  request
-                );
-                await afterJdexWrite(true, vault);
-                return created;
-              });
-              handle?.close();
-              reportCreateOutcome(outcome);
-              api.workspace.openNote(outcome.note.id);
-            } catch (error) {
-              host.notice(error instanceof Error ? error.message : String(error));
-            }
-          }
+          onSubmit
         }),
-      { title: 'JDex: crear cabecera' }
-    );
+      write: (vault, request, live) => createJdexHeader(vault, api.markdown, live.walk, withSystem(chosen), live.index, request)
+    });
   }
 
   function openCreateChildDialog(): void {
@@ -685,41 +641,22 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice(JDEX_CHILD_OF_CHILD_MESSAGE);
       return;
     }
+    const chosen = chosenSystem();
     const currentIndex = index;
-    let handle: PluginModalHandle | undefined;
-    handle = host.openModal(
-      (el) =>
+    openJdexCreateDialog<CreateChildRequest>(createPorts, {
+      title: `JDex: crear ID hijo de ${parent.label}`,
+      kind: 'create-id',
+      label: 'Crear hijo de ID',
+      mount: (el, onSubmit) =>
         mountCreateChildDialog(el, {
           index: currentIndex,
-          refreshIndex: async () => {
-            return readJdexCreationIndex(api.vault, settings);
-          },
+          refreshIndex: () => readJdexCreationIndex(api.vault, settings),
           parent,
           createFolderDefault: settings.createFolderByDefault,
-          onSubmit: async (request) => {
-            try {
-              const outcome = await journal.run('create-id', 'Crear hijo de ID', async (vault) => {
-                const created = await createJdexChild(
-                  vault,
-                  api.markdown,
-                  walk!,
-                  settings,
-                  index!,
-                  request
-                );
-                await afterJdexWrite(true, vault);
-                return created;
-              });
-              handle?.close();
-              reportCreateOutcome(outcome);
-              api.workspace.openNote(outcome.note.id);
-            } catch (error) {
-              host.notice(error instanceof Error ? error.message : String(error));
-            }
-          }
+          onSubmit
         }),
-      { title: `JDex: crear ID hijo de ${parent.label}` }
-    );
+      write: (vault, request, live) => createJdexChild(vault, api.markdown, live.walk, withSystem(chosen), live.index, request)
+    });
   }
 
   function openNormalizeDialog(scopePath: string | null): void {
