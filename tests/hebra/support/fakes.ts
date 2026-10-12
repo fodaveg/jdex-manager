@@ -802,11 +802,14 @@ export function hostLikeSettingsStorage(base: HebraPluginApi['storage']['setting
   const emit = (value: unknown) => {
     for (const listener of [...listeners]) listener(value);
   };
+  // The host stores JSON: what is saved is a copy (later changes to the object do not
+  // reach the store) and every load is a new object.
+  const copy = (value: unknown): unknown => (value === null || value === undefined ? null : JSON.parse(JSON.stringify(value)));
   return {
     settings: {
-      load: <T>() => base.load<T>(),
+      load: async <T>() => copy(await base.load<T>()) as T | null,
       save: async (value: unknown) => {
-        await base.save(value);
+        await base.save(copy(value));
         emit(value ?? null);
       },
       onChange: (listener) => {
@@ -815,9 +818,9 @@ export function hostLikeSettingsStorage(base: HebraPluginApi['storage']['setting
       }
     },
     fromElsewhere: (value) => {
-      const copy = value === null || value === undefined ? null : (JSON.parse(JSON.stringify(value)) as unknown);
-      void base.save(copy);
-      emit(copy);
+      const arrived = copy(value);
+      void base.save(copy(arrived));
+      emit(arrived);
     }
   };
 }

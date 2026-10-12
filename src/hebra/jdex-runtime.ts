@@ -1283,12 +1283,17 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       get: () => settings,
       save: (next) => {
         // A path changed by hand stops following the folder it pointed at before.
-        for (const key of TRACKED_FOLDER_KEYS) if (next[key] !== settings[key]) delete folderIds[key];
+        const unfollowed = TRACKED_FOLDER_KEYS.filter((key) => next[key] !== settings[key]);
+        for (const key of unfollowed) delete folderIds[key];
         const baseline = settings;
         settings = next;
         void persistJdexSettings(settingsStorage, settings, baseline).catch((error: unknown) =>
           report(error, 'guardar-ajustes')
         );
+        // Stored too: otherwise the next start follows the old folder back.
+        if (unfollowed.length > 0) {
+          void persistTrackedFolderIds(settingsStorage, folderIds).catch((error: unknown) => report(error, 'guardar-ajustes'));
+        }
         void rebuild().catch((error: unknown) => report(error, 'rebuild-ajustes'));
       },
       pickFolder: async () => {

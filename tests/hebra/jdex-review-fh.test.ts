@@ -292,6 +292,24 @@ describe('FH 8: a partial rewrite says whether what was written can be undone', 
   });
 });
 
+describe('FH 9: a path edited by hand in the panel stops following the old folder after a restart', () => {
+  it('keeps the typed reports path after deactivating and activating again', async () => {
+    const { api, fake, cleanup } = await setupWithHarness();
+    expect((await api.storage.settings.load<{ jdexFolderIds: Record<string, string> }>())?.jdexFolderIds.reportsFolder).toBe('reports');
+    const el = document.createElement('div');
+    document.body.append(el);
+    fake.recorded.settingsPanels[0](el);
+    const input = [...el.querySelectorAll('input')].find((entry) => entry.value === REPORTS)!;
+    input.value = 'Informes nuevos';
+    input.dispatchEvent(new Event('change'));
+    await vi.waitFor(async () => expect((await api.storage.settings.load<{ reportsFolder: string }>())?.reportsFolder).toBe('Informes nuevos'));
+    await cleanup();
+    const again = await activateJdex(api);
+    expect((await api.storage.settings.load<{ reportsFolder: string }>())?.reportsFolder).toBe('Informes nuevos');
+    await again();
+  });
+});
+
 async function setupWithHarness() {
   const vault = libraryVault();
   const harness = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX, reportsFolder: REPORTS } });
