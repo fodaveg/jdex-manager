@@ -5,10 +5,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS, JOURNAL_VERSION, type Operation } from '../../src/hebra/engine';
-import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
+import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_SEND_TO_INBOX, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { guardJdexJournal } from '../../src/hebra/jdex-lifecycle';
 import { createJdexFolderRenameGuard } from '../../src/hebra/jdex-folder-rename';
 import { writeJdexBuiltinTemplates } from '../../src/hebra/jdex-templates';
+import { jdexLocateActiveNote } from '../../src/hebra/jdex-active-note-commands';
+import { buildIndex } from '../../src/hebra/engine';
 import { JDEX_REWRITE_BATCH_MAX, JdexPartialRewriteError, rewriteJdexNotes } from '../../src/hebra/jdex-write';
 import { createJdexJournal, JdexJournalSaveError, type JdexJournal, type JdexJournalEffect } from '../../src/hebra/jdex-journal';
 import { activateJdex } from './support/activate';
@@ -325,6 +327,37 @@ describe('FH 10: built-in templates are not written twice into a folder outside 
     expect(again.existing).toHaveLength(4);
     const page = await library.notesPage(null, 100, { kind: 'folder', folderId: 'f-templates' });
     expect(page.items).toHaveLength(4);
+  });
+});
+
+describe('FH 11: active-note commands resolve the note like the path item', () => {
+  it('takes the walk path of the note by id (a same-title note keeps its own tie-break path)', () => {
+    const folderPaths = new Map([['jdex', JDEX]]);
+    const first = { id: 'n-a', folderId: 'jdex', title: '21.11 Hebra', path: `${JDEX}/21.11 Hebra.md` };
+    const second = { id: 'n-b', folderId: 'jdex', title: '21.11 Hebra', path: `${JDEX}/21.11 Hebra--0000000b.md`, basePath: first.path };
+    const walk = { rootFolderId: 'root', folderPaths, systemFolderPaths: [JDEX], systemNotes: [first, second] };
+    const index = buildIndex({ systemRoot: '', jdexFolder: JDEX, folderPaths: [JDEX], notePaths: [first.path, second.path] });
+    const found = jdexLocateActiveNote({ id: 'n-b', folderId: 'jdex', title: '21.11 Hebra' }, walk, index, JDEX);
+    expect(found?.ref.path).toBe(second.path);
+  });
+
+  it('refuses to send the note of a repeated number to its inbox', async () => {
+    const vault = new FakeJdexVault();
+    for (const folder of [
+      fakeFolder('sys', null, '00-09 Sistema'), fakeFolder('sys-cat', 'sys', '00 Sistema'), fakeFolder('jdex', 'sys-cat', '00.00 JDex'),
+      fakeFolder('area', null, '20-29 Productos'), fakeFolder('cat', 'area', '21 Software'),
+      fakeFolder('inbox', 'cat', '21.01 Bandeja de entrada'), fakeFolder('id', 'cat', '21.11 Hebra')
+    ]) vault.seedFolder(folder);
+    vault.seedNote(fakeNote('n-hebra', 'jdex', '# 21.11 Hebra\n'));
+    vault.seedNote(fakeNote('n-otra', 'jdex', '# 21.11 Otra\n'));
+    vault.seedNote(fakeNote('n-content', 'id', '# Idea\n'));
+    const { api, fake, workspace } = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX } });
+    const cleanup = await activateJdex(api);
+    workspace.setActiveNote({ id: 'n-content', folderId: 'id', title: 'Idea' });
+    await command(fake, JDEX_COMMAND_SEND_TO_INBOX).run();
+    expect(fake.recorded.notices.join(' ')).toContain('está repetido');
+    expect((await vault.noteRead('n-content'))?.folderId).toBe('id');
+    await cleanup();
   });
 });
 

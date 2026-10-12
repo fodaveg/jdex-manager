@@ -6,7 +6,7 @@
  * enabled/disabled flag, so "disabled outside an ID" is a notice, never a silent no-op.
  */
 import type { HebraPluginApi, PluginActiveNote } from 'hebra-plugin-api';
-import { locate, sameSystem, systemKey, type DateFormat, type IdEntry, type JdIndex } from './engine';
+import { isRepeatedId, locate, repeatedIdMessage, sameSystem, systemKey, type DateFormat, type IdEntry, type JdIndex } from './engine';
 import { archiveJdexInboxNote, sendJdexNoteToInbox } from './jdex-inbox-process';
 import type { JdexJournal } from './jdex-journal';
 import { jdexNotePath, type JdexLibraryWalk, type JdexNoteRef } from './library-index';
@@ -32,7 +32,10 @@ export function jdexLocateActiveNote(
   jdexFolder: string
 ): JdexActiveNoteLocation | null {
   if (!note || !walk || !index) return null;
-  const path = jdexNotePath(walk.folderPaths, note);
+  // By id first, like the path item: two same-title notes have distinct paths only in the walk.
+  const path =
+    walk.systemNotes.find((ref) => ref.id === note.id && ref.title === note.title.normalize('NFC') && ref.folderId === note.folderId)?.path ??
+    jdexNotePath(walk.folderPaths, note);
   if (!path) return null;
   const located = locate(index, { jdexFolder }, path);
   if (!located) return null;
@@ -69,7 +72,7 @@ export function registerJdexActiveNoteCommands(deps: JdexActiveNoteCommandsDeps)
   const fail = (error: unknown) => notice(error instanceof Error ? error.message : String(error));
 
   /** The active note inside an ID (or its JDex note when `allowJdexNote`); else a notice. */
-  function resolve(allowJdexNote: boolean) {
+  function resolve(allowJdexNote: boolean, pickNoteOrFolder = true) {
     const state = deps.state();
     const found = state ? jdexLocateActiveNote(api.workspace.activeNote(), state.walk, state.index, state.jdexFolder) : null;
     if (!state || !found) {
@@ -78,6 +81,12 @@ export function registerJdexActiveNoteCommands(deps: JdexActiveNoteCommandsDeps)
     }
     if (!allowJdexNote && found.located.atNote) {
       notice('Esta es la nota JDex del ID: no se envía ni se archiva, solo su contenido.');
+      return null;
+    }
+    // Sending, archiving and the JD path pick "the" note or folder of the number: a
+    // repeated one is refused, as everywhere else (`refuseRepeated` in the runtime).
+    if (pickNoteOrFolder && isRepeatedId(state.index, found.located.entry)) {
+      notice(repeatedIdMessage(found.located.entry));
       return null;
     }
     return { state, ...found };
@@ -122,7 +131,8 @@ export function registerJdexActiveNoteCommands(deps: JdexActiveNoteCommandsDeps)
       id: JDEX_COMMAND_COPY_NOTE_ID,
       name: 'JDex: copiar el ID de esta nota',
       run: async () => {
-        const ctx = resolve(true);
+        // The number itself, the same for every note that repeats it.
+        const ctx = resolve(true, false);
         if (!ctx) return;
         const { entry } = ctx.located;
         await deps.copy(systemKey(entry.id, entry.system), 'ID copiado.');
@@ -142,7 +152,8 @@ export function registerJdexActiveNoteCommands(deps: JdexActiveNoteCommandsDeps)
       id: JDEX_COMMAND_SEARCH_CATEGORY,
       name: 'JDex: buscar dentro de la categoría',
       run: () => {
-        const ctx = resolve(true);
+        // The category's folder, whichever note repeats the number.
+        const ctx = resolve(true, false);
         if (!ctx) return;
         const folder = jdexCategoryFolder(ctx.state.index, ctx.located);
         if (!folder) {
