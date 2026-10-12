@@ -53,7 +53,7 @@ describe('loadJdexSettings / persistJdexSettings', () => {
       createPatternByDefault: true, liveHeaders: true, healthMaxFiles: 50,
       automaticMaintenance: false, inboxStaleDays: 30, structureNotesAreFindings: false, dateFormat: 'YYYY-MM-DD',
       autocomplete: true, autocompleteInsert: 'link',
-      prefixNamesWithSystem: false,
+      prefixNamesWithSystem: false, debugLog: false,
       createFolderByDefault: false, descriptionIsFinding: true, noteWithoutFolderIsFinding: false, renamePairsWithoutAsking: false,
       templateNames: DEFAULT_SETTINGS.templateNames
     });
