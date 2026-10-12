@@ -88,7 +88,6 @@ import {
   type JdexInboxSummary,
   type JdexLibraryWalk
 } from './library-index';
-import { mountJdexAuditView } from './jdex-audit-view';
 import { mountJdexSettingsPanel } from './jdex-settings-panel';
 import { autodetectJdexSettings, jdexSettingsFromStored, loadJdexSettings, persistJdexSettings } from './settings';
 import {
@@ -156,43 +155,47 @@ export {
   JDEX_COMMAND_SEARCH_CATEGORY,
   JDEX_COMMAND_SEND_TO_INBOX
 } from './jdex-active-note-commands';
-import { loadJdexIdSection } from './jdex-id-section';
-import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
 import { jdexEditorExtension } from './jdex-editor-extension';
 import { createJdexJournal, jdexDeviceId } from './jdex-journal';
 import { guardJdexJournal, trackJdexModals } from './jdex-lifecycle';
 import { mountJdexJournalView } from './jdex-journal-view';
 import { createJdexDebugLog } from './jdex-debug-log';
 import { createJdexHealthReport } from './jdex-health';
-import { applyJdexRepair } from './jdex-repair';
 import { createJdexSystemReport } from './jdex-system-report';
 import { createRebuildScheduler } from './rebuild-scheduler';
+import { copyJdexText, moveJdexNoteToEntry, retireJdexEntry, type JdexActionPorts } from './jdex-actions';
+import { registerJdexCommands, type JdexCommandHandlers } from './jdex-commands';
+import { createJdexAuditPanel } from './jdex-audit-panel';
+import { createJdexIdSectionPanel } from './jdex-id-section-panel';
 
 export const JDEX_AUDIT_VIEW_ID = 'jdex:auditoria';
 export const JDEX_ID_SECTION_VIEW_ID = 'jdex:seccion-del-id';
 export const JDEX_STATUS_PATH_ID = 'jdex-path';
 export const JDEX_STATUS_AUDIT_ID = 'jdex-audit';
 export const JDEX_STATUS_INBOX_ID = 'jdex-inbox';
-export const JDEX_COMMAND_LOCATE = 'jdex-donde-vive-esta-nota';
-export const JDEX_COMMAND_TOGGLE = 'jdex-alternar-nota-y-carpeta';
-export const JDEX_COMMAND_AUDIT = 'jdex-auditar-el-sistema';
-export const JDEX_COMMAND_REPAIR = 'jdex-reparar';
-export const JDEX_COMMAND_CREATE_ID = 'jdex-crear-id';
-export const JDEX_COMMAND_CREATE_CATEGORY = 'jdex-crear-categoria';
-export const JDEX_COMMAND_CREATE_AREA = 'jdex-crear-area';
-export const JDEX_COMMAND_CREATE_HEADER = 'jdex-crear-cabecera';
-export const JDEX_COMMAND_CREATE_CHILD = 'jdex-crear-id-hijo';
-export const JDEX_COMMAND_NORMALIZE_NOTE = 'jdex-normalizar-esta-nota';
-export const JDEX_COMMAND_NORMALIZE_ALL = 'jdex-normalizar-toda-la-jdex';
-export const JDEX_COMMAND_REFRESH_HEADERS = 'jdex-actualizar-cabeceras';
-export const JDEX_COMMAND_REFRESH_INDEX = 'jdex-actualizar-indice';
-export const JDEX_COMMAND_WRAP_HEADERS = 'jdex-envolver-cabeceras';
-export const JDEX_COMMAND_GOTO_ID = 'jdex-ir-a-un-id';
-export const JDEX_COMMAND_PROCESS_INBOX = 'jdex-procesar-inbox';
-export const JDEX_COMMAND_UNDO = 'jdex-deshacer-ultima-operacion';
-export const JDEX_COMMAND_HEALTH = 'jdex-informe-de-salud';
-export const JDEX_COMMAND_SYSTEM_REPORT = 'jdex-informe-del-sistema';
-export const JDEX_COMMAND_WRITE_TEMPLATES = 'jdex-escribir-plantillas-integradas';
+// The command ids live with their table (`./jdex-commands.ts`); re-exported for callers.
+export {
+  JDEX_COMMAND_AUDIT,
+  JDEX_COMMAND_CREATE_AREA,
+  JDEX_COMMAND_CREATE_CATEGORY,
+  JDEX_COMMAND_CREATE_CHILD,
+  JDEX_COMMAND_CREATE_HEADER,
+  JDEX_COMMAND_CREATE_ID,
+  JDEX_COMMAND_GOTO_ID,
+  JDEX_COMMAND_HEALTH,
+  JDEX_COMMAND_LOCATE,
+  JDEX_COMMAND_NORMALIZE_ALL,
+  JDEX_COMMAND_NORMALIZE_NOTE,
+  JDEX_COMMAND_PROCESS_INBOX,
+  JDEX_COMMAND_REFRESH_HEADERS,
+  JDEX_COMMAND_REFRESH_INDEX,
+  JDEX_COMMAND_REPAIR,
+  JDEX_COMMAND_SYSTEM_REPORT,
+  JDEX_COMMAND_TOGGLE,
+  JDEX_COMMAND_UNDO,
+  JDEX_COMMAND_WRAP_HEADERS,
+  JDEX_COMMAND_WRITE_TEMPLATES
+} from './jdex-commands';
 
 /** The first rebuild of each activation, keyed by its cleanup (tests and diagnostics). */
 const activationSettled = new WeakMap<PluginCleanup, Promise<void>>();
@@ -232,22 +235,35 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   let latestNote: PluginActiveNote | null = null;
   const debugLog = createJdexDebugLog(api.vault, () => ({ settings, walk }));
   debugSink = (error, where) => void debugLog.record(where, error);
-  /** Sección del ID (lote 4, tarea 2), `idSectionEl`: la pestaña puede volver a
-   *  montarse sobre el mismo `el` mientras sigue abierta (la nota activa cambia);
-   *  `idSectionRequest` descarta la respuesta de una petición vieja que llega
-   *  tarde. Declarados AQUÍ, antes de `rebuild` (que los lee al final para
-   *  refrescar la pestaña si está montada) — `rebuild()` se invoca por primera
-   *  vez antes de que el bloque de registro de más abajo llegue a ejecutarse, y
-   *  un `let` leído desde una función ya definida pero invocada antes de su
-   *  propia línea sigue en zona muerta temporal (medido: `ReferenceError: Cannot
-   *  access 'idSectionEl' before initialization` en el primer `rebuild()`). */
-  let idSectionEl: HTMLElement | null = null;
   /** Repaints registered by the open editors (`jdexEditorExtension`'s `subscribe`). */
   const editorRepaints = new Set<() => void>();
-  /** «Reparar» rebuilds between steps: the audit view is refreshed once at its end. */
-  let repairing = false;
-  let idSectionRequest = 0;
-  let unmountIdSection: (() => void) | undefined;
+  /** The audit view (`./jdex-audit-panel.ts`) and the ID section (`./jdex-id-section-panel.ts`).
+   *  Created HERE, before the first `rebuild()`, because `derive()` refreshes them. */
+  const auditPanel = createJdexAuditPanel({
+    state: () => ({ walk, index, findings, settings }),
+    journal,
+    markdown: api.markdown,
+    isDisposed: () => disposed,
+    rebuild,
+    afterWrite: (vault) => afterJdexWrite(true, vault),
+    notice: (text) => host.notice(text),
+    report,
+    noteIdByPath,
+    openNote: (id) => api.workspace.openNote(id),
+    selectFolder: (id) => api.workspace.selectFolder(id)
+  });
+  const idSectionPanel = createJdexIdSectionPanel({
+    state: () => ({ walk, index, settings, note: latestNote }),
+    vault: api.vault,
+    markdown: api.markdown,
+    goto: (entry) => {
+      if (walk) gotoJdexEntry(entry, walk);
+    },
+    openNote: (id) => api.workspace.openNote(id),
+    createChild: () => openCreateChildDialog(),
+    isoDates: () => api.env.isoDates(),
+    report
+  });
 
   let pathHandle: PluginStatusBarItemHandle | null = null;
   const auditHandle = host.registerStatusBarItem({
@@ -391,14 +407,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     // La sección del ID (lote 4, tarea 2) puede estar montada con esta MISMA nota
     // activa: un `rebuild()` que crea un hijo o cambia el frontmatter no dispara
     // `onActiveNoteChange` (la nota activa no cambió), así que se refresca aquí.
-    if (idSectionEl) renderIdSectionInto(idSectionEl);
+    idSectionPanel.refresh();
     // Open editors repaint their numbers, and an open audit view shows the new findings
     // (not the ones captured when it was mounted). Not while Repair walks its selection.
     for (const repaint of [...editorRepaints]) repaint();
-    if (auditViewEl && !repairing) {
-      unmountAuditView?.();
-      mountAuditViewInto(auditViewEl);
-    }
+    auditPanel.refresh();
   }
 
   /** Reconstrucción COMPLETA: recorre la biblioteca desde cero. Reservada para la
@@ -824,13 +837,38 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   // ---- Lote 3, tarea 2: ir a un ID, mover la nota a un ID, buscar dentro de un
   // ID, copiar ID o ruta, retirar un ID ----------------------------------------
 
-  async function copyToClipboard(text: string, successMessage: string): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text);
-      host.notice(successMessage);
-    } catch {
-      host.notice('No se pudo copiar.');
-    }
+  /** Copy, move and retire run in `./jdex-actions.ts` with these ports. */
+  const actionPorts: JdexActionPorts = {
+    notice: (text) => host.notice(text),
+    journal,
+    rebuild,
+    afterWrite: (vault) => afterJdexWrite(true, vault),
+    report,
+    confirm: (message, confirmLabel) =>
+      new Promise<boolean>((resolve) => {
+        let handle: PluginModalHandle | undefined;
+        handle = host.openModal(
+          (el) =>
+            mountJdexRenameWarningView(el, {
+              message,
+              confirmLabel,
+              onContinue: () => {
+                resolve(true);
+                handle?.close();
+              },
+              onCancel: () => {
+                resolve(false);
+                handle?.close();
+              }
+            }),
+          // Closed any other way (Escape, the module turned off): nothing happens.
+          { title: 'JDex: retirar ID', onClosed: () => resolve(false) }
+        );
+      })
+  };
+
+  function copyToClipboard(text: string, successMessage: string): Promise<void> {
+    return copyJdexText(actionPorts, (value) => navigator.clipboard.writeText(value), text, successMessage);
   }
 
   /** «Ir a este ID»: la carpeta si la tiene (como `toggleNoteAndFolder`), si no la
@@ -861,87 +899,16 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     host.notice(`No se pudo abrir ${entry.label}.`);
   }
 
-  /** «Mover la nota abierta aquí»: la nota ACTIVA (`latestNote`, tarea 2 del lote
-   *  1), nunca una elegida aparte — el selector no vuelve a listar notas, que ya
-   *  tiene su propio buscador (⌘K a secas). */
-  async function moveActiveNoteToEntry(
-    entry: IdEntry,
-    currentWalk: JdexLibraryWalk
-  ): Promise<void> {
-    const note = latestNote;
-    if (!note || !entry.folderPath) return;
-    const folderId = jdexResolveFolderId(currentWalk, entry.folderPath);
-    if (!folderId) {
-      host.notice(`No se encontró la carpeta de ${entry.label}.`);
-      return;
-    }
-    try {
-      await journal.run('move', `Mover nota a ${entry.label}`, (vault) => vault.noteMove(note.id, folderId));
-      host.notice(`Movida a ${entry.label}.`);
-      await rebuild();
-    } catch (error) {
-      host.notice(error instanceof Error ? error.message : String(error));
-    }
+  /** «Mover la nota abierta aquí»: la nota ACTIVA (`latestNote`). */
+  function moveActiveNoteToEntry(entry: IdEntry, currentWalk: JdexLibraryWalk): Promise<void> {
+    return moveJdexNoteToEntry(actionPorts, latestNote, entry, currentWalk);
   }
 
-  /** «Retirar este ID»: un segundo aviso (mismo componente que la tarea 1, «nunca
-   *  actúa sola») antes de `retireJdexId` — mover a la `.09` y marcar archivado no
-   *  se deshace pulsando otra vez. */
-  function confirmRetireEntry(
-    entry: IdEntry,
-    currentWalk: JdexLibraryWalk,
-    currentIndex: JdIndex
-  ): void {
-    if (isRepeatedId(currentIndex, entry)) {
-      host.notice(repeatedIdMessage(entry));
-      return;
-    }
-    let handle: PluginModalHandle | undefined;
-    handle = host.openModal(
-      (el) =>
-        mountJdexRenameWarningView(el, {
-          message:
-            `«${entry.label}» se retira: se marca archivado con la fecha de hoy y, si ` +
-            `tiene carpeta, se mueve a la .09 de su categoría. El número NUNCA se ` +
-            `reutiliza. ¿Confirmas?`,
-          confirmLabel: 'Retirar',
-          onContinue: () => {
-            handle?.close();
-            void runRetireEntry(entry, currentWalk, currentIndex);
-          },
-          onCancel: () => handle?.close()
-        }),
-      { title: 'JDex: retirar ID' }
+  /** «Retirar este ID» with the walk and index of the dialog it was chosen in. */
+  function confirmRetireEntry(entry: IdEntry, currentWalk: JdexLibraryWalk, currentIndex: JdIndex): void {
+    void retireJdexEntry(actionPorts, entry, currentIndex, (vault) =>
+      retireJdexId(vault, api.markdown, currentWalk, currentIndex, entry, todayIso())
     );
-  }
-
-  async function runRetireEntry(
-    entry: IdEntry,
-    currentWalk: JdexLibraryWalk,
-    currentIndex: JdIndex
-  ): Promise<void> {
-    try {
-      const outcome = await journal.run('retire', `Retirar ${entry.label}`, async (vault) => {
-        const retired = await retireJdexId(
-          vault,
-          api.markdown,
-          currentWalk,
-          currentIndex,
-          entry,
-          todayIso()
-        );
-        await afterJdexWrite(true, vault);
-        return retired;
-      });
-      host.notice(
-        outcome.moved
-          ? `${entry.label} retirado: movido a su archivo.`
-          : `${entry.label} retirado (la carpeta se queda donde estaba).`
-      );
-    } catch (error) {
-      host.notice(error instanceof Error ? error.message : String(error));
-      await rebuild().catch((cause: unknown) => report(cause, 'rebuild-tras-retirada-parcial'));
-    }
   }
 
   function retiredAt(entry: IdEntry): string | null {
@@ -1127,102 +1094,89 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const offRenameGuard = api.workspace.onBeforeFolderRename(confirmRename);
   const offNoteTitleRenamed = api.workspace.onNoteTitleRenamed(onNoteTitleRenamed);
 
-  const offCommandLocate = host.registerCommand({
-    id: JDEX_COMMAND_LOCATE,
-    name: 'JDex: dónde vive esta nota',
-    run: () => {
+  // The palette (`./jdex-commands.ts`): the table has the ids and names, these the handlers.
+  function openUndoDialog(): void {
+    const entries = journal.entries();
+    const operation = entries[entries.length - 1];
+    // The identity confirmed in the dialog; the journal checks it inside its queue.
+    const operationId = operation?.id;
+    let handle: PluginModalHandle | undefined;
+    handle = host.openModal((el) => mountJdexJournalView(el, {
+      entries,
+      status: journal.status(),
+      onDiscard: async () => {
+        if (!operationId) return;
+        const discarded = await journal.discardLast(operationId);
+        host.notice(discarded ? `«${operation.label}» se quitó del diario; no se tocó ninguna nota.` : 'El diario cambió desde que se abrió; no se descartó nada.');
+        handle?.close();
+      },
+      onUndo: async () => {
+        try {
+          const result = await journal.undoLast(operationId);
+          for (const warning of result.warnings) host.notice(warning);
+          if (result.undone > 0) host.notice(`${result.undone} paso(s) deshecho(s).`);
+          handle?.close();
+          await rebuild();
+        } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+      }
+    }), { title: 'Diario JDex' });
+  }
+
+  const commandHandlers: JdexCommandHandlers = {
+    locate: () => {
       refreshPathItem();
       host.notice(latestLocated ? latestLocated.text : 'Esta nota no vive en el sistema JDex.');
-    }
-  });
-  const offCommandToggle = host.registerCommand({
-    id: JDEX_COMMAND_TOGGLE,
-    name: 'JDex: alternar nota y carpeta',
-    run: () => {
+    },
+    toggle: () => {
       refreshPathItem();
       toggleNoteAndFolder();
-    }
-  });
-  const offCommandAudit = host.registerCommand({
-    id: JDEX_COMMAND_AUDIT,
-    name: 'JDex: auditar el sistema',
-    run: () => host.revealView(JDEX_AUDIT_VIEW_ID)
-  });
-  const offCommandRepair = host.registerCommand({
-    id: JDEX_COMMAND_REPAIR,
-    name: 'JDex: reparar',
-    run: async () => {
+    },
+    audit: () => host.revealView(JDEX_AUDIT_VIEW_ID),
+    repair: async () => {
       await rebuild();
       host.revealView(JDEX_AUDIT_VIEW_ID);
-    }
-  });
-  const offCommandCreateId = host.registerCommand({
-    id: JDEX_COMMAND_CREATE_ID,
-    name: 'JDex: crear ID',
-    run: () => openCreateIdDialog()
-  });
-  const offCommandCreateCategory = host.registerCommand({
-    id: JDEX_COMMAND_CREATE_CATEGORY,
-    name: 'JDex: crear categoría',
-    run: () => openCreateCategoryDialog()
-  });
-  const offCommandCreateArea = host.registerCommand({
-    id: JDEX_COMMAND_CREATE_AREA,
-    name: 'JDex: crear área',
-    run: () => openCreateAreaDialog()
-  });
-  const offCommandCreateHeader = host.registerCommand({
-    id: JDEX_COMMAND_CREATE_HEADER,
-    name: 'JDex: crear cabecera',
-    run: () => openCreateHeaderDialog()
-  });
-  const offCommandCreateChild = host.registerCommand({
-    id: JDEX_COMMAND_CREATE_CHILD,
-    name: 'JDex: crear ID hijo (+)',
-    run: () => openCreateChildDialog()
-  });
-  const offCommandNormalizeNote = host.registerCommand({
-    id: JDEX_COMMAND_NORMALIZE_NOTE,
-    name: 'JDex: normalizar el frontmatter de esta nota',
-    run: () => openNormalizeThisNote()
-  });
-  const offCommandNormalizeAll = host.registerCommand({
-    id: JDEX_COMMAND_NORMALIZE_ALL,
-    name: 'JDex: normalizar el frontmatter de toda la JDex',
-    run: () => openNormalizeDialog(null)
-  });
-  const offCommandRefreshHeaders = host.registerCommand({
-    id: JDEX_COMMAND_REFRESH_HEADERS,
-    name: 'JDex: actualizar las listas de cabeceras',
-    run: () =>
+    },
+    createId: () => openCreateIdDialog(),
+    createCategory: () => openCreateCategoryDialog(),
+    createArea: () => openCreateAreaDialog(),
+    createHeader: () => openCreateHeaderDialog(),
+    createChild: () => openCreateChildDialog(),
+    normalizeNote: () => openNormalizeThisNote(),
+    normalizeAll: () => openNormalizeDialog(null),
+    refreshHeaders: () =>
       void refreshHeadersCommand().catch((error: unknown) =>
         report(error, 'actualizar-cabeceras')
-      )
-  });
-  const offCommandRefreshIndex = host.registerCommand({
-    id: JDEX_COMMAND_REFRESH_INDEX,
-    name: 'JDex: actualizar el índice del sistema',
-    run: () =>
-      void refreshIndexCommand().catch((error: unknown) => report(error, 'actualizar-indice'))
-  });
-  const offCommandWrapHeaders = host.registerCommand({
-    id: JDEX_COMMAND_WRAP_HEADERS,
-    name: 'JDex: envolver las listas de cabeceras en marcadores',
-    run: () =>
+      ),
+    refreshIndex: () =>
+      void refreshIndexCommand().catch((error: unknown) => report(error, 'actualizar-indice')),
+    wrapHeaders: () =>
       void openWrapHeadersDialog().catch((error: unknown) =>
         report(error, 'envolver-cabeceras')
-      )
-  });
-  const offCommandGotoId = host.registerCommand({
-    id: JDEX_COMMAND_GOTO_ID,
-    name: 'JDex: ir a un ID…',
-    run: () => openGotoIdDialog()
-  });
-  const offCommandProcessInbox = host.registerCommand({
-    id: JDEX_COMMAND_PROCESS_INBOX,
-    name: 'JDex: procesar inbox',
-    run: () => openProcessInboxDialog()
-  });
+      ),
+    gotoId: () => openGotoIdDialog(),
+    processInbox: () => openProcessInboxDialog(),
+    undo: () => openUndoDialog(),
+    health: async () => {
+      try {
+        await rebuild();
+        if (!walk || !index) return;
+        const note = await journal.run('fix', 'Crear informe de salud', (vault) => createJdexHealthReport(vault, walk!, index!, settings, todayIso()));
+        api.workspace.openNote(note.id);
+      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+    },
+    systemReport: async () => {
+      try {
+        await rebuild();
+        if (!walk || !index) return;
+        const note = await journal.run('fix', 'Crear informe del sistema', (vault) => createJdexSystemReport(vault, walk!, index!, findings, settings, todayIso()));
+        api.workspace.openNote(note.id);
+      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+    },
+    writeTemplates: async () => {
+      try { host.notice(await writeBuiltinTemplates()); } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+    }
+  };
+  const offCommands = registerJdexCommands(host, commandHandlers, 'main');
   const offActiveNoteCommands = registerJdexActiveNoteCommands({
     api,
     state: () => (walk && index ? { walk, index, jdexFolder: settings.jdexFolder, dateFormat: settings.dateFormat } : null),
@@ -1230,210 +1184,30 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     rebuild,
     copy: copyToClipboard
   });
-  const offCommandUndo = host.registerCommand({
-    id: JDEX_COMMAND_UNDO,
-    name: 'JDex: deshacer la última operación',
-    run: () => {
-      const entries = journal.entries();
-      const operation = entries[entries.length - 1];
-      // The identity confirmed in the dialog; the journal checks it inside its queue.
-      const operationId = operation?.id;
-      let handle: PluginModalHandle | undefined;
-      handle = host.openModal((el) => mountJdexJournalView(el, {
-        entries,
-        status: journal.status(),
-        onDiscard: async () => {
-          if (!operationId) return;
-          const discarded = await journal.discardLast(operationId);
-          host.notice(discarded ? `«${operation.label}» se quitó del diario; no se tocó ninguna nota.` : 'El diario cambió desde que se abrió; no se descartó nada.');
-          handle?.close();
-        },
-        onUndo: async () => {
-          try {
-            const result = await journal.undoLast(operationId);
-            for (const warning of result.warnings) host.notice(warning);
-            if (result.undone > 0) host.notice(`${result.undone} paso(s) deshecho(s).`);
-            handle?.close();
-            await rebuild();
-          } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
-        }
-      }), { title: 'Diario JDex' });
-    }
-  });
-  const offCommandHealth = host.registerCommand({
-    id: JDEX_COMMAND_HEALTH,
-    name: 'JDex: informe de salud del sistema',
-    run: async () => {
-      try {
-        await rebuild();
-        if (!walk || !index) return;
-        const note = await journal.run('fix', 'Crear informe de salud', (vault) => createJdexHealthReport(vault, walk!, index!, settings, todayIso()));
-        api.workspace.openNote(note.id);
-      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
-    }
-  });
-  const offCommandSystemReport = host.registerCommand({
-    id: JDEX_COMMAND_SYSTEM_REPORT,
-    name: 'JDex: informe del sistema',
-    run: async () => {
-      try {
-        await rebuild();
-        if (!walk || !index) return;
-        const note = await journal.run('fix', 'Crear informe del sistema', (vault) => createJdexSystemReport(vault, walk!, index!, findings, settings, todayIso()));
-        api.workspace.openNote(note.id);
-      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
-    }
-  });
+  const offLateCommands = registerJdexCommands(host, commandHandlers, 'late');
 
-  let unmountAuditView: (() => void) | undefined;
-  let auditViewEl: HTMLElement | null = null;
-  function mountAuditViewInto(el: HTMLElement): void {
-    unmountAuditView = mountJdexAuditView(el, {
-      findings: () => findings,
-      openPath: (path) => {
-        if (!walk) return;
-        if (path.endsWith('.md')) {
-          const ref = walk.systemNotes.find((note) => note.path === path);
-          if (ref) api.workspace.openNote(ref.id);
-          return;
-        }
-        const folderId = jdexResolveFolderId(walk, path);
-        if (folderId) api.workspace.selectFolder(folderId);
-      },
-      applyFrontmatterFix: (finding) => {
-        void (async () => {
-          try {
-            const result = await journal.run('fix', 'Aplicar arreglo de auditoría', (vault) => applyJdexFrontmatterFixes(vault, api.markdown, [finding], noteIdByPath));
-            for (const warning of result.warnings) host.notice(warning);
-            await rebuild();
-            if (auditViewEl) {
-              unmountAuditView?.();
-              mountAuditViewInto(auditViewEl);
-            }
-          } catch (error) {
-            report(error, 'aplicar-frontmatter');
-            host.notice(error instanceof Error ? error.message : String(error));
-          }
-        })();
-      },
-      repair: (selected) => {
-        void (async () => {
-          let done = 0;
-          let failed = 0;
-          repairing = true;
-          try {
-            await journal.run('fix', 'Reparar JDex', async (vault) => {
-              // Turned off before this queued operation started: nothing to write.
-              if (disposed) return;
-              const order = (finding: Finding): number => {
-                const type = finding.fix?.type;
-                if (type === 'create-note' || type === 'create-folder' || type === 'folders') return 0;
-                if (type === 'frontmatter' || type === 'rename') return 1;
-                if (type === 'move') return 2;
-                return 3;
-              };
-              for (const finding of [...selected].sort((a, b) => order(a) - order(b))) {
-                if (!finding.fix) continue;
-                // Turned off mid-loop: `rebuild()` no longer refreshes, so `findings` and
-                // `walk` would be stale; stop before writing anything else.
-                if (disposed) break;
-                try {
-                  await rebuild();
-                  if (disposed) break;
-                  if (!findings.some((fresh) => fresh.kind === finding.kind && JSON.stringify(fresh.fix) === JSON.stringify(finding.fix))) {
-                    throw new Error(`${finding.paths[0]}: cambió desde la vista previa; vuelve a abrir Reparar.`);
-                  }
-                  const result = await applyJdexRepair(vault, api.markdown, walk!, index!, settings, finding.fix);
-                  for (const warning of result.warnings) host.notice(warning);
-                  if (result.applied) done += 1;
-                  else failed += 1;
-                } catch (error) {
-                  failed += 1;
-                  host.notice(error instanceof Error ? error.message : String(error));
-                }
-              }
-              if (done > 0 && !disposed) await afterJdexWrite(true, vault);
-            });
-          } catch (error) {
-            report(error, 'reparar');
-            if (!disposed) host.notice(error instanceof Error ? error.message : String(error));
-          } finally {
-            repairing = false;
-            if (!disposed) {
-              await rebuild();
-              if (auditViewEl) {
-                unmountAuditView?.();
-                mountAuditViewInto(auditViewEl);
-              }
-              host.notice(`Reparar: ${done} aplicado(s); ${failed} omitido(s) o fallido(s).`);
-            }
-          }
-        })();
-      }
-    });
-  }
   const offAuditView = host.registerView({
     id: JDEX_AUDIT_VIEW_ID,
     title: 'Auditoría JDex',
     icon: 'circle-check',
     placement: 'dialog',
-    mount: (el) => {
-      auditViewEl = el;
-      mountAuditViewInto(el);
-    },
-    unmount: () => {
-      auditViewEl = null;
-      unmountAuditView?.();
-      unmountAuditView = undefined;
-    }
+    mount: (el) => auditPanel.mount(el),
+    unmount: () => auditPanel.unmount()
   });
 
-  // ---- Lote 4, tarea 2: sección del ID en el panel de contexto ----------------
-  // (`idSectionEl`/`idSectionRequest`/`unmountIdSection` viven arriba, con el
-  // resto del estado de `activate`: ver su comentario.)
+  // ---- Lote 4, tarea 2: sección del ID en el panel de contexto (`idSectionPanel`) ----
 
-  function renderIdSectionInto(el: HTMLElement): void {
-    idSectionEl = el;
-    const request = ++idSectionRequest;
-    mountJdexIdSectionLoading(el);
-    if (!walk || !index) return;
-    void loadJdexIdSection(api.vault, api.markdown, walk, index, settings, latestNote)
-      .then((data) => {
-        if (request !== idSectionRequest || idSectionEl !== el) return;
-        unmountIdSection?.();
-        unmountIdSection = mountJdexIdSectionView(el, {
-          data,
-          onGoto: (entry) => {
-            if (walk) gotoJdexEntry(entry, walk);
-          },
-          onOpenNote: (id) => api.workspace.openNote(id),
-          onCreateChild: () => openCreateChildDialog(),
-          isoDates: () => api.env.isoDates()
-        });
-      })
-      .catch((error: unknown) => report(error, 'seccion-del-id'));
-  }
-
-  const offIdSectionActiveNote = api.workspace.onActiveNoteChange(() => {
-    if (idSectionEl) renderIdSectionInto(idSectionEl);
-  });
+  const offIdSectionActiveNote = api.workspace.onActiveNoteChange(() => idSectionPanel.refresh());
   // El ajuste «Usar fechas ISO 8601» de Hebra: las fechas de la sección se repintan solas.
-  const offIsoDates = api.env.onIsoDatesChange(() => {
-    if (idSectionEl) renderIdSectionInto(idSectionEl);
-  });
+  const offIsoDates = api.env.onIsoDatesChange(() => idSectionPanel.refresh());
 
   const offIdSectionView = host.registerView({
     id: JDEX_ID_SECTION_VIEW_ID,
     title: 'JDex',
     icon: 'compass',
     placement: 'column',
-    mount: (el) => renderIdSectionInto(el),
-    unmount: () => {
-      idSectionEl = null;
-      idSectionRequest += 1;
-      unmountIdSection?.();
-      unmountIdSection = undefined;
-    }
+    mount: (el) => idSectionPanel.mount(el),
+    unmount: () => idSectionPanel.unmount()
   });
 
   // «Los números JD son clicables… y autocompletado» (lote 4, tarea 2): `ids()`
@@ -1493,14 +1267,6 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     await rebuild();
     return jdexTemplatesOutcomeMessage(outcome);
   }
-  const offCommandWriteTemplates = host.registerCommand({
-    id: JDEX_COMMAND_WRITE_TEMPLATES,
-    name: 'JDex: escribir plantillas integradas en la carpeta de plantillas',
-    run: async () => {
-      try { host.notice(await writeBuiltinTemplates()); } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
-    }
-  });
-
   const offSettingsPanel = host.settingsPanel((el) =>
     mountJdexSettingsPanel(el, {
       writeTemplates: writeBuiltinTemplates,
@@ -1544,27 +1310,9 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offNotes();
     offRenameGuard();
     offNoteTitleRenamed();
-    offCommandLocate();
-    offCommandToggle();
-    offCommandAudit();
-    offCommandRepair();
-    offCommandCreateId();
-    offCommandCreateCategory();
-    offCommandCreateArea();
-    offCommandCreateHeader();
-    offCommandCreateChild();
-    offCommandNormalizeNote();
-    offCommandNormalizeAll();
-    offCommandRefreshHeaders();
-    offCommandRefreshIndex();
-    offCommandWrapHeaders();
-    offCommandGotoId();
-    offCommandProcessInbox();
+    offCommands();
     offActiveNoteCommands();
-    offCommandUndo();
-    offCommandHealth();
-    offCommandSystemReport();
-    offCommandWriteTemplates();
+    offLateCommands();
     offAuditView();
     offIdSectionActiveNote();
     offIdSectionView();
