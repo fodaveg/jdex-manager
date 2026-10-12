@@ -6,6 +6,8 @@ import { type JdexManagerSettings, namePrefix } from "../settings";
 import { titleForCompare } from "../jd/title";
 import { scanVault } from "../vault/scan";
 import { createJdexNote, ensureFolder } from "../vault/create";
+import { trackModal } from "./modal-registry";
+import type { Effect } from "../jd/journal";
 
 export class AreaSuggestModal extends SuggestModal<AreaEntry> {
   private readonly areas: AreaEntry[];
@@ -49,6 +51,7 @@ abstract class StructureModal extends Modal {
   protected abstract perform(): Promise<TFile | null>;
 
   onOpen(): void {
+    trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(this.heading());
@@ -122,9 +125,21 @@ export class CreateCategoryModal extends StructureModal {
     private readonly area: AreaEntry,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
+    /** Undo journal operation of this creation; a recording list saves each effect as it happens. */
+    private readonly effects: Effect[] = [],
   ) {
     super(app);
     this.number = nextFreeCategory(area.number, index.categories.map((c) => c.number)) ?? "";
+  }
+  /** Re-reads the vault at confirm time: another device may have created this category. */
+  protected prepareSubmit(): void {
+    this.index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
+    if (this.index.categories.some((c) => c.number === this.number)) {
+      this.number = nextFreeCategory(this.area.number, this.index.categories.map((c) => c.number)) ?? "";
+      const input = this.contentEl.querySelector<HTMLInputElement>("input");
+      if (input) input.value = this.number;
+      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+    }
   }
   protected heading(): string {
     return `New category in ${this.area.label}`;
@@ -146,13 +161,13 @@ export class CreateCategoryModal extends StructureModal {
     const category = this.number;
     const name = jdexNoteName(category, this.title, namePrefix(this.settings));
     const vars = { id: category, title: this.title.trim(), area: areaCode(this.area.number), areaTitle: this.area.label, category, categoryTitle: name };
-    const note = await createJdexNote(this.app, this.settings, "categoria", name, vars);
+    const note = await createJdexNote(this.app, this.settings, "categoria", name, vars, "", this.effects);
     let folderPath: string | null = null;
     if (this.toggles.folder) {
       if (!this.area.path) new Notice(`No folder for ${this.area.label} in the system root; category folder not created.`);
       else {
         folderPath = normalizePath(`${this.area.path}/${name}`);
-        await ensureFolder(this.app, folderPath);
+        await ensureFolder(this.app, folderPath, this.effects);
       }
     }
     const zeros = standardZeroNames(category);
@@ -163,9 +178,9 @@ export class CreateCategoryModal extends StructureModal {
       if (!this.toggles[key]) continue;
       const zeroName = jdexNoteName(zero.id, zero.title, namePrefix(this.settings));
       if (!findId(this.index, zero.id)) {
-        await createJdexNote(this.app, this.settings, "id", zeroName, { ...vars, id: zero.id, title: zero.title });
+        await createJdexNote(this.app, this.settings, "id", zeroName, { ...vars, id: zero.id, title: zero.title }, "", this.effects);
       }
-      if (folderPath) await ensureFolder(this.app, `${folderPath}/${zeroName}`);
+      if (folderPath) await ensureFolder(this.app, `${folderPath}/${zeroName}`, this.effects);
     }
     await this.afterCreate();
     return note;
@@ -178,10 +193,24 @@ export class CreateAreaModal extends StructureModal {
     private index: JdIndex,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
+    /** Undo journal operation of this creation; a recording list saves each effect as it happens. */
+    private readonly effects: Effect[] = [],
   ) {
     super(app);
     const next = nextFreeArea(index);
     this.number = next === null ? "" : areaCode(next);
+  }
+  /** Re-reads the vault at confirm time: another device may have created this area. */
+  protected prepareSubmit(): void {
+    this.index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
+    const r = parseNewArea(this.index, this.number);
+    if ("error" in r && /already exists/.test(r.error)) {
+      const next = nextFreeArea(this.index);
+      this.number = next === null ? "" : areaCode(next);
+      const input = this.contentEl.querySelector<HTMLInputElement>("input");
+      if (input) input.value = this.number;
+      throw new Error(`That number was taken. Next free: ${this.number || "none"}.`);
+    }
   }
   protected heading(): string {
     return "New area";
@@ -205,17 +234,17 @@ export class CreateAreaModal extends StructureModal {
     const code = areaCode(r.area);
     const name = jdexNoteName(code, this.title, namePrefix(this.settings));
     const vars = { id: code, title: this.title.trim(), area: code, areaTitle: name, category: "", categoryTitle: "" };
-    const note = await createJdexNote(this.app, this.settings, "area", name, vars);
+    const note = await createJdexNote(this.app, this.settings, "area", name, vars, "", this.effects);
     let folderPath: string | null = null;
     if (this.toggles.folder) {
       folderPath = normalizePath(this.settings.systemRoot === "" ? name : `${this.settings.systemRoot}/${name}`);
-      await ensureFolder(this.app, folderPath);
+      await ensureFolder(this.app, folderPath, this.effects);
     }
     if (this.toggles.management) {
       const m = managementCategoryName(r.area);
       const mName = jdexNoteName(m.number, m.title, namePrefix(this.settings));
-      await createJdexNote(this.app, this.settings, "categoria", mName, { ...vars, id: m.number, title: m.title, category: m.number, categoryTitle: mName });
-      if (folderPath) await ensureFolder(this.app, `${folderPath}/${mName}`);
+      await createJdexNote(this.app, this.settings, "categoria", mName, { ...vars, id: m.number, title: m.title, category: m.number, categoryTitle: mName }, "", this.effects);
+      if (folderPath) await ensureFolder(this.app, `${folderPath}/${mName}`, this.effects);
     }
     await this.afterCreate();
     return note;
@@ -230,6 +259,8 @@ export class CreateHeaderModal extends StructureModal {
     private readonly category: CategoryEntry,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
+    /** Undo journal operation of this creation; a recording list saves each effect as it happens. */
+    private readonly effects: Effect[] = [],
   ) {
     super(app);
     this.number = nextFreeHeader(index, category.number, category.system) ?? "";
@@ -283,7 +314,7 @@ export class CreateHeaderModal extends StructureModal {
       areaTitle: area?.label ?? areaCode(this.category.areaNumber),
       category: this.category.number,
       categoryTitle: this.category.label,
-    });
+    }, "", this.effects);
     await this.afterCreate();
     return note;
   }
@@ -296,6 +327,8 @@ export class CreateChildModal extends StructureModal {
     private readonly parent: IdEntry,
     private readonly settings: JdexManagerSettings,
     private readonly afterCreate: () => Promise<void>,
+    /** Undo journal operation of this creation; a recording list saves each effect as it happens. */
+    private readonly effects: Effect[] = [],
   ) {
     super(app);
     this.number = `${parent.id}+`;
@@ -345,10 +378,11 @@ export class CreateChildModal extends StructureModal {
         categoryTitle: category?.label ?? "",
       },
       `\n## Padre\n\n- [[${parentNote}]]\n`,
+      this.effects,
     );
     if (this.toggles.folder) {
       if (!this.parent.folderPath) new Notice(`${this.parent.label} has no folder; child folder not created.`);
-      else await ensureFolder(this.app, `${this.parent.folderPath}/${jdexNoteName("+", title)}`);
+      else await ensureFolder(this.app, `${this.parent.folderPath}/${jdexNoteName("+", title)}`, this.effects);
     }
     await this.afterCreate();
     return note;

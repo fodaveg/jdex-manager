@@ -10,6 +10,9 @@ export const ID_PANEL_VIEW = "jdex-id-panel";
 export interface PanelSource {
   index: () => JdIndex;
   settings: () => { jdexFolder: string };
+  /** «Index changed», emitted after the plugin invalidates its index; returns the
+   *  unsubscribe. Without it the panel listens to vault events itself. */
+  onIndexChanged?: (listener: () => void) => () => void;
 }
 
 /** Side panel: the ID the active file belongs to, its note, its files, its + children and its siblings. */
@@ -35,16 +38,29 @@ export class IdPanelView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.registerEvent(this.app.workspace.on("file-open", () => this.render()));
-    this.registerEvent(this.app.vault.on("rename", () => this.render()));
-    this.registerEvent(this.app.vault.on("create", () => this.render()));
-    this.registerEvent(this.app.vault.on("delete", () => this.render()));
+    if (this.source.onIndexChanged) {
+      // After the plugin invalidated its index, never before (listener order).
+      this.register(this.source.onIndexChanged(() => this.render()));
+    } else {
+      this.registerEvent(this.app.vault.on("rename", () => this.render()));
+      this.registerEvent(this.app.vault.on("create", () => this.render()));
+      this.registerEvent(this.app.vault.on("delete", () => this.render()));
+    }
+    // The description comes from the note's cached frontmatter: repaint when it is reparsed.
+    this.registerEvent(this.app.metadataCache.on("changed", (file) => {
+      if (this.shownNotePath !== null && file.path === this.shownNotePath) this.render();
+    }));
     this.render();
     return Promise.resolve();
   }
 
+  /** The JDex note whose description is on screen, if any. */
+  private shownNotePath: string | null = null;
+
   render(): void {
     const root = this.contentEl;
     root.empty();
+    this.shownNotePath = null;
     root.addClass("jdex-panel");
     const file = this.app.workspace.getActiveFile();
     const settings = this.source.settings();
@@ -64,6 +80,7 @@ export class IdPanelView extends ItemView {
     }
     const entry = loc.entry;
     root.createDiv({ text: loc.text, cls: "jdex-panel-path" });
+    this.shownNotePath = entry.notePath ?? null;
     const description = entry.notePath ? this.description(entry.notePath) : null;
     if (description) root.createEl("p", { text: description });
 

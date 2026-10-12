@@ -9,9 +9,9 @@ import {
   JDEX_COMMAND_COPY_JD_PATH,
   JDEX_COMMAND_COPY_NOTE_ID,
   JDEX_COMMAND_SEARCH_CATEGORY,
-  JDEX_COMMAND_SEND_TO_INBOX,
-  activateJdex
+  JDEX_COMMAND_SEND_TO_INBOX
 } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import {
   FAKE_ROOT_FOLDER_ID as ROOT_FOLDER_ID,
   FakeJdexVault,

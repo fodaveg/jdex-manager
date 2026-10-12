@@ -9,7 +9,13 @@ export function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
 }
 export class App {}
-export class Plugin {}
+export class Plugin {
+  /** Cleanups registered with `register`, run by the test when it unloads the plugin. */
+  registered: (() => unknown)[] = [];
+  register(callback: () => unknown): void {
+    this.registered.push(callback);
+  }
+}
 export class Modal {}
 export class SuggestModal<T> {
   setPlaceholder(_text: string): void {}

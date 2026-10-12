@@ -169,7 +169,7 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       row.append(input);
       container.append(row);
     }
-    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings'], ['Autocompletar IDs al teclear NN.', 'autocomplete']] as const) {
+    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings'], ['Autocompletar IDs al teclear NN.', 'autocomplete'], ['Registro de depuración (nota en Informes)', 'debugLog']] as const) {
       const row = document.createElement('label');
       row.className = 'hebra-jdex-settings-row';
       const input = document.createElement('input');

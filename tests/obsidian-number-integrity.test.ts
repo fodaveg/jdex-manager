@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /* eslint-disable obsidianmd/prefer-create-el, obsidianmd/prefer-active-doc -- DOM fixtures have no Obsidian globals. */
 import { describe, expect, it, vi } from "vitest";
-import { type App, TFile } from "obsidian";
+import { type App, TFile, TFolder } from "obsidian";
 import JdexManagerPlugin from "../src/main";
 import { buildIndex } from "../src/jd/index";
 import { DEFAULT_SETTINGS } from "../src/settings";
@@ -23,7 +23,7 @@ vi.mock("obsidian", async (importOriginal) => ({
 const settings = { ...DEFAULT_SETTINGS, jdexFolder: "JDex" };
 const file = (name: string) => Object.assign(new TFile(), { path: `JDex/${name}.md`, name: `${name}.md`, extension: "md" });
 function fixture() {
-  const files = [file("21 Category"), file("21.11 Parent")];
+  const files = [Object.assign(new TFolder(), { path: "JDex", name: "JDex" }), file("21 Category"), file("21.11 Parent")];
   const create = vi.fn(async (path: string, content: string) => Object.assign(new TFile(), { path, content }));
   const app = { vault: { getAllLoadedFiles: () => files, getAbstractFileByPath: (path: string) => files.find((f) => f.path === path), create }, workspace: { getLeaf: () => ({ openFile: vi.fn() }) } } as unknown as App;
   const index = buildIndex({ systemRoot: "", jdexFolder: "JDex", folderPaths: [], notePaths: files.map((f) => f.path) });
@@ -82,10 +82,11 @@ describe("Obsidian live number validation", () => {
   it("reports removal of the number and journals the rename for undo", async () => {
     const f = fixture();
     const saveData = vi.fn(async () => {});
-    const plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as object, { app: f.app, settings, journal: [], saveData }) as unknown as JdexManagerPlugin;
+    const plugin = Object.assign(Object.create(JdexManagerPlugin.prototype) as object, { app: f.app, settings, loadData: async () => JSON.parse(JSON.stringify(settings)) as unknown, saveData }) as unknown as JdexManagerPlugin;
+    await plugin.loadSettings();
     const renamed = file("Parent");
     await plugin.onRename(renamed, "JDex/21.11 Parent.md");
     expect(notices.at(-1)).toBe("«21.11» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.");
-    expect(saveData).toHaveBeenCalledWith(expect.objectContaining({ journal: [expect.objectContaining({ effects: [{ kind: "moved", from: "JDex/21.11 Parent.md", to: "JDex/Parent.md" }] })] }));
+    expect(saveData).toHaveBeenCalledWith(expect.objectContaining({ journal: [expect.objectContaining({ effects: [expect.objectContaining({ kind: "moved", from: "JDex/21.11 Parent.md", to: "JDex/Parent.md", type: "file" })] })] }));
   });
 });

@@ -1,5 +1,5 @@
 import { type App, normalizePath, Notice, TFile } from "obsidian";
-import { auditSystem, isConflictCopyPath, type Finding, type Fix, type NoteMeta } from "../jd/audit";
+import { auditSystem, isConflictCopyPath, missingConfiguredFolders, type Finding, type Fix, type NoteMeta } from "../jd/audit";
 import { renderReport, reportFileName } from "../jd/audit-report";
 import { relativeTo } from "../jd/detect";
 import { renderTemplate, todayIso } from "../jd/template";
@@ -13,6 +13,7 @@ import { patchFrontmatter, readFrontmatter } from "./frontmatter-lines";
 import { resolveTemplate } from "./templates";
 import { fileDate } from "./file-date";
 import type { Effect } from "../jd/journal";
+import { movedIdentity } from "./journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
 import type { JdIndex } from "../jd/index";
 
@@ -72,6 +73,7 @@ export async function collectAudit(app: App, settings: JdexManagerSettings): Pro
   findings.push(...staleInboxFindings(index, app.vault.getAllLoadedFiles().filter((file): file is TFile => file instanceof TFile).map((file) => ({
     path: file.path, folderPath: file.path.slice(0, file.path.lastIndexOf('/')), createdAt: fileDate(app, file).getTime(),
   })), settings.inboxStaleDays, Date.now()));
+  findings.unshift(...missingConfiguredFolders(settings, allFolderPaths(app)));
   return { index, findings, filePaths };
 }
 
@@ -170,6 +172,6 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
     if (!target) throw new Error(`${item.from} ya no existe.`);
     if (app.vault.getAbstractFileByPath(item.to)) throw new Error(`${item.to} ya existe.`);
     await app.fileManager.renameFile(target, item.to);
-    effects?.push({ kind: "moved", from: item.from, to: item.to });
+    effects?.push({ kind: "moved", from: item.from, to: item.to, ...movedIdentity(target) });
   }
 }

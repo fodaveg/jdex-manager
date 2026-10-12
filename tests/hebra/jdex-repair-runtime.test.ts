@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { activateJdex, JDEX_AUDIT_VIEW_ID, JDEX_COMMAND_REPAIR, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
+import { JDEX_AUDIT_VIEW_ID, JDEX_COMMAND_REPAIR, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); });

@@ -1,6 +1,7 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 import { FINDING_KINDS, type Finding, type Fix } from "../jd/audit";
 import { describeFix, KIND_TITLES } from "../jd/audit-report";
+import { trackModal } from "./modal-registry";
 import type { JdexManagerSettings } from "../settings";
 import type { Effect } from "../jd/journal";
 import { applyFix } from "../vault/audit";
@@ -20,8 +21,11 @@ export class FixFindingsModal extends Modal {
   private readonly refreshFindings?: () => Promise<Finding[]>;
   private readonly settings?: JdexManagerSettings;
   private readonly selected = new Set<number>();
-  /** What the applied fixes did, for the undo journal; the caller reads it in `onDone`. */
-  readonly effects: Effect[] = [];
+  /**
+   * What the applied fixes did, for the undo journal. The caller may replace it with a recording
+   * list (`JdexManagerPlugin.journalOperation`) so each effect is saved as soon as it happens.
+   */
+  effects: Effect[] = [];
 
   constructor(app: App, findings: Finding[], onDone: () => Promise<void>, refreshFindings?: () => Promise<Finding[]>, settings?: JdexManagerSettings) {
     super(app);
@@ -36,6 +40,7 @@ export class FixFindingsModal extends Modal {
   }
 
   onOpen(): void {
+    trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
     // eslint-disable-next-line obsidianmd/ui/sentence-case

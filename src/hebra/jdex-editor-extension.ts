@@ -25,7 +25,7 @@
  * clicable sin remontar el editor.
  */
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
-import { EditorState, RangeSetBuilder, type Extension } from '@codemirror/state';
+import { EditorState, RangeSetBuilder, StateEffect, type Extension } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -53,7 +53,13 @@ export interface JdexEditorExtensionContext {
   autocomplete?(): boolean;
   /** Ajuste `autocompleteInsert`; sin función, `number`. */
   autocompleteInsert?(): 'link' | 'number';
+  /** The index changed: each open editor registers a repaint here (and unregisters when it
+   *  is destroyed), so numbers created, received or removed repaint without an edit. */
+  subscribe?(repaint: () => void): () => void;
 }
+
+/** Repaint the number decorations against the current `ids()`, without editing. */
+const jdexIndexChanged = StateEffect.define<null>();
 
 const JDEX_NUMBER_CLASS = 'cm-hebra-jdex-number';
 
@@ -90,13 +96,28 @@ function jdexDecorationExtension(ctx: JdexEditorExtensionContext): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
+      private readonly unsubscribe: () => void;
       constructor(view: EditorView) {
         this.decorations = buildDecorations(view, ctx);
+        this.unsubscribe = ctx.subscribe?.(() => {
+          try {
+            view.dispatch({ effects: jdexIndexChanged.of(null) });
+          } catch {
+            // A view torn down meanwhile, or mid-update: its next update repaints anyway.
+          }
+        }) ?? (() => {});
       }
       update(update: ViewUpdate): void {
-        if (update.docChanged || update.viewportChanged) {
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          update.transactions.some((tr) => tr.effects.some((effect) => effect.is(jdexIndexChanged)))
+        ) {
           this.decorations = buildDecorations(update.view, ctx);
         }
+      }
+      destroy(): void {
+        this.unsubscribe();
       }
     },
     { decorations: (plugin) => plugin.decorations }

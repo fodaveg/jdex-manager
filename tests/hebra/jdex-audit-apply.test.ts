@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JDEX_AUDIT_VIEW_ID, activateJdex } from '../../src/hebra/jdex-runtime';
+import { JDEX_AUDIT_VIEW_ID } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import { FakeJdexVault, createJdexTestApi, fakeFolder, fakeNote } from './support/fakes';
 
 /** Un sistema real del adaptador con una única nota sin descripción. */

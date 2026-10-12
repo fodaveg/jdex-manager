@@ -6,7 +6,7 @@
  * Deliberately NOT a finding: sub-folders more than one level deep inside an ID. Projects use them.
  */
 
-import { areaCode, areaOfCategory, sameSystem, systemKey, type IdEntry, type JdIndex } from "./index";
+import { areaCode, areaOfCategory, idIdentityKey, repeatedIdKeys, sameSystem, type IdEntry, type JdIndex } from "./index";
 import { firstSentence } from "./description";
 import { missingPatternFolders } from "./patterns";
 import { extractJdPrefix, isHeader, isReserved, jdexNoteName, parseJdNumber } from "./parse";
@@ -14,6 +14,7 @@ import { titleForCompare } from "./title";
 import { filesByFolder } from "./path-index";
 
 export type FindingKind =
+  | "missing-folder"
   | "folder-without-note"
   | "note-without-folder"
   | "name-mismatch"
@@ -30,6 +31,7 @@ export type FindingKind =
   | "inbox-stale";
 
 export const FINDING_KINDS: FindingKind[] = [
+  "missing-folder",
   "folder-without-note",
   "name-mismatch",
   "frontmatter-mismatch",
@@ -165,10 +167,13 @@ export function auditSystem(input: AuditInput): Finding[] {
   };
 
   const archived = new Set(notes.filter((n) => asString(n.frontmatter?.tipo) === "archivado").map((n) => n.path));
+  // A repeated number only reports duplicate-id: pairing rules would mix the two IDs.
+  const repeated = repeatedIdKeys(index);
 
   // 1 and 2: folder without note, note without folder (ID level). Retired IDs and headers keep their notes without folders by design.
   for (const entry of index.ids) {
     if (entry.notePath && archived.has(entry.notePath)) continue;
+    if (repeated.has(idIdentityKey(entry))) continue;
     if (entry.folderPath && !entry.notePath) {
       const folderName = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
       const child = entry.id.endsWith("+") && folderName.startsWith("+ ");
@@ -204,6 +209,7 @@ export function auditSystem(input: AuditInput): Finding[] {
   // 3: note and folder with the same number but a different title. The note is the source.
   for (const entry of index.ids) {
     if (!entry.notePath || !entry.folderPath) continue;
+    if (repeated.has(idIdentityKey(entry))) continue;
     const folderName = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
     const folderPrefix = extractJdPrefix(folderName);
     const childFolder = entry.id.endsWith("+") && folderName.startsWith("+ ");
@@ -262,15 +268,15 @@ export function auditSystem(input: AuditInput): Finding[] {
     });
   }
 
-  // 5: duplicate numbers among notes or among folders.
+  // 5: duplicate numbers among notes or among folders. Several + children of one ID are
+  // expected; two with the same title are not.
   for (const [source, raw] of [
     ["notas", index.rawIdNotes],
     ["carpetas", index.rawIdFolders],
   ] as const) {
     const byId = new Map<string, string[]>();
     for (const r of raw) {
-      if (r.id.endsWith("+")) continue; // several + children of one ID are expected
-      const key = systemKey(r.id, r.system);
+      const key = idIdentityKey({ id: r.id, system: r.system, title: extractJdPrefix(r.label)?.title ?? "" });
       byId.set(key, [...(byId.get(key) ?? []), r.path]);
     }
     for (const [id, paths] of byId) {
@@ -424,6 +430,38 @@ export function expectedFrontmatter(
   const category = index.categories.find((c) => c.number === number.category && sameSystem(c, number))?.label;
   if (category) out.categoria = category;
   return out;
+}
+
+/** Folder settings the hosts read by path. */
+export interface ConfiguredFolders {
+  jdexFolder?: string;
+  systemRoot?: string;
+  reportsFolder?: string;
+  templatesFolder?: string;
+}
+
+const CONFIGURED_FOLDER_LABELS: Record<keyof ConfiguredFolders, string> = {
+  jdexFolder: "La carpeta JDex",
+  systemRoot: "La raíz del sistema",
+  reportsFolder: "La carpeta de informes",
+  templatesFolder: "La carpeta de plantillas",
+};
+
+/** A configured folder that no longer exists (renamed, moved or deleted outside the
+ *  plugin): every number would silently drop out of the index. Empty settings are unset. */
+export function missingConfiguredFolders(settings: ConfiguredFolders, folderPaths: readonly string[]): Finding[] {
+  const known = new Set(folderPaths);
+  const findings: Finding[] = [];
+  for (const key of Object.keys(CONFIGURED_FOLDER_LABELS) as (keyof ConfiguredFolders)[]) {
+    const path = settings[key];
+    if (!path || known.has(path)) continue;
+    findings.push({
+      kind: "missing-folder",
+      paths: [path],
+      message: `${CONFIGURED_FOLDER_LABELS[key]} configurada («${path}») no existe: revisa los ajustes.`,
+    });
+  }
+  return findings;
 }
 
 /** Number of findings that count as problems (informative ones excluded). */

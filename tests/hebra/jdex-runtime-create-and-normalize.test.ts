@@ -18,8 +18,8 @@ import {
   JDEX_COMMAND_REFRESH_INDEX,
   JDEX_COMMAND_WRAP_HEADERS,
   JDEX_STATUS_AUDIT_ID,
-  activateJdex
 } from '../../src/hebra/jdex-runtime';
+import { activateJdex } from './support/activate';
 import {
   FAKE_ROOT_FOLDER_ID as ROOT_FOLDER_ID,
   FakeJdexVault,
