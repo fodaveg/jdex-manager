@@ -9,6 +9,7 @@
  */
 import { type App, normalizePath, TFile } from "obsidian";
 import { ensureFolder } from "./create";
+import type { Effect } from "../jd/journal";
 
 const STAMP = /\n?<!-- jdex:generado ([0-9a-f]{8}) -->\n?$/u;
 
@@ -37,9 +38,9 @@ export function isUneditedReport(content: string): boolean {
 
 /**
  * Writes `body` as the report at `path`, or at the first `(n)` variant that is either
- * free or still unedited. Returns the note written and its path.
+ * free or still unedited. Returns the note written and its path. Records the write in `effects`.
  */
-export async function writeDailyReport(app: App, folder: string, path: string, body: string): Promise<{ file: TFile; path: string }> {
+export async function writeDailyReport(app: App, folder: string, path: string, body: string, effects?: Effect[]): Promise<{ file: TFile; path: string }> {
   const content = stampReport(body);
   const base = normalizePath(path);
   let candidate = base;
@@ -51,12 +52,15 @@ export async function writeDailyReport(app: App, folder: string, path: string, b
       await app.vault.process(existing, (current) => {
         if (!isUneditedReport(current)) return current;
         replaced = true;
+        if (current !== content) effects?.push({ kind: "note-rewrite", path: candidate, before: current, after: content });
         return content;
       });
       if (replaced) return { file: existing, path: candidate };
     }
     candidate = base.replace(/\.md$/u, ` (${suffix}).md`);
   }
-  await ensureFolder(app, folder);
-  return { file: await app.vault.create(candidate, content), path: candidate };
+  await ensureFolder(app, folder, effects);
+  const file = await app.vault.create(candidate, content);
+  effects?.push({ kind: "created-note", path: candidate, content });
+  return { file, path: candidate };
 }

@@ -4,8 +4,9 @@ import { todayIso } from "./jd/template";
 import { ensureFolder } from "./vault/create";
 import { writeDailyReport } from "./vault/report-write";
 import { openGlobalSearch, pathQuery } from "./vault/search";
-import { describeUndo, durableEffect, type Effect, type Operation, type OperationKind, pushOperation } from "./jd/journal";
-import { undoOperation } from "./vault/journal";
+import type { Effect, OperationKind } from "./jd/journal";
+import { deviceIdentity, discardLastOperation, PluginDataFile, type RecordingEffects, UndoShield, undoLastOperation } from "./vault/journal-store";
+import { movedIdentity } from "./vault/journal";
 import { type JdexManagerSettings, type JdexNoteType, mergeSettings, namePrefix } from "./settings";
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
@@ -48,7 +49,21 @@ export default class JdexManagerPlugin extends Plugin {
   private inboxBar: HTMLElement | null = null;
   private whereBar: HTMLElement | null = null;
   private indexCache: { systemRoot: string; jdexFolder: string; index: JdIndex } | null = null;
-  private journal: Operation[] = [];
+  private dataFile?: PluginDataFile;
+  private shield?: UndoShield;
+
+  /**
+   * Settings and undo journal in `data.json` (`src/vault/journal-store.ts`). `onload` loads it
+   * first; created on first use so an instance that skipped `onload` still journals and merges on save.
+   */
+  private get data(): PluginDataFile {
+    return (this.dataFile ??= new PluginDataFile({ load: () => this.loadData(), save: (data) => this.saveData(data) }, this.settings, deviceIdentity(this.app), (message) => new Notice(message, 10000)));
+  }
+
+  /** Paths the last undo restored, kept away from automatic writes until they change again. */
+  private get undoShield(): UndoShield {
+    return (this.shield ??= new UndoShield());
+  }
   private maintenanceTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
   private maintenanceRunning = false;
   private maintenanceGate = new MaintenanceGate();
@@ -344,20 +359,32 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Undo last JDex operation",
       callback: () => void this.undoLast(),
     });
+    this.addCommand({
+      id: "discard-last",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      name: "Discard last JDex journal entry (no file changes)",
+      callback: () => void discardLastOperation({ data: this.data, confirm: (title, lines, action) => confirm(this.app, title, lines, action), notice: (message) => new Notice(message, 10000) }),
+    });
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      this.undoShield.observe(file.path, oldPath);
       this.invalidateIndex();
       void this.onRename(file, oldPath);
       this.queueMaintenance(file, oldPath);
     }));
     this.registerEvent(this.app.vault.on("delete", (file) => {
+      this.undoShield.observe(file.path);
       this.invalidateIndex();
       this.refreshInboxCount();
       this.queueMaintenance(file);
     }));
     // The index is built from paths only, so a modify never invalidates it.
-    this.registerEvent(this.app.vault.on("modify", (file) => this.queueMaintenance(file)));
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      this.undoShield.observe(file.path);
+      this.queueMaintenance(file);
+    }));
     this.registerEvent(this.app.vault.on("create", (file) => {
+      this.undoShield.observe(file.path);
       this.invalidateIndex();
       void this.onCreate(file);
       this.queueMaintenance(file);
@@ -390,11 +417,15 @@ export default class JdexManagerPlugin extends Plugin {
     if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
   }
 
-  /** Coalesces vault changes; the pass's own writes never enqueue another pass, foreign ones during it enqueue one. */
+  /**
+   * Coalesces vault changes; the pass's own writes never enqueue another pass, foreign ones during
+   * it enqueue one. Events of an undo (while it runs and while they settle) never enqueue a pass.
+   */
   private queueMaintenance(file: TAbstractFile, oldPath?: string): void {
     if (!this.settings.automaticMaintenance || !this.app.workspace.layoutReady) return;
     // The debug log is written by the plugin itself: its modify must not start a pass.
     if (isDebugLogPath(this.settings, file.path) || isDebugLogPath(this.settings, oldPath)) return;
+    if (this.undoShield.settling && (this.undoShield.protects(file.path) || (oldPath !== undefined && this.undoShield.protects(oldPath)))) return;
     const relevant = (path: string) => relativeTo(this.settings.systemRoot, path) !== null || relativeTo(this.settings.jdexFolder, path) !== null;
     if (!relevant(file.path) && !(oldPath && relevant(oldPath))) return;
     if (this.maintenanceRunning) {
@@ -412,28 +443,33 @@ export default class JdexManagerPlugin extends Plugin {
     }, 200);
   }
 
-  /** Records completed maintenance steps, including a partial pass. */
+  /**
+   * Records each maintenance step as it happens, including a partial pass. Runs in the journal's
+   * exclusive queue, so it waits for an undo in progress, and leaves alone what that undo restored.
+   */
   async maintainAutomatically(): Promise<void> {
     if (!this.settings.automaticMaintenance || this.maintenanceRunning) return;
     this.maintenanceRunning = true;
     this.maintenanceGate.begin();
-    const effects: Effect[] = [];
     let again = false;
     try {
-      await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn);
-    } catch (error) {
-      this.logError("maintainAutomatically", error);
-      new Notice(`Automatic maintenance stopped: ${String(error)}`);
-    } finally {
-      try { await this.record("fix", "Automatic JDex maintenance", effects); }
-      finally {
+      // Waits for an undo in progress; leaves alone what that undo restored.
+      await this.data.journal.exclusive(async () => {
+        const effects = this.journalOperation("fix", "Automatic JDex maintenance");
         try {
-          again = await this.maintenanceGate.finish(effects, async (path) => {
-            const f = this.app.vault.getAbstractFileByPath(path);
-            return f instanceof TFile ? await this.app.vault.read(f) : null;
-          });
-        } finally { this.maintenanceRunning = false; }
-      }
+          await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn, (path) => this.undoShield.protects(path));
+        } catch (error) {
+          this.logError("maintainAutomatically", error);
+          new Notice(`Automatic maintenance stopped: ${String(error)}`);
+        }
+        await effects.flush().catch(() => undefined);
+        again = await this.maintenanceGate.finish(effects, async (path) => {
+          const f = this.app.vault.getAbstractFileByPath(path);
+          return f instanceof TFile ? await this.app.vault.read(f) : null;
+        });
+      });
+    } finally {
+      this.maintenanceRunning = false;
     }
     if (again) this.scheduleMaintenance();
   }
@@ -441,62 +477,57 @@ export default class JdexManagerPlugin extends Plugin {
   /** Runs only on command; each report contains audit, health and changes since the previous. */
   async systemReport(): Promise<void> {
     if (!this.ready()) return;
-    const effects: Effect[] = [];
+    const effects = this.journalOperation("fix", "Create system report");
     try {
       const note = await createSystemReport(this.app, this.settings, effects);
       await this.app.workspace.getLeaf(false).openFile(note);
     } catch (error) {
       this.logError("systemReport", error);
       new Notice(error instanceof Error ? error.message : String(error));
-    } finally { await this.record("fix", "Create system report", effects); }
+    } finally { await effects.flush().catch(() => undefined); }
   }
 
   async loadSettings(): Promise<void> {
-    const stored = (await this.loadData()) as (Partial<JdexManagerSettings> & { journal?: unknown }) | null;
-    this.journal = Array.isArray(stored?.journal) ? (stored.journal as Operation[]) : [];
-    if (stored) delete stored.journal;
-    this.settings = mergeSettings(stored);
+    for (const message of await this.data.load()) new Notice(message, 10000);
   }
 
-  /** Settings and the undo journal share `data.json`. */
+  /** Settings and the undo journal share `data.json`; a save re-reads it and keeps what changed elsewhere. */
   async saveSettings(): Promise<void> {
-    await this.saveData({ ...this.settings, journal: this.journal });
+    await this.data.save();
+  }
+
+  /** `data.json` changed outside this window (Sync or another device): adopt it, joining the journals. */
+  async onExternalSettingsChange(): Promise<void> {
+    await this.data.reload();
+    this.invalidateIndex();
+    this.refreshInboxCount();
   }
 
   /** Records an operation in the undo journal (the last 20) and persists it. */
   async record(kind: OperationKind, label: string, effects: Effect[]): Promise<void> {
     if (effects.length === 0) return;
-    this.journal = pushOperation(this.journal, { kind, label, at: new Date().toISOString(), effects: effects.map(durableEffect) });
-    await this.saveSettings();
+    const sink = this.data.journal.begin(kind, label);
+    sink.push(...effects);
+    await sink.flush();
   }
 
-  /** Shows what undoing the last operation will do, then does it and drops it from the journal. */
+  /** An effects list that records each effect in the journal, and saves it, as it happens. */
+  journalOperation(kind: OperationKind, label: string): RecordingEffects {
+    return this.data.journal.begin(kind, label);
+  }
+
+  /** Shows what undoing the last operation will do, then does exactly that operation. */
   async undoLast(): Promise<void> {
-    const op = this.journal[this.journal.length - 1];
-    if (!op) {
-      new Notice("Nothing to undo: the journal is empty.");
-      return;
-    }
-    const ok = await confirm(this.app, `Undo "${op.label}"?`, [...describeUndo(op), "Nothing is deleted outright: notes and folders go to the trash."], "Undo");
-    if (!ok) return;
-    try {
-      this.renaming = true;
-      let done: string[];
-      try {
-        done = await undoOperation(this.app, op, async () => {
-          if (op.effects.length === 0) this.journal = this.journal.slice(0, -1);
-          await this.saveSettings();
-        });
-      } finally {
-        this.renaming = false;
-      }
-      new Notice(done.join(" · "), 10000);
-      this.refreshInboxCount();
-      await this.refreshHeaders(undefined, false);
-    } catch (error) {
-      this.logError("undoLast", error);
-      new Notice(`Undo stopped: ${error instanceof Error ? error.message : String(error)}. The operation stays in the journal.`, 10000);
-    }
+    await undoLastOperation({
+      app: this.app,
+      data: this.data,
+      shield: this.undoShield,
+      confirm: (title, lines, action) => confirm(this.app, title, lines, action),
+      notice: (message) => new Notice(message, 10000),
+      setRenaming: (value) => { this.renaming = value; },
+    });
+    // Header lists are not regenerated here: that would rewrite what the undo just restored.
+    this.refreshInboxCount();
   }
 
   /** Fills empty folder settings from the vault. `announce` shows a Notice with the outcome. */
@@ -538,10 +569,12 @@ export default class JdexManagerPlugin extends Plugin {
     this.lastFindings = null;
     await this.audit(false);
     if (!this.lastFindings) return;
+    const effects = this.journalOperation("fix", "Reparar JDex");
     const modal = new FixFindingsModal(this.app, this.lastFindings, async () => {
-      await this.record("fix", "Reparar JDex", modal.effects);
+      await effects.flush().catch(() => undefined);
       await this.audit(false);
     }, () => collectAuditFindings(this.app, this.settings), this.settings);
+    modal.effects = effects;
     modal.open();
   }
 
@@ -587,18 +620,25 @@ export default class JdexManagerPlugin extends Plugin {
       new Notice(only ? "Frontmatter already matches the name and position." : "Every JDex note already matches.");
       return;
     }
+    const effects = this.journalOperation("fix", "Normalize JDex frontmatter");
     const modal = new FixFindingsModal(this.app, findings, async () => {
-      await this.record("fix", "Normalize JDex frontmatter", modal.effects);
+      await effects.flush().catch(() => undefined);
       await this.refreshHeaders(undefined, false);
     });
+    modal.effects = effects;
     modal.open();
   }
 
-  /** Regenerates header lists; with `announce` it reports how many notes changed. */
+  /**
+   * Regenerates header lists as one journal operation; with `announce` it reports how many notes
+   * changed. Header notes an undo just restored are left alone until they change again.
+   */
   async refreshHeaders(onlyCategory: string | undefined, announce: boolean): Promise<void> {
     if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
-    const changed = await updateHeaders(this.app, index, onlyCategory);
+    const effects = this.journalOperation("fix", onlyCategory ? `Update header lists of ${onlyCategory}` : "Update header lists");
+    const changed = await updateHeaders(this.app, index, onlyCategory, effects, (path) => this.undoShield.protects(path));
+    await effects.flush().catch(() => undefined);
     if (announce) new Notice(`Header lists updated in ${changed} note(s).`);
   }
 
@@ -652,6 +692,7 @@ export default class JdexManagerPlugin extends Plugin {
   /** Rename in pairs, the "never renumber" warning and the moved-category warning. */
   private async handleRename(file: TAbstractFile, oldPath: string): Promise<void> {
     if (this.renaming || this.settings.jdexFolder === "") return;
+    if (this.undoShield.settling && (this.undoShield.protects(file.path) || this.undoShield.protects(oldPath))) return;
     const index = scanVault(this.app, this.settings);
     const action = pairAction({ oldPath, newPath: file.path, isFolder: file instanceof TFolder }, index, this.settings);
     if (action.type === "unnumbered" || action.type === "renumbered") {
@@ -659,7 +700,7 @@ export default class JdexManagerPlugin extends Plugin {
         ? `«${action.oldId}» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.`
         : `«${action.oldId}» ha pasado a «${action.newId}»: un ID nunca se renumera (johnnydecimal.com). Deshacer.`;
       new Notice(message, 10000);
-      await this.record("move", message, [{ kind: "moved", from: oldPath, to: file.path }]);
+      await this.record("move", message, [{ kind: "moved", from: oldPath, to: file.path, ...movedIdentity(file) }]);
       return;
     }
     if (action.type === "moved") {
@@ -678,13 +719,15 @@ export default class JdexManagerPlugin extends Plugin {
         ));
       if (ok) {
         (this.ownRenames ??= new Map()).set(action.partnerPath, action.newPartnerPath);
+        const effects = this.journalOperation("move", `Rename ${action.partnerPath} with its pair`);
         try {
-          await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath });
+          await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath }, effects);
         } catch (error) {
           this.logError("handleRename", error);
           new Notice(error instanceof Error ? error.message : String(error));
         } finally {
           this.ownRenames?.delete(action.partnerPath);
+          await effects.flush().catch(() => undefined);
         }
       }
     }
@@ -723,13 +766,14 @@ export default class JdexManagerPlugin extends Plugin {
     }
     try {
       const from = file.path;
+      const identity = movedIdentity(file);
       const to = await moveInto(
         this.app,
         file,
         target.folderPath,
         zero === "09" ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined,
       );
-      if (to !== from) await this.record("move", `${zero === "09" ? "Archive" : "Send to inbox"} ${file.name}`, [{ kind: "moved", from, to }]);
+      if (to !== from) await this.record("move", `${zero === "09" ? "Archive" : "Send to inbox"} ${file.name}`, [{ kind: "moved", from, to, ...identity }]);
       new Notice(`Moved to ${to}.`);
       this.refreshInboxCount();
     } catch (error) {
@@ -749,6 +793,7 @@ export default class JdexManagerPlugin extends Plugin {
       modal.open();
     });
     if (!entry) return;
+    const effects = this.journalOperation("move", `Move ${file.name} to ${entry.id}`);
     let folder = entry.folderPath;
     if (!folder) {
       const category = selectCreationSystem(index, entry.system).categories.find((c) => c.number === entry.category);
@@ -760,7 +805,7 @@ export default class JdexManagerPlugin extends Plugin {
       const ok = await confirm(this.app, `Create the folder of ${entry.id}?`, [`${entry.label} has no folder yet.`, `It will be created at ${wanted}.`], "Create and move");
       if (!ok) return;
       try {
-        await ensureFolder(this.app, wanted);
+        await ensureFolder(this.app, wanted, effects);
       } catch (error) {
         this.logError("moveToIdFlow", error);
         new Notice(error instanceof Error ? error.message : String(error));
@@ -771,8 +816,10 @@ export default class JdexManagerPlugin extends Plugin {
     try {
       const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined;
       const from = file.path;
+      const identity = movedIdentity(file);
       const to = await moveInto(this.app, file, folder, date);
-      if (to !== from) await this.record("move", `Move ${file.name} to ${entry.id}`, [{ kind: "moved", from, to }]);
+      if (to !== from) effects.push({ kind: "moved", from, to, ...identity });
+      await effects.flush().catch(() => undefined);
       new Notice(`Moved to ${to}.`);
       this.refreshInboxCount();
     } catch (error) {
@@ -813,9 +860,10 @@ export default class JdexManagerPlugin extends Plugin {
     const date = todayIso();
     const content = renderHealthReport(index, filePaths, date, { maxFiles: this.settings.healthMaxFiles, nearlyFull: 70 });
     const path = normalizePath(`${this.settings.reportsFolder}/${healthFileName(date)}`);
+    const effects = this.journalOperation("fix", "Create health report");
     try {
       // A health report of the day edited by hand is kept; the new one goes to «(2)».
-      const { file } = await writeDailyReport(this.app, this.settings.reportsFolder, path, content);
+      const { file } = await writeDailyReport(this.app, this.settings.reportsFolder, path, content, effects);
       await this.app.workspace.getLeaf(false).openFile(file);
     } catch (error) {
       this.logError("healthReport", error);
@@ -830,12 +878,21 @@ export default class JdexManagerPlugin extends Plugin {
       return;
     }
     try {
-      const to = await dateFile(this.app, file, this.settings.dateFormat);
+      const to = await this.datedRename(file);
       new Notice(to ? `Renamed to ${to.slice(to.lastIndexOf("/") + 1)}.` : "Already dated.");
     } catch (error) {
       this.logError("dateActive", error);
       new Notice(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  /** Dates `file` in place and records the rename for undo. */
+  private async datedRename(file: TFile): Promise<string | null> {
+    const from = file.path;
+    const identity = movedIdentity(file);
+    const to = await dateFile(this.app, file, this.settings.dateFormat);
+    if (to) await this.record("move", `Date ${from.slice(from.lastIndexOf("/") + 1)}`, [{ kind: "moved", from, to, ...identity }]);
+    return to;
   }
 
   async processInbox(): Promise<void> {
@@ -847,7 +904,7 @@ export default class JdexManagerPlugin extends Plugin {
       this.refreshInboxCount();
       return;
     }
-    new ProcessInboxModal(this.app, files, { index, systemRoot: this.settings.systemRoot, dateFormat: this.settings.dateFormat }, async () => {
+    new ProcessInboxModal(this.app, files, { index, systemRoot: this.settings.systemRoot, dateFormat: this.settings.dateFormat, journal: (kind, label) => this.journalOperation(kind, label) }, async () => {
       this.refreshInboxCount();
     }).open();
   }
@@ -891,11 +948,13 @@ export default class JdexManagerPlugin extends Plugin {
     if (!this.app.workspace.layoutReady) return;
     if (this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
     this.refreshInboxCount();
+    // A note an undo restores is not new: it is not dated, indexed or listed again.
+    if (this.undoShield.settling && this.undoShield.protects(file.path)) return;
     if (this.settings.dateOnCreate) {
       const index = scanVault(this.app, this.settings);
       if (isDatable(index, this.settings, file.path)) {
         try {
-          await dateFile(this.app, file, this.settings.dateFormat);
+          await this.datedRename(file);
         } catch {
           // A clash on the dated name is not worth a notice at creation time.
         }
@@ -956,7 +1015,9 @@ export default class JdexManagerPlugin extends Plugin {
     );
     if (!ok) return;
     try {
-      const created = await createMissingStructureNotes(this.app, this.settings, index);
+      const effects = this.journalOperation("create-structure", "Create missing category and area notes");
+      const created = await createMissingStructureNotes(this.app, this.settings, index, effects);
+      await effects.flush().catch(() => undefined);
       new Notice(`${created} note(s) created.`);
     } catch (error) {
       this.logError("createStructureNotes", error);
@@ -968,7 +1029,9 @@ export default class JdexManagerPlugin extends Plugin {
   async refreshSystemIndex(announce: boolean): Promise<void> {
     if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
-    const changed = await updateSystemIndex(this.app, this.settings, index, announce);
+    const effects = this.journalOperation("fix", "Update the system index");
+    const changed = await updateSystemIndex(this.app, this.settings, index, announce, effects);
+    await effects.flush().catch(() => undefined);
     if (announce) new Notice(changed ? "System index updated." : "System index unchanged.");
   }
 
@@ -980,14 +1043,14 @@ export default class JdexManagerPlugin extends Plugin {
       return;
     }
     new AreaSuggestModal(this.app, index, (area) => {
-      new CreateCategoryModal(this.app, index, area, this.settings, () => this.refreshHeaders(undefined, false)).open();
+      new CreateCategoryModal(this.app, index, area, this.settings, () => this.refreshHeaders(undefined, false), this.journalOperation("create-structure", `Create category in ${area.label}`)).open();
     }).open();
   }
 
   async createAreaFlow(): Promise<void> {
     if (!this.ready()) return;
     const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
-    new CreateAreaModal(this.app, index, this.settings, async () => {}).open();
+    new CreateAreaModal(this.app, index, this.settings, async () => {}, this.journalOperation("create-structure", "Create area")).open();
   }
 
   async createHeaderFlow(): Promise<void> {
@@ -999,7 +1062,7 @@ export default class JdexManagerPlugin extends Plugin {
       return;
     }
     new CategorySuggestModal(this.app, index, (category) => {
-      new CreateHeaderModal(this.app, index, category, this.settings, () => this.refreshHeaders(category.number, false)).open();
+      new CreateHeaderModal(this.app, index, category, this.settings, () => this.refreshHeaders(category.number, false), this.journalOperation("create-id", `Create header in ${category.label}`)).open();
     }).open();
   }
 
@@ -1015,23 +1078,15 @@ export default class JdexManagerPlugin extends Plugin {
     ];
     const ok = await confirm(this.app, `Retire ${entry.id}?`, lines, "Retire");
     if (!ok) return;
-    const effects: Effect[] = [];
-    let recorded = false;
+    // Each step is journaled as it happens, so a partial retirement stays undoable.
+    const effects = this.journalOperation("retire", `Retire ${entry.id}`);
     try {
       const done = await retireId(this.app, index, entry, undefined, effects);
-      await this.record("retire", `Retire ${entry.id}`, effects);
-      recorded = true;
+      await effects.flush();
       new Notice(done.join(" · "), 8000);
       await this.refreshHeaders(entry.category, false);
     } catch (error) {
       this.logError("retireFlow", error);
-      if (!recorded && effects.length > 0) {
-        try {
-          await this.record("retire", `Retire ${entry.id} (partial)`, effects);
-        } catch (journalError) {
-          new Notice(`Retirement changed files but its undo journal could not be saved: ${String(journalError)}`, 10000);
-        }
-      }
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
@@ -1041,7 +1096,7 @@ export default class JdexManagerPlugin extends Plugin {
     const index = scanVault(this.app, this.settings);
     const entry = index.ids.find((e) => e.id === parent.id && sameSystem(e, parent));
     if (!entry) return;
-    new CreateChildModal(this.app, index, entry, this.settings, async () => {}).open();
+    new CreateChildModal(this.app, index, entry, this.settings, async () => {}, this.journalOperation("create-id", `Create child of ${entry.label}`)).open();
   }
 
   async createTemplates(): Promise<void> {
@@ -1072,9 +1127,10 @@ export default class JdexManagerPlugin extends Plugin {
       new CreateIdModal(this.app, index, category, this.settings, async (request) => {
         await this.saveSettings();
         try {
-          const effects: Effect[] = [];
+          // Journaled effect by effect: a failure after creating the note keeps it undoable.
+          const effects = this.journalOperation("create-id", `Create ${request.id} ${request.title.trim()}`);
           const note = await createId(this.app, this.settings, index, category, request, effects);
-          await this.record("create-id", `Create ${note.basename}`, effects);
+          await effects.flush();
           new Notice(`Created ${note.basename}.`);
           if (request.createFolder && this.settings.afterCreateOpen === "folder" && category.path) {
             // No public API reveals a folder in the explorer: open the note and say where the folder is.
