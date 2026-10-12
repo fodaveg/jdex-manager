@@ -131,6 +131,32 @@ describe('loadJdexIdSection', () => {
     expect(data.files.map((f) => f.name)).toEqual(['captura.png', 'Notas de Hebra']);
     expect(data.files.find((f) => f.kind === 'note')?.id).toBe('n-content');
     expect(data.siblings.map((s) => s.id)).toEqual(['21.12']);
+    expect(data.siblingsTitle).toBe('21.11 a 21.19');
     expect(data.children).toEqual([]);
+  });
+
+  it('lists only the siblings under the header of the ID, not the whole category', async () => {
+    const base = '20-29 P/21 Cat';
+    const folders = ['20-29 P', base, `${base}/21.10 Cabecera A`, `${base}/21.11 Uno`, `${base}/21.12 Dos`, `${base}/21.20 Cabecera B`, `${base}/21.21 Tres`, `${base}/21.01 Inbox`];
+    const index = buildIndex({ systemRoot: '', jdexFolder: '', notePaths: [], folderPaths: folders });
+    const w: JdexLibraryWalk = { rootFolderId: 'root', folderPaths: new Map([['f-uno', `${base}/21.11 Uno`]]), systemFolderPaths: folders, systemNotes: [] };
+    const data = await loadJdexIdSection(fakeLibrary(), markdown, w, index, { jdexFolder: '' }, { id: 'n', folderId: 'f-uno', title: 'Nota' });
+    expect(data.entry?.id).toBe('21.11');
+    expect(data.siblings.map((s) => s.id)).toEqual(['21.12']);
+    expect(data.siblingsTitle).toBe('Bajo 21.10 Cabecera A');
+    // an inbox hangs from no header: no siblings, empty title
+    const inboxWalk: JdexLibraryWalk = { ...w, folderPaths: new Map([['f-in', `${base}/21.01 Inbox`]]) };
+    const inbox = await loadJdexIdSection(fakeLibrary(), markdown, inboxWalk, index, { jdexFolder: '' }, { id: 'n', folderId: 'f-in', title: 'Nota' });
+    expect(inbox.siblings).toEqual([]);
+    expect(inbox.siblingsTitle).toBe('');
+  });
+
+  it('flags a truncated listing when the page has a next cursor', async () => {
+    const index = buildIndex(INDEX_INPUT);
+    const library = { ...fakeLibrary(), notesPage: async () => ({ items: [], nextCursor: 'more' }) };
+    const data = await loadJdexIdSection(library, markdown, walk(), index, { jdexFolder: INDEX_INPUT.jdexFolder },
+      { id: 'n-hebra', folderId: 'f-jdex', title: '21.11 Hebra' });
+    expect(data.truncated).toEqual({ notes: true, files: false });
+    expect(data.contentsLimit).toBe(200);
   });
 });

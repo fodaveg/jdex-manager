@@ -7,7 +7,7 @@ import { updateHeaders } from "./headers";
 import { updateSystemIndex } from "./structure";
 
 /** Caller owns serialization and persists effects even when a later step fails. */
-export async function maintainSystem(app: App, settings: JdexManagerSettings, effects: Effect[]): Promise<void> {
+export async function maintainSystem(app: App, settings: JdexManagerSettings, effects: Effect[], warn?: (message: string) => void): Promise<void> {
   if (!settings.automaticMaintenance || settings.jdexFolder === "") return;
   const { index, findings } = await collectAudit(app, settings);
   const derived = new Set(["jd", "tipo", "area", "categoria"]);
@@ -20,5 +20,5 @@ export async function maintainSystem(app: App, settings: JdexManagerSettings, ef
     await applyFix(app, { ...fix, set, expected }, effects);
   }
   await updateHeaders(app, index, undefined, effects);
-  await updateSystemIndex(app, settings, index, false, effects);
+  await updateSystemIndex(app, settings, index, false, effects, warn);
 }

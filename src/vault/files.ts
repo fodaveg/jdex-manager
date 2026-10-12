@@ -1,6 +1,7 @@
 import { type App, normalizePath, TFile } from "obsidian";
 import { type DateFormat, datedName, directFiles, inboxFolders } from "../jd/files";
 import type { JdIndex } from "../jd/index";
+import { fileDate } from "./file-date";
 
 /** Moves `file` into `folder`, keeping its name (dated when `date` is given). Refuses to overwrite. */
 export async function moveInto(app: App, file: TFile, folder: string, date?: { when: Date; format: DateFormat }): Promise<string> {
@@ -12,9 +13,9 @@ export async function moveInto(app: App, file: TFile, folder: string, date?: { w
   return target;
 }
 
-/** Renames `file` in place with a date prefix taken from its creation time. Returns the new path or null when already dated. */
+/** Renames `file` in place with a date prefix taken from its frontmatter date, else its creation time. Returns the new path or null when already dated. */
 export async function dateFile(app: App, file: TFile, format: DateFormat): Promise<string | null> {
-  const name = datedName(file.name, new Date(file.stat.ctime), format);
+  const name = datedName(file.name, fileDate(app, file), format);
   if (name === file.name) return null;
   const target = normalizePath(`${file.parent?.path ?? ""}/${name}`);
   if (app.vault.getAbstractFileByPath(target)) throw new Error(`${target} already exists.`);

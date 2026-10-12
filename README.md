@@ -28,9 +28,9 @@ What works today (0.4.1):
 - **Create header**: `AC.X0 ■ emoji Title` note with `tipo: cabecera`, the next free X0 proposed, and an empty children block that the live header list fills.
 - **Create child ID (+)**: from the command palette on the active JDex note or from the file menu of an ID note or folder. The child is `AC.ID+ Title` with `jd: "AC.ID+"` and a link to its parent; the folder, if asked, is `+ Title` inside the parent folder.
 
-- **Send to inbox / Archive**: move the active file to the `.01` or `.09` of its category (a picker when the file lives outside the system). Archiving adds the creation date as prefix.
-- **Process inboxes**: walks every `AC.01` and `00.01` file by file with a preview: move to an ID, archive, skip, open or delete. The status bar shows how many files are waiting.
-- **Date file name**: prefixes the creation date to a file inside a content ID (`YYYY-MM-DD` or `YYYY-MM`). Optional automatic dating on creation. JDex notes and management folders are never touched.
+- **Send to inbox / Archive**: move the active file to the `.01` or `.09` of its category (a picker when the file lives outside the system). Archiving adds the date as prefix: the `fecha` / `creado` / `created` / `date` frontmatter value when a note has one, else the file creation time (not verified for files received through Obsidian Sync).
+- **Process inboxes**: walks every `AC.01` and `00.01` file by file with a preview: move to an ID, archive, skip, open or delete. The status bar shows how many files are waiting. In Hebra the dialog also previews each note, sends it to the trash only after a confirmation, and can move it to an ID that has no folder only if you tick "Include IDs without a folder" and confirm creating it. Hebra does not date the name when moving (only Archive adds the date), and Open advances to the next note without closing the dialog.
+- **Date file name**: prefixes the date (frontmatter first, else creation time) to a file inside a content ID (`YYYY-MM-DD` or `YYYY-MM`). Optional automatic dating on creation. JDex notes and management folders are never touched.
 - **Go to ID**: a picker with note and folder on the same row; Enter opens the note, Cmd/Ctrl+Enter the folder.
 - **Move active file to an ID**: the same picker, from the command palette or the file menu, moves the file into the folder of the chosen ID (offering to create the folder when the ID has none). A setting dates the name on the way.
 - **Search inside the active ID / category**: opens Obsidian's search with `path:"…/21.22 JDex Manager/"` already typed; when the core search plugin is not reachable the query goes to the clipboard.
@@ -74,7 +74,7 @@ Both hosts share the engine defaults. Hebra stores its settings per library and 
 | What to open after creating | Yes | n/a (the note opens) |
 | Date files on create or on move | Yes | n/a |
 | Clickable numbers in reading view | Yes | n/a |
-| Autocomplete and what it inserts | Yes | Not yet |
+| Autocomplete and what it inserts | Yes (inserts a link by default) | Yes (inserts the number by default) |
 
 ## Install
 
@@ -86,14 +86,28 @@ Both hosts share the engine defaults. Hebra stores its settings per library and 
 
 ## Develop
 
+Node 22 or later (CI uses 22). A fresh checkout installs exactly what the lockfile says:
+
 ```
-npm install
+npm ci               # not `npm install`: it must not rewrite package-lock.json
 npm run dev          # esbuild in watch mode (Obsidian)
 npm run build:hebra  # hebra-main.mjs, hebra-styles.css and hebra.json (Hebra plugin)
-npm run check        # lint, both builds and tests
+npm run check        # lint, both builds and tests with the coverage floor
 ```
 
+`hebra-main.mjs`, `hebra-styles.css` and `hebra.json` are generated and git-ignored, so a clean checkout has none of them. `npm run check` builds them before the tests; to run vitest on its own (`npx vitest run --maxWorkers=1`) run `npm run build:hebra` first, or `tests/hebra/bundle.test.ts` fails on purpose instead of skipping. Keep `--maxWorkers=1`: the suite is serial by design (`npm test` already sets it). Vitest 5 has no `--minWorkers` option.
+
+Coverage (`npm run test:coverage`, part of `check`) enforces the floor in `vitest.config.mts`, measured on 12 Oct 2026; raise it as coverage rises.
+
+`npm run audit:bundled` fails if `npm audit` reports an advisory in a package that ships inside `main.js` or `hebra-main.mjs` (today only `yaml`, in the Hebra bundle). It needs the network, so it runs in CI and not in `check`. `npm audit --omit=dev` does not describe what ships, because `yaml` is a dev dependency that gets bundled.
+
 The Hebra plugin lives in `src/hebra/` (entry `main.ts`, written against `hebra-plugin-api`, never against Obsidian or Hebra internals) and shares only the pure engine in `src/jd/` with the Obsidian plugin. `scripts/build-hebra.mjs` bundles it into one ES module, generates `hebra.json` (never by hand) and fails if the bundle imports anything it should not or inlines CodeMirror; `esbuild.config.mjs` fails if `main.js` bundles anything from `src/hebra/`.
+
+## Release
+
+A release is a tag equal to the version in `manifest.json`, `package.json` and `hebra.json`, on a commit that is already in `main`, with the notes written in `release-notes/<tag>.md` in that same commit (the workflow fails without them). The workflow hashes the six assets from the build, attests their provenance, creates a draft, downloads it back and compares it with those hashes and with GitHub's own digests, and only then publishes. It also requires the repository to have immutable releases enabled (Settings, Releases): that setting is not something the workflow can turn on. `minAppVersion`, `versions.json` and the version fields are changed by hand, on purpose; `npm run check:min-app` fails if the code starts to need newer Obsidian API than `minAppVersion`.
+
+Dependencies are reviewed through Dependabot (`.github/dependabot.yml`, npm and GitHub Actions). `obsidian` is held to `~1.14.4`, a minor, so a new minor arrives as a pull request that CI judges with `check:min-app`.
 
 ## Credit and licence
 

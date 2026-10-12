@@ -9,7 +9,8 @@
  * sola.
  */
 import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
-import { datedName, zeroOf, type DateFormat, type JdIndex } from './engine';
+import { datedName, idFolderOfPath, sameSystem, zeroOf, type DateFormat, type IdEntry, type JdIndex } from './engine';
+import { ensureJdexFolder } from './jdex-create-write';
 import {
   jdexResolveFolderId,
   type JdexInboxSummary,
@@ -58,8 +59,41 @@ export function jdexInboxArchiveTarget(
   return archive && folderId ? { folderId, label: archive.label } : null;
 }
 
+/** The `.01` or `.09` of the category that owns the note's folder, whatever ID that
+ *  folder belongs to (an inbox, a content ID, the archive itself). `null` when the
+ *  folder is outside every ID or the category has no live folder for that zero. */
+export function jdexZeroTarget(
+  note: Pick<JdexNoteRef, 'folderId'>,
+  walk: Pick<JdexLibraryWalk, 'folderPaths' | 'rootFolderId'>,
+  index: JdIndex,
+  zero: '01' | '09'
+): { folderId: string; label: string } | null {
+  const folderPath = walk.folderPaths.get(note.folderId);
+  if (folderPath === undefined || folderPath === '') return null;
+  const owner = idFolderOfPath(index, `${folderPath}/_`);
+  if (!owner) return null;
+  const target = zeroOf(index, owner.category, zero, owner.system ?? '');
+  const folderId = target?.folderPath ? jdexResolveFolderId(walk, target.folderPath) : null;
+  return target && folderId ? { folderId, label: target.label } : null;
+}
+
+/** «Enviar a su inbox»: moves the note to the `.01` of its category (no dating). */
+export async function sendJdexNoteToInbox(
+  library: Pick<PluginVault, 'noteMove'>,
+  note: JdexNoteRef,
+  walk: JdexLibraryWalk,
+  index: JdIndex
+): Promise<{ label: string }> {
+  const target = jdexZeroTarget(note, walk, index, '01');
+  if (!target) throw new Error('Esta categoría no tiene una carpeta .01 a la que enviarla.');
+  if (target.folderId === note.folderId) throw new Error(`La nota ya está en ${target.label}.`);
+  await library.noteMove(note.id, target.folderId);
+  return { label: target.label };
+}
+
 /** Move to `.09` with the note creation date prefixed to its title. A stale title
- *  rewrite aborts before the move; a later move failure remains in the journal. */
+ *  rewrite aborts before the move; a later move failure remains in the journal.
+ *  The origin may be any ID of the category (not only its `.01`). */
 export async function archiveJdexInboxNote(
   library: Pick<PluginVault, 'noteRead' | 'notesRewriteBatch' | 'noteMoveIfUnchanged'>,
   markdown: Pick<PluginMarkdown, 'withTitle'>,
@@ -68,8 +102,9 @@ export async function archiveJdexInboxNote(
   index: JdIndex,
   dateFormat: DateFormat
 ): Promise<void> {
-  const target = jdexInboxArchiveTarget(note, walk, index);
+  const target = jdexZeroTarget(note, walk, index, '09');
   if (!target) throw new Error('Esta categoría no tiene una carpeta .09 para archivar.');
+  if (target.folderId === note.folderId) throw new Error(`La nota ya está en ${target.label}.`);
   const current = await library.noteRead(note.id);
   if (!current || current.body === null || current.trashedAt !== null || current.folderId !== note.folderId) {
     throw new Error('La nota cambió desde que se abrió el inbox; vuelve a abrirlo.');
@@ -86,4 +121,35 @@ export async function archiveJdexInboxNote(
     revision = committed.revision;
   }
   if (!await library.noteMoveIfUnchanged(note.id, target.folderId, { revision, folderId: current.folderId })) throw new Error('La nota cambió antes de moverla al archivo; se conserva en el inbox.');
+}
+
+/** Send an inbox note to the library trash, only if it is still where the dialog saw it. */
+export async function trashJdexInboxNote(
+  library: Pick<PluginVault, 'noteRead' | 'noteTrashIfUnchanged'>,
+  note: JdexNoteRef
+): Promise<void> {
+  const current = await library.noteRead(note.id);
+  if (!current || current.trashedAt !== null || current.folderId !== note.folderId) {
+    throw new Error('La nota cambió desde que se abrió el inbox; vuelve a abrirlo.');
+  }
+  const trashed = await library.noteTrashIfUnchanged(note.id, { revision: current.revision, folderId: current.folderId });
+  if (!trashed) throw new Error('La nota cambió antes de mandarla a la papelera; se conserva en el inbox.');
+}
+
+/** Optional and explicit: create the folder of an ID that has none (inside the folder of
+ *  its category, through the library API) and move the note there. The caller asks the
+ *  user first; this never runs on its own. */
+export async function moveJdexInboxNoteCreatingFolder(
+  library: Pick<PluginVault, 'noteMove' | 'foldersList' | 'folderCreate'>,
+  note: JdexNoteRef,
+  walk: Pick<JdexLibraryWalk, 'folderPaths' | 'rootFolderId'>,
+  index: JdIndex,
+  entry: IdEntry
+): Promise<void> {
+  if (entry.folderPath) throw new Error(`${entry.label} ya tiene carpeta.`);
+  const category = index.categories.find((c) => c.number === entry.category && sameSystem(c, entry));
+  const parentId = category?.path ? jdexResolveFolderId(walk, category.path) : null;
+  if (!parentId) throw new Error(`La categoría de ${entry.label} no tiene carpeta donde crear la del ID.`);
+  const folderId = await ensureJdexFolder(library, parentId, entry.label);
+  await library.noteMove(note.id, folderId);
 }

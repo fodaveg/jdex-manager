@@ -187,3 +187,70 @@ describe('mountJdexInboxProcessView', () => {
     expect(el.textContent).toContain('No se encontró la carpeta de destino.');
   });
 });
+
+describe('mountJdexInboxProcessView: preview, trash and optional folder creation', () => {
+  const button = (el: HTMLElement, text: string) =>
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text);
+
+  it('shows a preview of the note, cut at 600 characters', async () => {
+    const el = document.createElement('div');
+    mountJdexInboxProcessView(el, { queue: [note('n1', 'f1', 'Suelta')], entries: [], folderLabel: () => 'Inbox', ...noop(), readPreview: async () => 'x'.repeat(700) });
+    expect(el.querySelector('.hebra-jdex-inbox-preview')?.textContent).toBe('Cargando…');
+    await vi.waitFor(() => expect(el.querySelector('.hebra-jdex-inbox-preview')?.textContent).toBe(`${'x'.repeat(600)}…`));
+  });
+
+  it('a protected note says so instead of showing a preview', async () => {
+    const el = document.createElement('div');
+    mountJdexInboxProcessView(el, { queue: [note('n1', 'f1', 'Suelta')], entries: [], folderLabel: () => 'Inbox', ...noop(), readPreview: async () => null });
+    await vi.waitFor(() => expect(el.querySelector('.hebra-jdex-inbox-preview')?.textContent).toContain('No se puede mostrar'));
+  });
+
+  it('trash needs a confirmation: the first click writes nothing, Cancel returns', async () => {
+    const el = document.createElement('div');
+    const onTrash = vi.fn(async () => {});
+    mountJdexInboxProcessView(el, { queue: [note('n1', 'f1', 'Suelta'), note('n2', 'f1', 'Otra')], entries: [], folderLabel: () => 'Inbox', ...noop(), onTrash });
+    button(el, 'Papelera…')!.click();
+    expect(onTrash).not.toHaveBeenCalled();
+    expect(el.textContent).toContain('irá a la papelera');
+    button(el, 'Cancelar')!.click();
+    expect(onTrash).not.toHaveBeenCalled();
+    expect(el.textContent).toContain('Suelta');
+    button(el, 'Papelera…')!.click();
+    button(el, 'Mandar a la papelera')!.click();
+    await vi.waitFor(() => expect(el.textContent).toContain('Otra'));
+    expect(onTrash).toHaveBeenCalledTimes(1);
+  });
+
+  it('without onTrash there is no trash button', () => {
+    const el = document.createElement('div');
+    mountJdexInboxProcessView(el, { queue: [note('n1', 'f1', 'Suelta')], entries: [], folderLabel: () => 'Inbox', ...noop() });
+    expect(button(el, 'Papelera…')).toBeUndefined();
+  });
+
+  it('IDs without a folder are offered only when asked, and the folder is created only after confirming', async () => {
+    const el = document.createElement('div');
+    const onMoveCreatingFolder = vi.fn(async () => {});
+    const noFolder = entry({ id: '21.12', title: 'Sin carpeta', label: '21.12 Sin carpeta', folderPath: undefined });
+    const callbacks = noop();
+    mountJdexInboxProcessView(el, { queue: [note('n1', 'f1', 'Suelta')], entries: [noFolder], folderLabel: () => 'Inbox', ...callbacks, onMoveCreatingFolder });
+    button(el, 'Mover…')!.click();
+    expect(el.querySelector('[role="option"]')).toBeNull();
+    const toggle = el.querySelector<HTMLInputElement>('.hebra-jdex-inbox-optional input')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change'));
+    (el.querySelector('[role="option"]') as HTMLButtonElement).click();
+    expect(el.textContent).toContain('no tiene carpeta. ¿Crearla y mover');
+    expect(onMoveCreatingFolder).not.toHaveBeenCalled();
+    expect(callbacks.onMove).not.toHaveBeenCalled();
+    button(el, 'Crear carpeta y mover')!.click();
+    await vi.waitFor(() => expect(onMoveCreatingFolder).toHaveBeenCalledWith(expect.objectContaining({ id: 'n1' }), noFolder));
+    expect(callbacks.onMove).not.toHaveBeenCalled();
+  });
+
+  it('without onMoveCreatingFolder the move panel has no toggle', () => {
+    const el = document.createElement('div');
+    mountJdexInboxProcessView(el, { queue: [note('n1', 'f1', 'Suelta')], entries: [], folderLabel: () => 'Inbox', ...noop() });
+    button(el, 'Mover…')!.click();
+    expect(el.querySelector('.hebra-jdex-inbox-optional')).toBeNull();
+  });
+});

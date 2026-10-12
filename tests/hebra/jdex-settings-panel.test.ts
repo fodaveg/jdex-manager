@@ -203,4 +203,19 @@ describe('mountJdexSettingsPanel', () => {
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ dateFormat: 'YYYY-MM' }));
   });
 
+  it('exposes the autocomplete switch and what it inserts', () => {
+    const el = document.createElement('div');
+    const save = vi.fn();
+    mountJdexSettingsPanel(el, { get: () => ({ ...DEFAULT_SETTINGS, autocompleteInsert: 'number' }), save, pickFolder: vi.fn(async () => '') });
+    const toggle = [...el.querySelectorAll('label')].find((l) => l.textContent?.includes('Autocompletar'))!.querySelector('input')!;
+    expect(toggle.checked).toBe(true);
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ autocomplete: false }));
+    const insert = [...el.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'link'))!;
+    expect(insert.value).toBe('number');
+    insert.value = 'link';
+    insert.dispatchEvent(new Event('change'));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ autocompleteInsert: 'link' }));
+  });
 });

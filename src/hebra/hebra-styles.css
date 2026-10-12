@@ -62,12 +62,41 @@
   text-underline-offset: 0.2em;
 }
 
+/* Text inputs and selects need a 3:1 boundary (WCAG 1.4.11). Hebra's `--line` is 1.1-1.7:1
+   against every theme surface (measured, 15 themes x light/dark), so the border mixes in
+   `--ink`; 62% clears 3.05:1 on all of them. */
+.hebra-jdex-settings,
+.hebra-jdex-field,
+.hebra-jdex-goto-search {
+  --jdex-input-border: color-mix(in srgb, var(--ink) 62%, var(--panel));
+}
+
+/* The row's grid used to hold a 163px floor for the input (label 144 + input 163 + button
+   78 + gaps = 401px): narrower panels, such as a 390px phone, scrolled sideways. */
+.hebra-jdex-settings {
+  container-type: inline-size;
+}
+
 .hebra-jdex-settings-row {
   display: grid;
-  grid-template-columns: 9rem 1fr auto;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2);
   margin: 0 0 var(--space-3);
+}
+
+@container (max-width: 26rem) {
+  .hebra-jdex-settings-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .hebra-jdex-settings-row > label:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .hebra-jdex-settings-row > input[type='text']:last-child {
+    grid-column: 1 / -1;
+  }
 }
 
 .hebra-jdex-settings-row label {
@@ -76,9 +105,10 @@
 }
 
 .hebra-jdex-settings-row input[type='text'] {
+  min-width: 0;
   min-height: var(--hit-pointer);
   padding: 0 var(--space-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--jdex-input-border, var(--line));
   border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--ink);
@@ -138,7 +168,7 @@
 .hebra-jdex-field select {
   min-height: var(--hit-pointer);
   padding: 0 var(--space-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--jdex-input-border, var(--line));
   border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--ink);
@@ -166,7 +196,9 @@
 .hebra-jdex-dialog-error {
   margin: 0 0 var(--space-2);
   min-height: 1.2em;
-  color: var(--danger-text);
+  /* `--danger-text` does not exist in Hebra's themes (the message inherited `--ink`);
+     `--danger-ink` does, and measures >= 6.3:1 on `--paper` in every theme. */
+  color: var(--danger-ink, var(--ink));
   font-size: var(--type-ui-xs);
 }
 
@@ -243,7 +275,7 @@
   min-height: var(--hit-pointer);
   margin: 0 0 var(--space-3);
   padding: 0 var(--space-3);
-  border: 1px solid var(--line);
+  border: 1px solid var(--jdex-input-border, var(--line));
   border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--ink);
@@ -267,8 +299,20 @@
 }
 
 .hebra-jdex-goto-row button:hover,
-.hebra-jdex-goto-row button:focus-visible {
+.hebra-jdex-goto-row button:focus-visible,
+.hebra-jdex-goto-row button.is-active {
   background: var(--state-hover);
+}
+
+.hebra-jdex-goto-row button.is-active {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: -2px;
+}
+
+.hebra-jdex-goto-status {
+  margin: var(--space-2) var(--space-3) 0;
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
 }
 
 .hebra-jdex-goto-empty {
@@ -297,6 +341,29 @@
 .hebra-jdex-goto-action {
   width: 100%;
   text-align: left;
+}
+
+.hebra-jdex-inbox-preview {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2);
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid var(--soft-line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: var(--type-ui-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hebra-jdex-inbox-optional {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
 }
 
 .hebra-jdex-goto-action:disabled {
@@ -339,6 +406,12 @@
 
 .hebra-jdex-section-empty {
   margin: 0;
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
+}
+
+.hebra-jdex-section-hint {
+  margin: 0.25rem 0 0;
   color: var(--muted);
   font-size: var(--type-ui-sm);
 }

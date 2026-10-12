@@ -8,7 +8,7 @@
  * son dos consultas nuevas, nunca proporcionales al tamaño de la biblioteca.
  */
 import type { PluginActiveNote, PluginVault } from 'hebra-plugin-api';
-import { childrenPlus, locate, sameSystem, type IdEntry, type JdIndex, type Location } from './engine';
+import { childrenOf, childrenPlus, locate, sameSystem, type IdEntry, type JdIndex, type Location } from './engine';
 import {
   jdexFrontmatterString,
   readJdexFrontmatter,
@@ -34,10 +34,17 @@ export interface JdexIdSectionData {
   readonly description: string;
   readonly files: readonly JdexIdSectionFile[];
   readonly children: readonly IdEntry[];
+  /** Siblings under the header of the ID (as in Obsidian), the ID itself excluded. */
   readonly siblings: readonly IdEntry[];
+  /** «Bajo 21.10 Cabecera», or `''` when the ID hangs from no header (`.01`-`.09`, `+`). */
+  readonly siblingsTitle?: string;
+  /** The folder holds more than `FOLDER_CONTENTS_LIMIT` notes and/or files than were listed. */
+  readonly truncated?: { readonly notes: boolean; readonly files: boolean };
+  /** How many notes/files each list is capped at, for the notice. */
+  readonly contentsLimit?: number;
 }
 
-const FOLDER_CONTENTS_LIMIT = 200;
+export const FOLDER_CONTENTS_LIMIT = 200;
 
 const EMPTY: JdexIdSectionData = {
   located: null,
@@ -52,7 +59,7 @@ const EMPTY: JdexIdSectionData = {
 async function folderContents(
   library: JdexIdSectionLibrary,
   folderId: string
-): Promise<JdexIdSectionFile[]> {
+): Promise<{ files: JdexIdSectionFile[]; truncated: { notes: boolean; files: boolean } }> {
   const [notes, files] = await Promise.all([
     library.notesPage(null, FOLDER_CONTENTS_LIMIT, { kind: 'folder', folderId }),
     library.filesPage(folderId, false, null, FOLDER_CONTENTS_LIMIT)
@@ -66,8 +73,29 @@ async function folderContents(
     })),
     ...files.items.map((item) => ({ name: item.name, date: item.updatedAt, kind: 'file' as const }))
   ];
+  // Most recently updated first (Obsidian sorts by name; Hebra's panel is a "what changed" view).
   out.sort((a, b) => b.date - a.date);
-  return out;
+  return { files: out, truncated: { notes: notes.nextCursor !== null, files: files.nextCursor !== null } };
+}
+
+/** Siblings of an ID as Obsidian's panel lists them: the IDs under the same header range
+ *  (`childrenOf`), never the whole category. Empty title when the ID has no header. */
+export function jdexSiblingsUnderHeader(
+  index: JdIndex,
+  entry: IdEntry
+): { title: string; siblings: IdEntry[] } {
+  const last = Number(entry.id.split('.')[1]);
+  const tens = Math.floor(last / 10) * 10;
+  if (!Number.isFinite(tens) || tens === 0 || entry.id.endsWith('+')) return { title: '', siblings: [] };
+  const headerId = `${entry.category}.${tens}`;
+  const header = index.ids.find((e) => e.id === headerId && sameSystem(e, entry));
+  const all = childrenOf(index, headerId, entry.system);
+  if (all.length <= 1 && !header) return { title: '', siblings: [] };
+  const prefix = headerId.slice(0, -1);
+  return {
+    title: header ? `Bajo ${header.label}` : `${prefix}1 a ${prefix}9`,
+    siblings: all.filter((candidate) => candidate.id !== entry.id)
+  };
 }
 
 export async function loadJdexIdSection(
@@ -98,18 +126,14 @@ export async function loadJdexIdSection(
   }
 
   let files: JdexIdSectionFile[] = [];
+  let truncated = { notes: false, files: false };
   if (entry.folderPath) {
     const folderId = jdexResolveFolderId(walk, entry.folderPath);
-    if (folderId) files = await folderContents(library, folderId);
+    if (folderId) ({ files, truncated } = await folderContents(library, folderId));
   }
 
   const children = childrenPlus(index, entry.id, entry.system);
-  const siblings = index.ids.filter(
-    (candidate) =>
-      candidate.category === entry.category && sameSystem(candidate, entry) &&
-      candidate.id !== entry.id &&
-      !candidate.id.endsWith('+')
-  );
+  const { title: siblingsTitle, siblings } = jdexSiblingsUnderHeader(index, entry);
 
   return {
     located,
@@ -118,6 +142,9 @@ export async function loadJdexIdSection(
     description,
     files,
     children,
-    siblings
+    siblings,
+    siblingsTitle,
+    truncated,
+    contentsLimit: FOLDER_CONTENTS_LIMIT
   };
 }

@@ -67,7 +67,15 @@ export function mountJdexGotoView(el: HTMLElement, options: JdexGotoViewOptions)
 
   const picker = mountJdexIdPicker(el, {
     entries: options.entries,
-    onSelect: (entry) => openActions(entry)
+    // Clic (o Enter sobre la fila tras Tab): el panel con las seis acciones. Enter en el
+    // buscador sobre el resaltado hace directamente la acción por defecto, «Ir», cuando ese
+    // ID tiene a dónde ir; si no, abre el panel y dice por qué.
+    onSelect: (entry) => openActions(entry),
+    onActivate: (entry) => {
+      const acts = actionsFor(entry, options.hasActiveNote, null);
+      if (acts.goto.disabled) openActions(entry);
+      else options.onGoto(entry);
+    }
   });
   el.append(actions);
 

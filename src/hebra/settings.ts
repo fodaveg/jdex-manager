@@ -32,8 +32,9 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
   // the parser cannot read back, so it is dropped instead of stored.
   const systemId = typeof source.systemId === 'string' ? normalizeSystemId(source.systemId) : null;
   if (systemId !== null) out.systemId = systemId;
-  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'prefixNamesWithSystem',
+  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'autocomplete', 'prefixNamesWithSystem',
     'createFolderByDefault', 'descriptionIsFinding', 'noteWithoutFolderIsFinding', 'renamePairsWithoutAsking'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  if (source.autocompleteInsert === 'link' || source.autocompleteInsert === 'number') out.autocompleteInsert = source.autocompleteInsert;
   // Template names: each type keeps its default unless a non-empty name was stored.
   if (typeof source.templateNames === 'object' && source.templateNames !== null && !Array.isArray(source.templateNames)) {
     const stored = source.templateNames as Record<string, unknown>;
@@ -53,15 +54,19 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
   return out;
 }
 
+/** En Hebra el autocompletado inserta el número a secas (así lo hacía antes de existir el
+ *  ajuste); el `link` del motor es el valor por defecto de Obsidian y aquí es opt-in. */
+export const HEBRA_DEFAULTS: JdexManagerSettings = { ...DEFAULT_SETTINGS, autocompleteInsert: 'number' };
+
 /** Ajustes guardados de esta biblioteca, sobre los valores por defecto del motor; sin
- *  nada guardado (o corrupto), `DEFAULT_SETTINGS` tal cual. */
+ *  nada guardado (o corrupto), los valores por defecto (`HEBRA_DEFAULTS`). */
 export async function loadJdexSettings(storage: JdexSettingsStorage): Promise<JdexManagerSettings> {
   try {
     const raw = await storage.load<unknown>();
-    if (raw === null) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...normalizeStored(raw) };
+    if (raw === null) return HEBRA_DEFAULTS;
+    return { ...HEBRA_DEFAULTS, ...normalizeStored(raw) };
   } catch {
-    return DEFAULT_SETTINGS;
+    return HEBRA_DEFAULTS;
   }
 }
 

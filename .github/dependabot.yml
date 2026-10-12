@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Aliases pinned to the LOWER bound of the CodeMirror ranges declared in hebra.json
+      # (scripts/build-hebra.mjs SHARED_RANGES): they must only move together with it.
+      - dependency-name: codemirror-state-min
+      - dependency-name: codemirror-view-min
+      # obsidian (~1.14.x) is NOT ignored: its PR carries the new typings and CI runs
+      # `npm run check:min-app`, which fails if the plugin ends up needing API newer than
+      # minAppVersion.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
