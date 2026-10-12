@@ -92,23 +92,25 @@ export interface JournalState<E = Effect> {
  * - an operation removed in either copy (undone or discarded) stays removed;
  * - an operation present in both keeps the copy with the higher `rev` (this device's on a tie);
  * - operations without effects are dropped;
- * - the result is ordered by date, then identity, and keeps the last `max`.
+ * - the result is ordered by date (operations of the same instant keep this device's order) and
+ *   keeps the last `max`.
  * Undo always targets the last operation, and refuses one made on another device, so the merged
  * order never makes a device undo past an operation it did not make.
  */
 export function mergeJournals<E>(local: JournalState<E>, stored: JournalState<E>, max = JOURNAL_MAX): JournalState<E> {
   const removed = [...new Set([...stored.removed, ...local.removed])].slice(-JOURNAL_REMOVED_MAX);
   const gone = new Set(removed);
+  // This device's order first: the sort below is stable, so operations of the same instant keep it.
   const byId = new Map<string, Operation<E>>();
-  for (const op of withJournalIds(stored.entries)) if (!gone.has(op.id!)) byId.set(op.id!, op);
-  for (const op of withJournalIds(local.entries)) {
+  for (const op of withJournalIds(local.entries)) if (!gone.has(op.id!)) byId.set(op.id!, op);
+  for (const op of withJournalIds(stored.entries)) {
     if (gone.has(op.id!)) continue;
-    const other = byId.get(op.id!);
-    if (!other || (op.rev ?? 0) >= (other.rev ?? 0)) byId.set(op.id!, op);
+    const mine = byId.get(op.id!);
+    if (!mine || (op.rev ?? 0) > (mine.rev ?? 0)) byId.set(op.id!, op);
   }
   const entries = [...byId.values()]
     .filter((op) => Array.isArray(op.effects) && op.effects.length > 0)
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id! < b.id! ? -1 : a.id! > b.id! ? 1 : 0));
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   return { entries: entries.length > max ? entries.slice(entries.length - max) : entries, removed };
 }
 

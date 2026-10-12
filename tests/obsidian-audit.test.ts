@@ -73,7 +73,8 @@ describe("Obsidian audit fixes", () => {
   it("normalizes every frontmatter writer before saving the Obsidian journal", async () => {
     const plugin = new JdexManagerPlugin({} as App, {} as PluginManifest);
     let saved: unknown;
-    Object.assign(plugin, { saveData: vi.fn(async (data: unknown) => { saved = JSON.parse(JSON.stringify(data)); }) });
+    Object.assign(plugin, { loadData: async () => saved ?? null, saveData: vi.fn(async (data: unknown) => { saved = JSON.parse(JSON.stringify(data)); }) });
+    await plugin.loadSettings();
     await plugin.record("retire", "Retirar", [{ kind: "frontmatter", path: "X.md", previous: { tipo: "id", archivado: undefined } }]);
     expect(saved).toMatchObject({ journal: [{ effects: [{ kind: "frontmatter", previous: { tipo: "id" }, missingKeys: ["archivado"] }] }] });
   });

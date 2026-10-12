@@ -3,8 +3,8 @@ import { healthFileName, renderHealthReport } from "./jd/health";
 import { todayIso } from "./jd/template";
 import { ensureFolder } from "./vault/create";
 import { openGlobalSearch, pathQuery } from "./vault/search";
-import { describeUndo, durableEffect, type Effect, type Operation, type OperationKind, pushOperation } from "./jd/journal";
-import { undoOperation } from "./vault/journal";
+import type { Effect, OperationKind } from "./jd/journal";
+import { deviceIdentity, discardLastOperation, PluginDataFile, type RecordingEffects, UndoShield, undoLastOperation } from "./vault/journal-store";
 import { type JdexManagerSettings, type JdexNoteType, mergeSettings, namePrefix } from "./settings";
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
@@ -43,7 +43,10 @@ export default class JdexManagerPlugin extends Plugin {
   private inboxBar: HTMLElement | null = null;
   private whereBar: HTMLElement | null = null;
   private indexCache: { systemRoot: string; jdexFolder: string; index: JdIndex } | null = null;
-  private journal: Operation[] = [];
+  /** Settings and undo journal in `data.json` (`src/vault/journal-store.ts`). */
+  private data!: PluginDataFile;
+  /** Paths the last undo restored, kept away from automatic writes until they change again. */
+  private readonly undoShield = new UndoShield();
   private maintenanceTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
   private maintenanceRunning = false;
 
@@ -323,6 +326,12 @@ export default class JdexManagerPlugin extends Plugin {
       name: "Undo last JDex operation",
       callback: () => void this.undoLast(),
     });
+    this.addCommand({
+      id: "discard-last",
+      // eslint-disable-next-line obsidianmd/ui/sentence-case
+      name: "Discard last JDex journal entry (no file changes)",
+      callback: () => void discardLastOperation({ data: this.data, confirm: (title, lines, action) => confirm(this.app, title, lines, action), notice: (message) => new Notice(message, 10000) }),
+    });
 
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       this.invalidateIndex();
@@ -413,50 +422,47 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const stored = (await this.loadData()) as (Partial<JdexManagerSettings> & { journal?: unknown }) | null;
-    this.journal = Array.isArray(stored?.journal) ? (stored.journal as Operation[]) : [];
-    if (stored) delete stored.journal;
-    this.settings = mergeSettings(stored);
+    this.data = new PluginDataFile({ load: () => this.loadData(), save: (data) => this.saveData(data) }, this.settings, deviceIdentity(this.app), (message) => new Notice(message, 10000));
+    for (const message of await this.data.load()) new Notice(message, 10000);
   }
 
-  /** Settings and the undo journal share `data.json`. */
+  /** Settings and the undo journal share `data.json`; a save re-reads it and keeps what changed elsewhere. */
   async saveSettings(): Promise<void> {
-    await this.saveData({ ...this.settings, journal: this.journal });
+    await this.data.save();
+  }
+
+  /** `data.json` changed outside this window (Sync or another device): adopt it, joining the journals. */
+  async onExternalSettingsChange(): Promise<void> {
+    await this.data.reload();
+    this.invalidateIndex();
+    this.refreshInboxCount();
   }
 
   /** Records an operation in the undo journal (the last 20) and persists it. */
   async record(kind: OperationKind, label: string, effects: Effect[]): Promise<void> {
     if (effects.length === 0) return;
-    this.journal = pushOperation(this.journal, { kind, label, at: new Date().toISOString(), effects: effects.map(durableEffect) });
-    await this.saveSettings();
+    const sink = this.data.journal.begin(kind, label);
+    sink.push(...effects);
+    await sink.flush();
   }
 
-  /** Shows what undoing the last operation will do, then does it and drops it from the journal. */
+  /** An effects list that records each effect in the journal, and saves it, as it happens. */
+  journalOperation(kind: OperationKind, label: string): RecordingEffects {
+    return this.data.journal.begin(kind, label);
+  }
+
+  /** Shows what undoing the last operation will do, then does exactly that operation. */
   async undoLast(): Promise<void> {
-    const op = this.journal[this.journal.length - 1];
-    if (!op) {
-      new Notice("Nothing to undo: the journal is empty.");
-      return;
-    }
-    const ok = await confirm(this.app, `Undo "${op.label}"?`, [...describeUndo(op), "Nothing is deleted outright: notes and folders go to the trash."], "Undo");
-    if (!ok) return;
-    try {
-      this.renaming = true;
-      let done: string[];
-      try {
-        done = await undoOperation(this.app, op, async () => {
-          if (op.effects.length === 0) this.journal = this.journal.slice(0, -1);
-          await this.saveSettings();
-        });
-      } finally {
-        this.renaming = false;
-      }
-      new Notice(done.join(" · "), 10000);
-      this.refreshInboxCount();
-      await this.refreshHeaders(undefined, false);
-    } catch (error) {
-      new Notice(`Undo stopped: ${error instanceof Error ? error.message : String(error)}. The operation stays in the journal.`, 10000);
-    }
+    await undoLastOperation({
+      app: this.app,
+      data: this.data,
+      shield: this.undoShield,
+      confirm: (title, lines, action) => confirm(this.app, title, lines, action),
+      notice: (message) => new Notice(message, 10000),
+      setRenaming: (value) => { this.renaming = value; },
+    });
+    // Header lists are not regenerated here: that would rewrite what the undo just restored.
+    this.refreshInboxCount();
   }
 
   /** Fills empty folder settings from the vault. `announce` shows a Notice with the outcome. */
