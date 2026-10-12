@@ -97,6 +97,7 @@ import {
   mountCreateIdDialog
 } from './jdex-create-view';
 import { jdexCreationIndex } from './jdex-create';
+import { jdexTemplatesOutcomeMessage, writeJdexBuiltinTemplates } from './jdex-templates';
 import {
   createJdexArea,
   createJdexCategory,
@@ -157,6 +158,7 @@ export const JDEX_COMMAND_PROCESS_INBOX = 'jdex-procesar-inbox';
 export const JDEX_COMMAND_UNDO = 'jdex-deshacer-ultima-operacion';
 export const JDEX_COMMAND_HEALTH = 'jdex-informe-de-salud';
 export const JDEX_COMMAND_SYSTEM_REPORT = 'jdex-informe-del-sistema';
+export const JDEX_COMMAND_WRITE_TEMPLATES = 'jdex-escribir-plantillas-integradas';
 
 /** Reconstruir el índice tras un `library-changed` no en CADA aviso (una biblioteca que
  *  sincroniza muchas notas seguidas dispararía varias reconstrucciones completas). */
@@ -1496,8 +1498,27 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     report(error, 'extension-del-editor');
   }
 
+  /** «Escribir plantillas integradas»: the four built-in templates into `templatesFolder`,
+   *  never over a note that already has the name. */
+  async function writeBuiltinTemplates(): Promise<string> {
+    await rebuild();
+    if (!walk) throw new Error('El índice JDex aún no está listo.');
+    const currentWalk = walk;
+    const outcome = await journal.run('create-structure', 'Escribir plantillas integradas', (vault) => writeJdexBuiltinTemplates(vault, api.markdown, currentWalk, settings));
+    await rebuild();
+    return jdexTemplatesOutcomeMessage(outcome);
+  }
+  const offCommandWriteTemplates = host.registerCommand({
+    id: JDEX_COMMAND_WRITE_TEMPLATES,
+    name: 'JDex: escribir plantillas integradas en la carpeta de plantillas',
+    run: async () => {
+      try { host.notice(await writeBuiltinTemplates()); } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+    }
+  });
+
   const offSettingsPanel = host.settingsPanel((el) =>
     mountJdexSettingsPanel(el, {
+      writeTemplates: writeBuiltinTemplates,
       get: () => settings,
       save: (next) => {
         settings = next;
@@ -1552,6 +1573,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandUndo();
     offCommandHealth();
     offCommandSystemReport();
+    offCommandWriteTemplates();
     offAuditView();
     offIdSectionActiveNote();
     offIdSectionView();

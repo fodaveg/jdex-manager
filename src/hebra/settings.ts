@@ -32,7 +32,18 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
   // the parser cannot read back, so it is dropped instead of stored.
   const systemId = typeof source.systemId === 'string' ? normalizeSystemId(source.systemId) : null;
   if (systemId !== null) out.systemId = systemId;
-  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'prefixNamesWithSystem'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'prefixNamesWithSystem',
+    'createFolderByDefault', 'descriptionIsFinding', 'noteWithoutFolderIsFinding', 'renamePairsWithoutAsking'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  // Template names: each type keeps its default unless a non-empty name was stored.
+  if (typeof source.templateNames === 'object' && source.templateNames !== null && !Array.isArray(source.templateNames)) {
+    const stored = source.templateNames as Record<string, unknown>;
+    const names = { ...DEFAULT_SETTINGS.templateNames };
+    for (const type of Object.keys(names) as (keyof typeof names)[]) {
+      const value = stored[type];
+      if (typeof value === 'string' && value.trim() !== '') names[type] = value.trim();
+    }
+    out.templateNames = names;
+  }
   if (source.dateFormat === 'YYYY-MM-DD' || source.dateFormat === 'YYYY-MM') out.dateFormat = source.dateFormat;
   if (typeof source.inboxStaleDays === 'number' && Number.isInteger(source.inboxStaleDays) && source.inboxStaleDays >= 1) out.inboxStaleDays = source.inboxStaleDays;
   if (typeof source.healthMaxFiles === 'number' && Number.isFinite(source.healthMaxFiles) && source.healthMaxFiles >= 0) out.healthMaxFiles = source.healthMaxFiles;

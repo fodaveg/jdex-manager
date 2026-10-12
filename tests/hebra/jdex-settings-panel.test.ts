@@ -17,8 +17,8 @@ describe('mountJdexSettingsPanel', () => {
       pickFolder: vi.fn(async () => '')
     });
     const inputs = [...el.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
-    // 4 carpetas + id de sistema = 5 campos.
-    expect(inputs).toHaveLength(5);
+    // 4 carpetas + id de sistema + 4 nombres de plantilla = 9 campos.
+    expect(inputs).toHaveLength(9);
     expect(inputs.find((i) => i.value === 'Sistema/00.00 JDex')).toBeTruthy();
   });
 
@@ -117,6 +117,79 @@ describe('mountJdexSettingsPanel', () => {
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change'));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ prefixNamesWithSystem: true }));
+  });
+
+  it('every control has an accessible name and the folder hints are linked (263b284a)', () => {
+    const el = document.createElement('div');
+    mountJdexSettingsPanel(el, { get: () => DEFAULT_SETTINGS, save: vi.fn(), pickFolder: vi.fn(async () => ''), writeTemplates: vi.fn(async () => '') });
+    const nameOf = (control: HTMLElement): string => {
+      const aria = control.getAttribute('aria-label');
+      if (aria) return aria;
+      const byFor = control.id ? el.querySelector(`label[for="${control.id}"]`) : null;
+      return (byFor ?? control.closest('label'))?.textContent?.trim() ?? '';
+    };
+    const controls = [...el.querySelectorAll<HTMLElement>('input, select, textarea, button')];
+    expect(controls.length).toBeGreaterThan(20);
+    const unnamed = controls.filter((control) => control.tagName !== 'BUTTON' && nameOf(control) === '');
+    expect(unnamed.map((control) => control.outerHTML)).toEqual([]);
+    const root = [...el.querySelectorAll<HTMLInputElement>('input[type="text"]')][0];
+    expect(nameOf(root)).toBe('Raíz del sistema');
+    expect(el.querySelector(`#${root.getAttribute('aria-describedby')}`)?.textContent).toBe('Vacío = toda la biblioteca.');
+    const pickers = [...el.querySelectorAll('button')].filter((b) => b.textContent === 'Elegir carpeta…').map((b) => b.getAttribute('aria-label'));
+    expect(new Set(pickers).size).toBe(4);
+  });
+
+  it('saves the new switches, template names and file limit (263b284a)', () => {
+    const el = document.createElement('div');
+    let settings = { ...DEFAULT_SETTINGS };
+    const save = vi.fn((next: typeof settings) => { settings = next; });
+    mountJdexSettingsPanel(el, { get: () => settings, save, pickFolder: vi.fn(async () => '') });
+    const byLabel = (text: string): HTMLInputElement =>
+      [...el.querySelectorAll('label')].find((label) => label.textContent?.includes(text))!.querySelector('input')!;
+    for (const [text, key] of [
+      ['Crear también la carpeta al crear', 'createFolderByDefault'],
+      ['Contar como problema una nota JDex sin carpeta', 'noteWithoutFolderIsFinding'],
+      ['Renombrar la pareja nota y carpeta sin preguntar', 'renamePairsWithoutAsking']
+    ] as const) {
+      const box = byLabel(text);
+      expect(box.checked).toBe(false);
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      expect(settings[key]).toBe(true);
+    }
+    const description = byLabel('Avisar de notas JDex sin descripción');
+    expect(description.checked).toBe(true);
+    description.checked = false;
+    description.dispatchEvent(new Event('change'));
+    expect(settings.descriptionIsFinding).toBe(false);
+    const idTemplate = byLabel('Nombre de la plantilla de ID');
+    expect(idTemplate.value).toBe('JDex - id');
+    idTemplate.value = '';
+    idTemplate.dispatchEvent(new Event('change'));
+    expect(idTemplate.value).toBe('JDex - id');
+    idTemplate.value = ' Plantilla ID ';
+    idTemplate.dispatchEvent(new Event('change'));
+    expect(settings.templateNames).toEqual({ ...DEFAULT_SETTINGS.templateNames, id: 'Plantilla ID' });
+    const limit = byLabel('informe de salud');
+    limit.value = '-1';
+    limit.dispatchEvent(new Event('change'));
+    expect(settings.healthMaxFiles).toBe(50);
+    limit.value = '80';
+    limit.dispatchEvent(new Event('change'));
+    expect(settings.healthMaxFiles).toBe(80);
+  });
+
+  it('«Escribir plantillas integradas» shows the outcome or the error in a status line', async () => {
+    const el = document.createElement('div');
+    const writeTemplates = vi.fn().mockResolvedValueOnce('Plantillas escritas: JDex - id.').mockRejectedValueOnce(new Error('La carpeta de plantillas no está configurada.'));
+    mountJdexSettingsPanel(el, { get: () => DEFAULT_SETTINGS, save: vi.fn(), pickFolder: vi.fn(async () => ''), writeTemplates });
+    const button = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Escribir plantillas integradas')!;
+    const status = el.querySelector(`#${button.getAttribute('aria-describedby')}`)!;
+    button.click();
+    await vi.waitFor(() => expect(status.textContent).toBe('Plantillas escritas: JDex - id.'));
+    button.click();
+    await vi.waitFor(() => expect(status.textContent).toBe('La carpeta de plantillas no está configurada.'));
+    expect(button.disabled).toBe(false);
   });
 
   it('lets the archive date use the monthly format from settings', () => {
