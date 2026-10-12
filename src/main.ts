@@ -1081,7 +1081,7 @@ class JdexManagerSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
-  // `getSettingDefinitions` arrived in Obsidian 1.13; this plugin supports 1.4.16, so it renders the tab itself.
+  // `getSettingDefinitions` arrived in Obsidian 1.13; manifest.json minAppVersion is 1.7.2 (checked by npm run check:min-app), so it renders the tab itself.
   display(): void {
     const { containerEl } = this;
     containerEl.empty();

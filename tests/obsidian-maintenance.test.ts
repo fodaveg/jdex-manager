@@ -84,7 +84,9 @@ describe('Obsidian optional maintenance', () => {
   it('preserves prose edited between reading a managed note and committing its block', async () => {
     const { app, settings, bodies } = fixture();
     settings.automaticMaintenance = true;
-    const process = app.vault.process.bind(app.vault);
+    // `process` is already a vi.fn: take its implementation BEFORE replacing it (Vitest 5 spies on the
+    // same mock, so binding the mock itself would recurse into the replacement).
+    const process = vi.mocked(app.vault.process).getMockImplementation()!;
     vi.spyOn(app.vault, 'process').mockImplementation(async (file, transform) => {
       bodies.set(file.path, bodies.get(file.path)! + '\nConcurrent prose.\n');
       return process(file, transform);

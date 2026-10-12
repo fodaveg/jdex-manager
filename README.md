@@ -63,14 +63,28 @@ Categories come from the folders under the system root (`20-29 …/21 …`) and 
 
 ## Develop
 
+Node 22 or later (CI uses 22). A fresh checkout installs exactly what the lockfile says:
+
 ```
-npm install
+npm ci               # not `npm install`: it must not rewrite package-lock.json
 npm run dev          # esbuild in watch mode (Obsidian)
 npm run build:hebra  # hebra-main.mjs, hebra-styles.css and hebra.json (Hebra plugin)
-npm run check        # lint, both builds and tests
+npm run check        # lint, both builds and tests with the coverage floor
 ```
 
+`hebra-main.mjs`, `hebra-styles.css` and `hebra.json` are generated and git-ignored, so a clean checkout has none of them. `npm run check` builds them before the tests; to run vitest on its own (`npx vitest run --maxWorkers=1`) run `npm run build:hebra` first, or `tests/hebra/bundle.test.ts` fails on purpose instead of skipping. Keep `--maxWorkers=1`: the suite is serial by design (`npm test` already sets it). Vitest 5 has no `--minWorkers` option.
+
+Coverage (`npm run test:coverage`, part of `check`) enforces the floor in `vitest.config.mts`, measured on 12 Oct 2026; raise it as coverage rises.
+
+`npm run audit:bundled` fails if `npm audit` reports an advisory in a package that ships inside `main.js` or `hebra-main.mjs` (today only `yaml`, in the Hebra bundle). It needs the network, so it runs in CI and not in `check`. `npm audit --omit=dev` does not describe what ships, because `yaml` is a dev dependency that gets bundled.
+
 The Hebra plugin lives in `src/hebra/` (entry `main.ts`, written against `hebra-plugin-api`, never against Obsidian or Hebra internals) and shares only the pure engine in `src/jd/` with the Obsidian plugin. `scripts/build-hebra.mjs` bundles it into one ES module, generates `hebra.json` (never by hand) and fails if the bundle imports anything it should not or inlines CodeMirror; `esbuild.config.mjs` fails if `main.js` bundles anything from `src/hebra/`.
+
+## Release
+
+A release is a tag equal to the version in `manifest.json`, `package.json` and `hebra.json`, on a commit that is already in `main`, with the notes written in `release-notes/<tag>.md` in that same commit (the workflow fails without them). The workflow hashes the six assets from the build, attests their provenance, creates a draft, downloads it back and compares it with those hashes and with GitHub's own digests, and only then publishes. It also requires the repository to have immutable releases enabled (Settings, Releases): that setting is not something the workflow can turn on. `minAppVersion`, `versions.json` and the version fields are changed by hand, on purpose; `npm run check:min-app` fails if the code starts to need newer Obsidian API than `minAppVersion`.
+
+Dependencies are reviewed through Dependabot (`.github/dependabot.yml`, npm and GitHub Actions). `obsidian` is held to `~1.14.4`, a minor, so a new minor arrives as a pull request that CI judges with `check:min-app`.
 
 ## Credit and licence
 
