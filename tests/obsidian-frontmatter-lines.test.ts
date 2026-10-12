@@ -4,6 +4,7 @@ import { buildIndex } from "../src/jd/index";
 import type { Effect, Operation } from "../src/jd/journal";
 import { applyFix } from "../src/vault/audit";
 import { undoOperation } from "../src/vault/journal";
+import { frontmatterBlock } from "../src/vault/frontmatter-lines";
 import { retireId } from "../src/vault/retire";
 import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 
@@ -40,7 +41,7 @@ describe("Obsidian frontmatter writes touch only their keys", () => {
     expect(after).toContain('aliases: [uno, "dos"]');
     expect(after).toContain('jd: "21.20"');
     expect(after).toContain('area: "20-29 Area"');
-    expect(effects).toEqual([{ kind: "note-rewrite", path: NOTE, before: BODY, after }]);
+    expect(effects).toEqual([{ kind: "frontmatter-block", path: NOTE, before: frontmatterBlock(BODY), after: frontmatterBlock(after) }]);
     const op = JSON.parse(JSON.stringify({ kind: "fix", label: "Reparar", at: "2026-10-12", effects })) as Operation;
     await undoOperation(app, op);
     expect(bodies.get(NOTE)).toBe(BODY);
@@ -76,7 +77,7 @@ describe("Obsidian frontmatter writes touch only their keys", () => {
     expect(after).toContain("# Comentario de cabecera del usuario");
     // Same as Hebra's writer: the inline comment stays, after a single space.
     expect(after).toContain('tipo: "archivado" # tipo puesto a mano');
-    expect(effects[0]).toMatchObject({ kind: "note-rewrite", path: NOTE, before: BODY });
+    expect(effects[0]).toMatchObject({ kind: "frontmatter-block", path: NOTE, before: frontmatterBlock(BODY) });
   });
 
   it("retiring a note whose frontmatter cannot be patched fails before touching the folder", async () => {

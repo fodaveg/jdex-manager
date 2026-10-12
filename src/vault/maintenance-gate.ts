@@ -1,5 +1,6 @@
 /** Tells the plugin's own writes from foreign vault events during an automatic maintenance pass. */
 import type { Effect } from "../jd/journal";
+import { frontmatterBlock } from "./frontmatter-lines";
 
 /** Paths a pass wrote, renamed or created, taken from its effects. */
 function ownPaths(effects: readonly Effect[]): Set<string> {
@@ -13,12 +14,16 @@ function ownPaths(effects: readonly Effect[]): Set<string> {
   return out;
 }
 
-/** Content the pass left in a path, when the effect records it. */
-function writtenContent(effects: readonly Effect[], path: string): string | undefined {
-  let written: string | undefined;
+/**
+ * What the pass left in a path, when the effect records it: the whole note, or only its
+ * frontmatter block (a frontmatter correction journals nothing else).
+ */
+function writtenContent(effects: readonly Effect[], path: string): { text: string; part: "note" | "frontmatter" } | undefined {
+  let written: { text: string; part: "note" | "frontmatter" } | undefined;
   for (const effect of effects) {
-    if (effect.kind === "note-rewrite" && effect.path === path) written = effect.after;
-    else if (effect.kind === "created-note" && effect.path === path) written = effect.content;
+    if (effect.kind === "note-rewrite" && effect.path === path) written = { text: effect.after, part: "note" };
+    else if (effect.kind === "frontmatter-block" && effect.path === path) written = { text: effect.after, part: "frontmatter" };
+    else if (effect.kind === "created-note" && effect.path === path) written = { text: effect.content, part: "note" };
   }
   return written;
 }
@@ -50,7 +55,8 @@ export class MaintenanceGate {
       const written = writtenContent(effects, path);
       if (written === undefined) continue;
       try {
-        if ((await read(path)) !== written) return true;
+        const current = await read(path);
+        if (current === null || (written.part === "note" ? current : frontmatterBlock(current)) !== written.text) return true;
       } catch {
         return true;
       }

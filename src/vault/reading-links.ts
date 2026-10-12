@@ -81,15 +81,44 @@ export function registerReadingLinks(plugin: Plugin, ctx: ReadingLinksContext): 
 
     // Capture phase on the rendered block: it runs before any handler Obsidian attaches higher up,
     // so a number is never opened through the destination fixed at render time.
+    const linkOf = (event: Event): { target: HTMLElement; key: string } | null => {
+      const target = event.target instanceof Element ? event.target.closest<HTMLElement>("a.jdex-number-link") : null;
+      const key = target?.dataset.jd;
+      return target && key !== undefined ? { target, key } : null;
+    };
     el.addEventListener(
       "click",
       (event: MouseEvent) => {
-        const target = event.target instanceof Element ? event.target.closest<HTMLElement>("a.jdex-number-link") : null;
-        const key = target?.dataset.jd;
-        if (!target || key === undefined) return;
+        const link = linkOf(event);
+        if (!link) return;
         event.preventDefault();
         event.stopPropagation();
-        void openNumber(plugin, ctx, key, event.ctrlKey || event.metaKey);
+        void openNumber(plugin, ctx, link.key, event.ctrlKey || event.metaKey);
+      },
+      true,
+    );
+    // The middle button opens a new tab, resolved the same way; the right button is left alone.
+    el.addEventListener(
+      "auxclick",
+      (event: MouseEvent) => {
+        const link = event.button === 1 ? linkOf(event) : null;
+        if (!link) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void openNumber(plugin, ctx, link.key, true);
+      },
+      true,
+    );
+    // Enter on the focusable variant without href (with href, the browser turns Enter into a click).
+    el.addEventListener(
+      "keydown",
+      (event: KeyboardEvent) => {
+        if (event.key !== "Enter") return;
+        const link = linkOf(event);
+        if (!link || link.target.hasAttribute("href")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void openNumber(plugin, ctx, link.key, event.ctrlKey || event.metaKey);
       },
       true,
     );

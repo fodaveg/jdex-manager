@@ -6,7 +6,7 @@ import { renderTemplate, todayIso } from "../jd/template";
 import { type JdexManagerSettings, namePrefix } from "../settings";
 import { resolveTemplate } from "../vault/templates";
 import { patternFor } from "../jd/patterns";
-import { ensureFolder } from "../vault/create";
+import { assertJdexFolderExists, ensureFolder } from "../vault/create";
 import { scanVault } from "../vault/scan";
 import type { Effect } from "../jd/journal";
 import { t } from "./i18n";
@@ -212,6 +212,7 @@ export async function createId(
   const existing = findId(index, request.id, system);
   if (existing) throw new Error(t().idUsedBy(request.id, existing.label));
   if (app.vault.getAbstractFileByPath(notePath)) throw new Error(t().pathExists(notePath));
+  assertJdexFolderExists(app, settings);
 
   const area = index.areas.find((a) => a.number === areaOfCategory(category.number));
   const template = await resolveTemplate(app, settings, "id", { category: category.number, area: areaCode(category.areaNumber) });

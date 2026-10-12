@@ -9,6 +9,7 @@ import type { Effect, Operation } from "../src/jd/journal";
 import { DEFAULT_SETTINGS } from "../src/settings";
 import { applyFix } from "../src/vault/audit";
 import { undoOperation } from "../src/vault/journal";
+import { frontmatterBlock } from "../src/vault/frontmatter-lines";
 import { FixFindingsModal } from "../src/ui/audit";
 import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 import { installObsidianDom } from "./support/obsidian-dom";
@@ -149,7 +150,7 @@ describe("Obsidian audit fixes", () => {
     expect(body).toContain('jd: "21.22"');
     expect(body).toContain("tipo: archivado");
     expect(effects).toHaveLength(1);
-    expect(effects[0]).toEqual({ kind: "note-rewrite", path, before, after: body });
+    expect(effects[0]).toEqual({ kind: "frontmatter-block", path, before: frontmatterBlock(before!), after: frontmatterBlock(body) });
     expect(notices().join(" ")).toContain("descripcion porque cambió desde la auditoría");
   });
 

@@ -1,6 +1,6 @@
 import { type App, type TAbstractFile, TFile, TFolder } from "obsidian";
 import { type Effect, frontmatterConflicts, frontmatterUndoState, isKnownEffect, type Operation, removeInsertedLine } from "../jd/journal";
-import { readFrontmatter, removeFrontmatterProperty, setFrontmatterProperty } from "./frontmatter-lines";
+import { frontmatterBlock, readFrontmatter, removeFrontmatterProperty, setFrontmatterProperty } from "./frontmatter-lines";
 
 export interface UndoOptions {
   /** The user confirmed a preview that warned about entries written before 0.5. */
@@ -26,26 +26,53 @@ export async function undoOperation(app: App, op: Operation, onProgress?: () => 
   return done;
 }
 
+/**
+ * The journal entry of a frontmatter correction: only the frontmatter block when nothing else in
+ * the note changed (the usual case), the whole note otherwise.
+ */
+export function frontmatterRewrite(path: string, before: string, after: string): Effect {
+  const from = frontmatterBlock(before);
+  const to = frontmatterBlock(after);
+  if (before.slice(from.length) === after.slice(to.length)) return { kind: "frontmatter-block", path, before: from, after: to };
+  return { kind: "note-rewrite", path, before, after };
+}
+
 /** First-level child names of a folder, to recognise it after a move. */
 export function folderChildren(folder: TFolder): string[] {
   return folder.children.map((child) => child.name).sort();
 }
 
 /** What identifies a moved file or folder at undo time; recorded with the `moved` effect. */
-export function movedIdentity(target: TAbstractFile): Pick<Extract<Effect, { kind: "moved" }>, "type" | "ctime" | "children"> {
-  if (target instanceof TFile) return typeof target.stat?.ctime === "number" ? { type: "file", ctime: target.stat.ctime } : { type: "file" };
+export function movedIdentity(target: TAbstractFile): Pick<Extract<Effect, { kind: "moved" }>, "type" | "ctime" | "size" | "children"> {
+  if (target instanceof TFile) {
+    return {
+      type: "file",
+      ...(typeof target.stat?.ctime === "number" ? { ctime: target.stat.ctime } : {}),
+      ...(typeof target.stat?.size === "number" ? { size: target.stat.size } : {}),
+    };
+  }
   if (target instanceof TFolder) return { type: "folder", children: folderChildren(target) };
   return {};
 }
 
-function sameMovedItem(e: Extract<Effect, { kind: "moved" }>, target: TAbstractFile): boolean {
-  if (!e.type) return true;
-  if (e.type === "file") return target instanceof TFile && (e.ctime === undefined || target.stat.ctime === e.ctime);
-  if (!(target instanceof TFolder)) return false;
+/**
+ * `same`, `different`, or `by-size`: a file whose ctime changed (Android, where ctime follows
+ * mtime) but whose path, name and size are the ones recorded. The path and name hold because the
+ * target was looked up at the recorded destination.
+ */
+function sameMovedItem(e: Extract<Effect, { kind: "moved" }>, target: TAbstractFile): "same" | "by-size" | "different" {
+  if (!e.type) return "same";
+  if (e.type === "file") {
+    if (!(target instanceof TFile)) return "different";
+    if (e.ctime === undefined || target.stat.ctime === e.ctime) return "same";
+    const name = e.to.slice(e.to.lastIndexOf("/") + 1);
+    return e.size !== undefined && target.stat.size === e.size && target.name === name ? "by-size" : "different";
+  }
+  if (!(target instanceof TFolder)) return "different";
   const recorded = e.children ?? [];
-  if (recorded.length === 0) return true;
+  if (recorded.length === 0) return "same";
   const now = new Set(folderChildren(target));
-  return recorded.some((name) => now.has(name));
+  return recorded.some((name) => now.has(name)) ? "same" : "different";
 }
 
 async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<string> {
@@ -59,6 +86,17 @@ async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<st
         return e.before;
       });
       return `Restored the managed blocks in ${e.path}.`;
+    }
+    case "frontmatter-block": {
+      const file = app.vault.getAbstractFileByPath(e.path);
+      if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
+      // Only the block is compared and restored: edits to the body since then are kept.
+      await app.vault.process(file, (current) => {
+        const block = frontmatterBlock(current);
+        if (block !== e.after) throw new Error(`the frontmatter of ${e.path} was edited after the operation; nothing was restored, review manually`);
+        return e.before + current.slice(block.length);
+      });
+      return `Restored the frontmatter of ${e.path}.`;
     }
     case "created-note": {
       const file = app.vault.getAbstractFileByPath(e.path);
@@ -85,10 +123,13 @@ async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<st
     case "moved": {
       const target = app.vault.getAbstractFileByPath(e.to);
       if (!target) throw new Error(`${e.to} is not there any more; nothing to move back.`);
-      if (!sameMovedItem(e, target)) throw new Error(`${e.to} is not the item that was moved there; review manually.`);
+      const identity = sameMovedItem(e, target);
+      if (identity === "different") throw new Error(`${e.to} is not the item that was moved there; review manually.`);
       if (app.vault.getAbstractFileByPath(e.from)) throw new Error(`${e.from} exists again; cannot move ${e.to} back.`);
       await app.fileManager.renameFile(target, e.from);
-      return `Moved ${e.to} back to ${e.from}.`;
+      return identity === "by-size"
+        ? `Moved ${e.to} back to ${e.from}. Its creation time changed after the move (as on Android); it was recognised by its path, name and size.`
+        : `Moved ${e.to} back to ${e.from}.`;
     }
     case "frontmatter": {
       const state = frontmatterUndoState(e);

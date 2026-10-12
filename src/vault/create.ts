@@ -8,6 +8,16 @@ import { scanVault } from "./scan";
 import { resolveTemplate } from "./templates";
 import type { Effect } from "../jd/journal";
 
+/**
+ * Every creator of a JDex note calls this first: a renamed or deleted JDex folder is never
+ * recreated (empty but for the new note) at its old path.
+ */
+export function assertJdexFolderExists(app: App, settings: Pick<JdexManagerSettings, "jdexFolder">): void {
+  if (settings.jdexFolder !== "" && !(app.vault.getAbstractFileByPath(normalizePath(settings.jdexFolder)) instanceof TFolder)) {
+    throw new Error(`The JDex folder (${settings.jdexFolder}) does not exist. Check the plugin settings; nothing was created.`);
+  }
+}
+
 /** Creates `jdexFolder/<name>.md` from the template of `type`. Refuses to overwrite. Records the note in `effects`. */
 export async function createJdexNote(
   app: App,
@@ -20,10 +30,7 @@ export async function createJdexNote(
 ): Promise<TFile> {
   const path = normalizePath(`${settings.jdexFolder}/${name}.md`);
   if (app.vault.getAbstractFileByPath(path)) throw new Error(`${path} already exists.`);
-  // Never recreate a renamed or deleted JDex folder (empty) at its old path.
-  if (settings.jdexFolder !== "" && !(app.vault.getAbstractFileByPath(normalizePath(settings.jdexFolder)) instanceof TFolder)) {
-    throw new Error(`The JDex folder (${settings.jdexFolder}) does not exist. Check the plugin settings; nothing was created.`);
-  }
+  assertJdexFolderExists(app, settings);
   const template = await resolveTemplate(app, settings, type, { category: vars.category || undefined, area: vars.area || undefined });
   const content = renderTemplate(template, { date: todayIso(), ...vars }) + extra;
   const parsed = extractJdPrefix(name);

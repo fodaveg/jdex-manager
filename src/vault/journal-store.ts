@@ -16,7 +16,7 @@ import {
   appendOperation,
   durableEffect,
   type Effect,
-  JOURNAL_MAX,
+  trimJournal,
   JOURNAL_VERSION,
   journalOperationId,
   mergeJournals,
@@ -75,20 +75,70 @@ export function effectPaths(op: Operation): string[] {
 
 export const DEVICE_KEY = "jdex-manager-device";
 
-/** A stable id for this device and vault, kept in Obsidian's local storage (never synced). */
-export function deviceIdentity(host: { loadLocalStorage?(key: string): unknown; saveLocalStorage?(key: string, value: unknown): void }, make: () => string = newJournalId): string {
+/** What `deviceIdentity` reads from the app. */
+export interface DeviceHost {
+  /** Obsidian 1.8.7 and later only (minAppVersion is 1.7.2): optional, checked before each use. */
+  loadLocalStorage?(key: string): unknown;
+  /** Obsidian 1.8.7 and later only, like `loadLocalStorage`. */
+  saveLocalStorage?(key: string, value: unknown): void;
+  vault?: { getName(): string };
+}
+
+type KeyValueStorage = Pick<Storage, "getItem" | "setItem">;
+
+function browserStorage(): KeyValueStorage | null {
   try {
-    const existing = host.loadLocalStorage?.(DEVICE_KEY);
-    if (typeof existing === "string" && existing !== "") return existing;
-    const id = make();
-    if (host.saveLocalStorage) {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A stable id for this device and vault, never synced. Obsidian's local storage when the app has
+ * it (1.8.7+); before that, the window's local storage under a key per vault name, so an older
+ * Obsidian keeps one identity across restarts instead of a new one per session. An identity kept
+ * by that fallback is carried into Obsidian's storage after an update, so the device stays the same.
+ */
+export function deviceIdentity(host: DeviceHost, make: () => string = newJournalId, storage: KeyValueStorage | null = browserStorage()): string {
+  let vaultName = "";
+  try {
+    vaultName = host.vault?.getName() ?? "";
+  } catch {
+    // No vault name: one fallback key for every vault.
+  }
+  const fallbackKey = `${DEVICE_KEY}:${vaultName}`;
+  const readFallback = (): string | null => {
+    try {
+      const kept = storage?.getItem(fallbackKey);
+      return typeof kept === "string" && kept !== "" ? kept : null;
+    } catch {
+      return null;
+    }
+  };
+  try {
+    if (typeof host.loadLocalStorage === "function" && typeof host.saveLocalStorage === "function") {
+      const existing = host.loadLocalStorage(DEVICE_KEY);
+      if (typeof existing === "string" && existing !== "") return existing;
+      const id = readFallback() ?? make();
       host.saveLocalStorage(DEVICE_KEY, id);
+      return id;
+    }
+  } catch {
+    // Obsidian's local storage failed: try the fallback.
+  }
+  const kept = readFallback();
+  if (kept) return kept;
+  const id = make();
+  try {
+    if (storage) {
+      storage.setItem(fallbackKey, id);
       return id;
     }
   } catch {
     // Local storage unavailable: fall through to a per-session identity.
   }
-  return `session-${make()}`;
+  return `session-${id}`;
 }
 
 export class JournalStore {
@@ -129,7 +179,7 @@ export class JournalStore {
     const valid = raw.filter(isOperation);
     this.unreadable = [...(Array.isArray(stored.journalUnreadable) ? (stored.journalUnreadable as unknown[]) : []), ...raw.filter((entry) => !isOperation(entry))];
     if (raw.length > valid.length) notices.push(`${raw.length - valid.length} journal entr${raw.length - valid.length === 1 ? "y is" : "ies are"} unreadable; kept in data.json and not offered for undo.`);
-    this.entries = withJournalIds(valid.filter((op) => op.effects.length > 0)).slice(-JOURNAL_MAX);
+    this.entries = trimJournal(withJournalIds(valid.filter((op) => op.effects.length > 0))).entries;
     this.removed = Array.isArray(stored.journalRemoved) ? (stored.journalRemoved as unknown[]).filter((id): id is string => typeof id === "string") : [];
     return notices;
   }
@@ -190,6 +240,16 @@ export class JournalStore {
     return next;
   }
 
+  /**
+   * Runs `task` in the save queue, after every save already queued and before any queued later,
+   * so it never interleaves with a save's read and write. Its failure is not a failed save.
+   */
+  serialized(task: () => Promise<void>): Promise<void> {
+    const next = this.saves.catch(() => undefined).then(task);
+    this.saves = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
   /** Queues a save; the returned promise rejects if this save fails. */
   save(): Promise<void> {
     const next = this.saves.catch(() => undefined).then(() => this.persist());
@@ -207,13 +267,13 @@ export class JournalStore {
    * Opens an operation that is recorded with its first effect and saved after each one.
    * With a journal from a newer version nothing is recorded.
    */
-  begin(kind: OperationKind, label: string): RecordingEffects {
+  begin(kind: OperationKind, label: string, auto = false): RecordingEffects {
     let op: Operation | null = null;
     const sink = new RecordingEffects();
     return sink.attach((items) => {
       if (this.future) return;
       if (!op) {
-        op = { id: newJournalId(), device: this.device, kind, label, at: new Date().toISOString(), effects: [], rev: 0 };
+        op = { id: newJournalId(), device: this.device, kind, label, at: new Date().toISOString(), effects: [], rev: 0, ...(auto ? { auto: true } : {}) };
         ({ entries: this.entries, removed: this.removed } = appendOperation({ entries: this.entries, removed: this.removed }, op));
       }
       op.effects.push(...items.map(durableEffect));
@@ -271,12 +331,18 @@ export class PluginDataFile {
     return this.journal.load(stored);
   }
 
-  /** `data.json` changed outside this window (sync, another device): adopt it without losing local entries. */
-  async reload(): Promise<void> {
-    const stored = asRecord(await this.io.load());
-    Object.assign(this.settings, mergeChangedSettings(this.settings, this.baseline, stored));
-    this.baseline = JSON.parse(JSON.stringify(this.settings)) as JdexManagerSettings;
-    this.journal.absorb(stored);
+  /**
+   * `data.json` changed outside this window (sync, another device): adopt it without losing local
+   * entries. Queued with the saves. The baseline becomes what is on disk, not the live settings: a
+   * setting changed while `data.json` was being read stays "changed here" and the next save writes it.
+   */
+  reload(): Promise<void> {
+    return this.journal.serialized(async () => {
+      const stored = asRecord(await this.io.load());
+      Object.assign(this.settings, mergeChangedSettings(this.settings, this.baseline, stored));
+      this.baseline = mergeSettings(settingsOf(stored));
+      this.journal.absorb(stored);
+    });
   }
 
   /** Saves settings and journal through the journal's save queue, so every write is ordered. */
@@ -288,8 +354,11 @@ export class PluginDataFile {
     const stored = asRecord(await this.io.load());
     Object.assign(this.settings, mergeChangedSettings(this.settings, this.baseline, stored));
     this.journal.absorb(stored);
-    await this.io.save({ ...stored, ...this.settings, ...this.journal.serialize() });
-    this.baseline = JSON.parse(JSON.stringify(this.settings)) as JdexManagerSettings;
+    // The baseline is the copy that is written, taken before the await: a setting changed while
+    // the write is in flight is not in it, so the next save still sees it as changed here.
+    const written = JSON.parse(JSON.stringify(this.settings)) as JdexManagerSettings;
+    await this.io.save({ ...stored, ...written, ...this.journal.serialize() });
+    this.baseline = written;
   }
 }
 

@@ -5,11 +5,13 @@ import type { Effect } from "../jd/journal";
 
 /**
  * Regenerates the children block of every header note that has markers. Returns how many notes changed.
- * `skip` leaves out notes an undo just restored.
+ * `skip` leaves out notes an undo just restored. `stopped` (plugin unloaded) ends the pass before
+ * its next write.
  */
-export async function updateHeaders(app: App, index: JdIndex, onlyCategory?: string, effects?: Effect[], skip?: (path: string) => boolean): Promise<number> {
+export async function updateHeaders(app: App, index: JdIndex, onlyCategory?: string, effects?: Effect[], skip?: (path: string) => boolean, stopped?: () => boolean): Promise<number> {
   let changed = 0;
   for (const header of headerEntries(index)) {
+    if (stopped?.()) break;
     if (onlyCategory && header.category !== onlyCategory) continue;
     if (skip?.(header.notePath!)) continue;
     const file = app.vault.getAbstractFileByPath(header.notePath!);
@@ -17,6 +19,7 @@ export async function updateHeaders(app: App, index: JdIndex, onlyCategory?: str
     const content = await app.vault.read(file);
     const next = replaceChildrenBlock(content, renderChildren(childrenOf(index, header.id, header.system)));
     if (next === null || next === content) continue;
+    if (stopped?.()) break;
     let effect: Effect | null = null;
     await app.vault.process(file, (current) => {
       const updated = replaceChildrenBlock(current, renderChildren(childrenOf(index, header.id, header.system)));

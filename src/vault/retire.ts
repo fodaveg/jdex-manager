@@ -4,7 +4,7 @@ import { insertAfterH1, retirePlan } from "../jd/retire";
 import { todayIso } from "../jd/template";
 import type { Effect } from "../jd/journal";
 import { patchFrontmatter, readFrontmatter } from "./frontmatter-lines";
-import { movedIdentity } from "./journal";
+import { frontmatterRewrite, movedIdentity } from "./journal";
 
 /** Applies a retire plan: marks the live note, moves its folder, then writes the line. Records what it did in `effects`. */
 export async function retireId(app: App, index: JdIndex, entry: IdEntry, successor?: string, effects: Effect[] = []): Promise<string[]> {
@@ -25,7 +25,7 @@ export async function retireId(app: App, index: JdIndex, entry: IdEntry, success
     if (patched.refused.length > 0) {
       throw new Error(`${plan.notePath}: no se pudo escribir ${patched.refused.join(", ")} porque el frontmatter tiene una clave repetida o un formato que no se puede modificar sin riesgo. Corrígelo a mano y vuelve a intentarlo; la nota y la carpeta no se han tocado.`);
     }
-    if (patched.body !== current) rewrite = { kind: "note-rewrite", path: plan.notePath, before: current, after: patched.body };
+    if (patched.body !== current) rewrite = frontmatterRewrite(plan.notePath, current, patched.body);
     return patched.body;
   });
   if (rewrite) effects.push(rewrite);

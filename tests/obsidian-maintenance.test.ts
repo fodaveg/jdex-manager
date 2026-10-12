@@ -36,7 +36,7 @@ describe('Obsidian optional maintenance', () => {
     expect(app.fileManager.trashFile).not.toHaveBeenCalled();
     expect(app.vault.create).not.toHaveBeenCalled();
     // Frontmatter fixes are exact rewrites now, like the managed blocks.
-    const rewritten = effects.flatMap((effect) => effect.kind === 'note-rewrite' ? [effect.path] : []);
+    const rewritten = effects.flatMap((effect) => effect.kind === 'note-rewrite' || effect.kind === 'frontmatter-block' ? [effect.path] : []);
     expect(rewritten).toContain('J/21.11 Note.md');
     expect(rewritten).toContain('J/21.10 ■ Header.md');
     expect(rewritten).toContain('J/00.00 Index.md');

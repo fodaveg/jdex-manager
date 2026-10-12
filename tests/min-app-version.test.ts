@@ -46,6 +46,32 @@ describe('minAppVersion guard (scripts/check-min-app-version.mjs)', () => {
     expect(hits.some((hit) => hit.since === '1.11.1')).toBe(true);
   });
 
+  it('fails when a local structural type declares an App member that is too new (deliberate negative)', () => {
+    const hits = findTooNewApis('1.7.2', {
+      overrides: {
+        [PROBE]: [
+          'export function probe(host: { loadLocalStorage(key: string): unknown }) {',
+          '  return host.loadLocalStorage("k");',
+          '}'
+        ].join('\n')
+      }
+    });
+    expect(hits.some((hit) => hit.file.endsWith('__probe_min_app__.ts') && hit.text.includes('loadLocalStorage') && hit.since === '1.8.7')).toBe(true);
+  });
+
+  it('accepts the same member declared optional, which forces a guard before each call (control)', () => {
+    const hits = findTooNewApis('1.7.2', {
+      overrides: {
+        [PROBE]: [
+          'export function probe(host: { loadLocalStorage?(key: string): unknown }) {',
+          '  return host.loadLocalStorage?.("k");',
+          '}'
+        ].join('\n')
+      }
+    });
+    expect(hits).toEqual([]);
+  });
+
   it('is sensitive to the threshold: the same API the plugin uses today is too new for 1.7.1', () => {
     const hits = findTooNewApis('1.7.1');
     expect(hits.some((hit) => hit.text.includes('revealLeaf') && hit.since === '1.7.2')).toBe(true);
