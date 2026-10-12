@@ -52,6 +52,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false  # the repository is public: the later `git fetch` needs no token
 
       - name: Refuse a tag whose commit is not on origin/main
         run: |
@@ -149,13 +150,22 @@ jobs:
             console.log('ok published', r.tag_name, 'immutable');
           "
 
-      # A failure before publishing must not leave a half-built draft behind. Never touches a
-      # release that is already public.
+      # A failure before publishing must not leave a half-built draft behind, also when the failure
+      # came between `gh release create` and RELEASE_ID being recorded. It looks the release up by
+      # tag, and only deletes it if it exists and is still a draft: never a published release.
       - name: Remove the draft if the run failed before publishing
-        if: failure() && env.RELEASE_ID != ''
+        if: failure()
         run: |
           set -euo pipefail
-          if [ "$(gh api "repos/$REPO/releases/$RELEASE_ID" --jq .draft)" = "true" ]; then
-            gh api -X DELETE "repos/$REPO/releases/$RELEASE_ID"
-            echo "::warning::the draft for $TAG was deleted because verification failed"
+          ID="${RELEASE_ID:-}"
+          if [ -z "$ID" ]; then
+            ID=$(gh api "repos/$REPO/releases" --paginate --jq ".[] | select(.draft == true and .tag_name == \"$TAG\") | .id" | head -n 1 || true)
+          fi
+          if [ -z "$ID" ]; then
+            echo "no draft for $TAG to remove"
+            exit 0
+          fi
+          if [ "$(gh api "repos/$REPO/releases/$ID" --jq .draft)" = "true" ]; then
+            gh api -X DELETE "repos/$REPO/releases/$ID"
+            echo "::warning::the draft for $TAG was deleted because the run failed before publishing"
           fi

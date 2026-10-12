@@ -11,7 +11,7 @@ import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
 import type { IdEntry } from "./jd/index";
 import { isRepeatedId, selectCreationSystem, sameSystem, systemKey } from "./jd/index";
-import { pairAction } from "./jd/pair";
+import { pairAction, pairBlockedByRepeat } from "./jd/pair";
 import { extractJdPrefix } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
 import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
@@ -766,7 +766,8 @@ export default class JdexManagerPlugin extends Plugin {
     }
     const newName = file.path.slice(file.path.lastIndexOf("/") + 1);
     const renamed = extractJdPrefix(file instanceof TFile ? newName.replace(/\.md$/, "") : newName);
-    if (action.type === "rename-partner" && renamed?.number.kind === "id" &&
+    const pairEvent = { oldPath, newPath: file.path, isFolder: file instanceof TFolder };
+    if ((action.type === "rename-partner" || (action.type === "none" && pairBlockedByRepeat(pairEvent, index, this.settings))) && renamed?.number.kind === "id" &&
       this.refuseRepeated(index, { id: renamed.number.extension ? `${renamed.number.id}+` : renamed.number.id, system: renamed.number.system, title: renamed.title })) {
       // Renaming "the" partner of a repeated number would rename the other ID's file.
     } else if (action.type === "rename-partner") {

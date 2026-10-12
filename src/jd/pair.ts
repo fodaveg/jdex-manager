@@ -4,7 +4,7 @@
  */
 
 import { relativeTo } from "./detect";
-import { sameSystem, systemKey, type JdIndex } from "./index";
+import { isRepeatedId, sameSystem, systemKey, type JdIndex } from "./index";
 import { extractJdPrefix, jdexNoteName, type JdNumber } from "./parse";
 import { titleForCompare } from "./title";
 
@@ -65,6 +65,25 @@ export function pairAction(
   index: JdIndex,
   settings: { jdexFolder: string; systemRoot: string },
 ): PairAction {
+  const resolved = resolvePair(ev, index, settings);
+  return "repeated" in resolved ? { type: "none" } : resolved;
+}
+
+/** Whether `pairAction` proposed nothing only because the number is repeated (two notes or folders
+ *  share it, so "the" partner could be the other ID's). The caller can then say why. */
+export function pairBlockedByRepeat(
+  ev: RenameEvent,
+  index: JdIndex,
+  settings: { jdexFolder: string; systemRoot: string },
+): boolean {
+  return "repeated" in resolvePair(ev, index, settings);
+}
+
+function resolvePair(
+  ev: RenameEvent,
+  index: JdIndex,
+  settings: { jdexFolder: string; systemRoot: string },
+): PairAction | { repeated: true } {
   const oldRelative = relativeTo(ev.isFolder ? settings.systemRoot : settings.jdexFolder, ev.oldPath);
   if (oldRelative === null || (!ev.isFolder && oldRelative.includes("/"))) return { type: "none" };
   if (ev.isFolder && oldRelative.split("/").length !== (baseName(ev.oldPath).startsWith("+ ") ? 4 : 3)) return { type: "none" };
@@ -95,6 +114,8 @@ export function pairAction(
   // Before or after the rename, the unchanged partner still has the old child title.
   const entry = index.ids.find((e) => e.id === (oldParsed.number.kind === "id" ? oldParsed.number.id + (oldParsed.number.extension ?? "") : "") && sameSystem(e, oldParsed.number) && (!oldId.endsWith("+") || titleForCompare(e.title) === titleForCompare(oldParsed.title)));
   if (!entry) return { type: "none" };
+  // Two notes or folders share this number: `find` took the first, which may be the other ID.
+  if (isRepeatedId(index, entry)) return { repeated: true };
   if (ev.isFolder) {
     if (!entry.notePath) return { type: "none" };
     const notePrefix = extractJdPrefix(baseName(entry.notePath));
@@ -108,6 +129,8 @@ export function pairAction(
   if (!entry.folderPath) return { type: "none" };
   const nestedChild = baseName(entry.folderPath).startsWith("+ ");
   const folderPrefix = extractJdPrefix(baseName(entry.folderPath));
+  // A `+` child with nothing left of its title would be named `+` alone: no proposal.
+  if (nestedChild && titleForCompare(newParsed.title) === "") return { type: "none" };
   const newName = nestedChild ? jdexNoteName("+", titleForCompare(newParsed.title)) : jdexNoteName(newParsed.number.id + (newParsed.number.extension ?? ""), titleForCompare(newParsed.title), folderPrefix?.number.system);
   const newPartnerPath = `${parentOf(entry.folderPath)}/${newName}`;
   if (newPartnerPath === entry.folderPath) return { type: "none" };

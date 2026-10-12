@@ -11,12 +11,8 @@ import type {
   PluginActiveNote,
   PluginFolder,
   PluginNote,
-  PluginNoteSummary,
   PluginNoteTitleRenamedEvent,
-  PluginNotesChange,
-  PluginNotesPage,
-  PluginNotesScope,
-  PluginVault
+  PluginNotesChange
 } from 'hebra-plugin-api';
 import {
   JDEX_AUDIT_VIEW_ID,
@@ -30,9 +26,11 @@ import {
 import { activateJdex } from './support/activate';
 import {
   FAKE_ROOT_FOLDER_ID as ROOT_FOLDER_ID,
+  FakeJdexVault,
   createJdexTestApi,
   fakeFolder,
-  fakeNote
+  fakeNote,
+  vaultFromNotes
 } from './support/fakes';
 
 let seq = 0;
@@ -86,7 +84,7 @@ function buildFixture() {
     [catInbox.id, [inboxNote]]
   ]);
 
-  return { folders, notesByFolder, ids: { jdexId, hebraId, jdexManagerId, catInbox } };
+  return { folders, vault: vaultFromNotes(notesByFolder, folders), ids: { jdexId, hebraId, jdexManagerId, catInbox } };
 }
 
 /** Lo que el módulo le pide al almacén (PERF-07) y una compuerta para hacer lenta una
@@ -105,93 +103,45 @@ interface PortProbe {
   holdNotesPage?: Promise<void> | null;
 }
 
-function fakeLibraryPort(
-  notesByFolder: Map<string, PluginNote[]>,
-  probe: PortProbe,
-  folders: () => PluginFolder[]
-): PluginVault {
-  function find(id: string): PluginNote | null {
-    for (const notes of notesByFolder.values()) {
-      const found = notes.find((n) => n.id === id);
-      if (found) return found;
+/** The shared `FakeJdexVault` with this file's probe on top: call counters, a gate that
+ *  holds the first `noteRead`, and the failures `PortProbe` asks for. The notes, the paging
+ *  and the 1.0.0-host summary come from the double, not from a copy of it. */
+function probeVault(vault: FakeJdexVault, probe: PortProbe, folders: () => PluginFolder[]): FakeJdexVault {
+  vault.omitSummaryBodySha = true;
+  vault.foldersList = async () => folders().map((entry) => ({ ...entry }));
+  const notesPage = vault.notesPage.bind(vault);
+  const noteRead = vault.noteRead.bind(vault);
+  const noteSummary = vault.noteSummary.bind(vault);
+  vault.notesPage = async (cursor, limit, scope) => {
+    probe.calls.notesPage += 1;
+    if (probe.gateNotesPage) {
+      await probe.gateNotesPage;
+      throw new Error('almacén caído (notesPage, en vuelo)');
     }
-    return null;
-  }
-  return {
-    libraryId: () => 'lib-1',
-    rootFolderId: () => ROOT_FOLDER_ID,
-    async foldersList() {
-      return folders().map((entry) => ({ ...entry }));
-    },
-    async notesPage(
-      cursor: string | null,
-      limit: number,
-      scope?: PluginNotesScope
-    ): Promise<PluginNotesPage> {
-      probe.calls.notesPage += 1;
-      if (probe.gateNotesPage) {
-        await probe.gateNotesPage;
-        throw new Error('almacén caído (notesPage, en vuelo)');
-      }
-      if (probe.holdNotesPage) {
-        const hold = probe.holdNotesPage;
-        probe.holdNotesPage = null;
-        await hold;
-      }
-      if (probe.failNotesPage) throw new Error('almacén caído (notesPage)');
-      if (!scope || scope.kind !== 'folder') throw new Error('se esperaba ámbito de carpeta');
-      const notes = notesByFolder.get(scope.folderId) ?? [];
-      const start = cursor ? notes.findIndex((n) => n.id === cursor) + 1 : 0;
-      const page = notes.slice(start, start + limit);
-      const hasMore = start + limit < notes.length;
-      return {
-        items: page.map((n) => ({
-          id: n.id,
-          title: n.title,
-          excerpt: '',
-          updatedAt: n.updatedAt,
-          favorite: false,
-          createdAt: n.createdAt,
-          locked: false
-        })),
-        nextCursor: hasMore ? page[page.length - 1].id : null
-      };
-    },
-    async noteRead(id: string) {
-      probe.calls.noteRead += 1;
-      const row = find(id);
-      const hold = probe.holdNoteRead;
-      if (hold) {
-        probe.holdNoteRead = null;
-        await hold();
-      }
-      return row;
-    },
-    async noteSummary(ids: readonly string[]): Promise<PluginNoteSummary[]> {
-      probe.calls.noteSummary += 1;
-      if (probe.failNoteSummary) throw new Error('almacén caído (noteSummary)');
-      // Doble de un host 1.0.0: el resumen no trae `bodySha256` ni `revision`.
-      return ids.flatMap((id): PluginNoteSummary[] => {
-        const row = find(id);
-        return row
-          ? [
-              {
-                id: row.id,
-                title: row.title,
-                excerpt: '',
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                favorite: false,
-                locked: false,
-                folderId: row.folderId,
-                trashedAt: row.trashedAt,
-                archivedAt: row.archivedAt
-              } as unknown as PluginNoteSummary
-            ]
-          : [];
-      });
+    if (probe.holdNotesPage) {
+      const hold = probe.holdNotesPage;
+      probe.holdNotesPage = null;
+      await hold;
     }
-  } as unknown as PluginVault;
+    if (probe.failNotesPage) throw new Error('almacén caído (notesPage)');
+    return notesPage(cursor, limit, scope);
+  };
+  vault.noteRead = async (id) => {
+    probe.calls.noteRead += 1;
+    const row = await noteRead(id);
+    const hold = probe.holdNoteRead;
+    if (hold) {
+      probe.holdNoteRead = null;
+      await hold();
+    }
+    return row;
+  };
+  vault.noteSummary = async (ids) => {
+    probe.calls.noteSummary += 1;
+    if (probe.failNoteSummary) throw new Error('almacén caído (noteSummary)');
+    return noteSummary(ids);
+  };
+  return vault;
 }
 
 async function setup(fixture: ReturnType<typeof buildFixture>, settings?: unknown) {
@@ -200,7 +150,7 @@ async function setup(fixture: ReturnType<typeof buildFixture>, settings?: unknow
     holdNoteRead: null
   };
   let currentFolders: PluginFolder[] = fixture.folders;
-  const port = fakeLibraryPort(fixture.notesByFolder, probe, () => currentFolders);
+  const port = probeVault(fixture.vault, probe, () => currentFolders);
   const { api, fake, workspace } = await createJdexTestApi({ vault: port, settings });
   /** Lo que registra el plugin, con los nombres que usaba el registro de Hebra. */
   const registry = {
@@ -229,7 +179,7 @@ async function setup(fixture: ReturnType<typeof buildFixture>, settings?: unknow
       currentFolders = folders;
       workspace.emitFolders(folders);
     },
-    /** Lote 5: como Hebra tras guardar el título de una nota. */
+    /** Como Hebra tras guardar el título de una nota. */
     fireNoteTitleRenamed: (event: PluginNoteTitleRenamedEvent) =>
       workspace.emitTitleRenamed(event)
   };
@@ -355,7 +305,7 @@ describe('activate', () => {
     expect(registry.settingsPanels()).toHaveLength(0);
   });
 
-  it('lote 5: renombrar el título de la nota JDex del ID a otro número avisa (y «Deshacer» llama a event.undo())', async () => {
+  it('renombrar el título de la nota JDex del ID a otro número avisa (y «Deshacer» llama a event.undo())', async () => {
     const fixture = buildFixture();
     const { context, fireNoteTitleRenamed } = await setup(fixture);
     const runtime = jdexRuntimeExport(context);
@@ -414,8 +364,7 @@ describe('activate', () => {
     // Se crea la nota JDex que faltaba en 21.22, con el frontmatter completo (vive en
     // la carpeta JDex, no en la del ID): su hallazgo `folder-without-note` debería
     // desaparecer tras el siguiente `library-changed`, sin añadir ningún otro.
-    fixture.notesByFolder.set(fixture.ids.jdexId.id, [
-      ...(fixture.notesByFolder.get(fixture.ids.jdexId.id) ?? []),
+    fixture.vault.seedNote(
       noteRow(
         'n-jdex-manager',
         fixture.ids.jdexId.id,
@@ -431,7 +380,7 @@ describe('activate', () => {
           ''
         ].join('\n')
       )
-    ]);
+    );
     setFolders([...fixture.folders]);
     await vi.advanceTimersByTimeAsync(1000);
 
@@ -489,7 +438,7 @@ describe('un library-changed de notas (PERF-07)', () => {
 
   it('un título cambiado se pone al día sin recorrer carpetas ni leer cuerpos', async () => {
     const { probe, fireNotesChange, fixture } = await activated();
-    fixture.notesByFolder.get(fixture.ids.hebraId.id)![0].title = 'Notas de Hebra, revisadas';
+    fixture.vault.seedNote({ ...fixture.vault.peek('n-content-hebra'), title: 'Notas de Hebra, revisadas' });
     fireNotesChange({ ids: ['n-content-hebra'], reason: 'save' });
     await vi.advanceTimersByTimeAsync(2000);
     expect(probe.calls).toEqual({ notesPage: 0, noteRead: 0, noteSummary: 1 });
@@ -498,10 +447,8 @@ describe('un library-changed de notas (PERF-07)', () => {
   it('un guardado de la nota JDex que cambia su frontmatter relee SOLO esa nota', async () => {
     const { probe, fireNotesChange, fixture, auditProblems } = await activated();
     const before = auditProblems();
-    const row = fixture.notesByFolder.get(fixture.ids.jdexId.id)![0];
     // Sin descripción: el frontmatter cambia, y con él un hallazgo más.
-    row.body = ['---', 'jd: 21.11', 'tipo: id', '---', ''].join('\n');
-    row.revision.bodySha256 = 'sha-n-hebra-v2';
+    fixture.vault.saveElsewhere('n-hebra', ['---', 'jd: 21.11', 'tipo: id', '---', ''].join('\n'));
     fireNotesChange({ ids: ['n-hebra'], reason: 'save' });
     await vi.advanceTimersByTimeAsync(2000);
     expect(probe.calls).toEqual({ notesPage: 0, noteRead: 1, noteSummary: 1 });
@@ -538,8 +485,7 @@ describe('un library-changed de notas (PERF-07)', () => {
   it('el alta de la nota JDex que faltaba entra en el índice por ids y quita su hallazgo', async () => {
     const { probe, fireNotesChange, fixture, auditProblems } = await activated();
     const before = auditProblems();
-    fixture.notesByFolder.set(fixture.ids.jdexId.id, [
-      ...fixture.notesByFolder.get(fixture.ids.jdexId.id)!,
+    fixture.vault.seedNote(
       noteRow(
         'n-jdex-manager',
         fixture.ids.jdexId.id,
@@ -555,7 +501,7 @@ describe('un library-changed de notas (PERF-07)', () => {
           ''
         ].join('\n')
       )
-    ]);
+    );
     fireNotesChange({ ids: ['n-jdex-manager'], reason: 'create' });
     await vi.advanceTimersByTimeAsync(2000);
     expect(probe.calls).toEqual({ notesPage: 0, noteRead: 1, noteSummary: 1 });
@@ -595,8 +541,7 @@ describe('un library-changed de notas (PERF-07)', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { probe, fireNotesChange, fixture, auditProblems } = await activated();
     const before = auditProblems();
-    fixture.notesByFolder.set(fixture.ids.jdexId.id, [
-      ...fixture.notesByFolder.get(fixture.ids.jdexId.id)!,
+    fixture.vault.seedNote(
       noteRow(
         'n-jdex-manager',
         fixture.ids.jdexId.id,
@@ -612,7 +557,7 @@ describe('un library-changed de notas (PERF-07)', () => {
           ''
         ].join('\n')
       )
-    ]);
+    );
     probe.failNoteSummary = true;
     fireNotesChange({ ids: ['n-jdex-manager'], reason: 'create' });
     await vi.advanceTimersByTimeAsync(1000);
@@ -693,8 +638,7 @@ describe('un library-changed de notas (PERF-07)', () => {
     const auditText = () => auditItem.text;
     const auditBefore = auditText();
     // La biblioteca cambia (falta la nota de 21.22: un hallazgo menos) mientras se lee.
-    fixture.notesByFolder.set(fixture.ids.jdexId.id, [
-      ...fixture.notesByFolder.get(fixture.ids.jdexId.id)!,
+    fixture.vault.seedNote(
       noteRow(
         'n-jdex-manager',
         fixture.ids.jdexId.id,
@@ -710,7 +654,7 @@ describe('un library-changed de notas (PERF-07)', () => {
           ''
         ].join('\n')
       )
-    ]);
+    );
     let release: () => void = () => {};
     harness.probe.holdNotesPage = new Promise<void>((resolve) => (release = resolve));
     harness.setFolders([...harness.context.folders()]);
@@ -753,8 +697,7 @@ describe('un library-changed de notas (PERF-07)', () => {
     harness.probe.holdNoteRead = () => new Promise<void>((resolve) => (release = resolve));
     const activating = jdexRuntimeExport(harness.context).activate();
     await vi.advanceTimersByTimeAsync(10); // la reconstrucción inicial queda en la lectura
-    fixture.notesByFolder.set(fixture.ids.jdexId.id, [
-      ...fixture.notesByFolder.get(fixture.ids.jdexId.id)!,
+    fixture.vault.seedNote(
       noteRow(
         'n-jdex-manager',
         fixture.ids.jdexId.id,
@@ -770,7 +713,7 @@ describe('un library-changed de notas (PERF-07)', () => {
           ''
         ].join('\n')
       )
-    ]);
+    );
     harness.fireNotesChange({ ids: ['n-jdex-manager'], reason: 'create' });
     release();
     await activating;
@@ -790,8 +733,7 @@ describe('un library-changed de notas (PERF-07)', () => {
     await vi.advanceTimersByTimeAsync(1000);
     // Cambia la biblioteca (falta la nota de 21.22: un hallazgo menos) y arranca R2, que
     // acaba antes que R1.
-    fixture.notesByFolder.set(fixture.ids.jdexId.id, [
-      ...fixture.notesByFolder.get(fixture.ids.jdexId.id)!,
+    fixture.vault.seedNote(
       noteRow(
         'n-jdex-manager',
         fixture.ids.jdexId.id,
@@ -807,7 +749,7 @@ describe('un library-changed de notas (PERF-07)', () => {
           ''
         ].join('\n')
       )
-    ]);
+    );
     setFolders([...fixture.folders]);
     await vi.advanceTimersByTimeAsync(1000);
     expect(auditProblems()).toBe(stale - 1);
