@@ -127,6 +127,45 @@ export interface JdexNoteRef {
   readonly createdAt?: number;
   /** Ruta completa con `.md`, como la vería el motor. */
   readonly path: string;
+  /** Set when `path` carries Hebra's tie-break suffix: the path two same-title notes share. */
+  readonly basePath?: string;
+}
+
+/** Hex of a note id for Hebra's tie-break suffix (`noteIdHexForPath`); a non-canonical id
+ *  (tests, older hosts) gets a stable FNV-1a hash instead. */
+function noteIdHex(id: string): string {
+  const compact = id.replace(/-/gu, '').toLowerCase();
+  if (/^[0-9a-f]{32}$/u.test(compact)) return compact;
+  let hash = 0x811c9dc5;
+  for (const point of id) hash = Math.imul(hash ^ point.codePointAt(0)!, 0x01000193) >>> 0;
+  return hash.toString(16).padStart(8, '0');
+}
+
+/**
+ * Two live notes of one folder with the same title share a path, and the engine (which
+ * works on paths) would see only one of them. The technical identity is the note id: the
+ * first id keeps the path and the others get Hebra's own tie-break (`Title--1a2b3c4d.md`,
+ * what a file mirror shows), which the engine ignores when comparing titles
+ * (`titleForCompare`), so the title it interprets does not change.
+ */
+export function disambiguateJdexNotes(notes: readonly JdexNoteRef[]): JdexNoteRef[] {
+  const groups = new Map<string, JdexNoteRef[]>();
+  for (const note of notes) {
+    const base = note.basePath ?? note.path;
+    groups.set(base, [...(groups.get(base) ?? []), note]);
+  }
+  if ([...groups.values()].every((group) => group.length === 1) && notes.every((note) => note.basePath === undefined)) {
+    return [...notes];
+  }
+  const out: JdexNoteRef[] = [];
+  for (const [base, group] of groups) {
+    const ordered = [...group].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    ordered.forEach((note, position) => {
+      const { basePath: _previous, ...plain } = note;
+      out.push(position === 0 ? { ...plain, path: base } : { ...plain, path: `${base.slice(0, -3)}--${noteIdHex(note.id).slice(0, 8)}.md`, basePath: base });
+    });
+  }
+  return sortJdexNotes(out);
 }
 
 /** Notas DIRECTAS de `folderId` (nunca subcarpetas: cada carpeta se recorre una vez en
@@ -221,7 +260,7 @@ export async function walkJdexLibrary(
     systemNotes.push(...(await directNotesOf(library, folder.id, folderPaths.get(folder.id)!)));
   }
   if (jdexOutside) systemNotes.push(...(await directNotesOf(library, jdexOutside.id, jdexFolder)));
-  const sortedNotes = sortJdexNotes(systemNotes);
+  const sortedNotes = disambiguateJdexNotes(sortJdexNotes(systemNotes));
   const noteIdByPath = indexNotePaths(sortedNotes);
   return { rootFolderId, folderPaths, folderIdByPath, noteIdByPath, systemFolderPaths, systemNotes: sortedNotes };
 }
@@ -464,7 +503,7 @@ export async function applyJdexNoteChanges(
     }
   }
   if (!changed) return { kind: 'unchanged' };
-  const systemNotes = sortJdexNotes([...notes.values()]);
+  const systemNotes = disambiguateJdexNotes(sortJdexNotes([...notes.values()]));
   return {
     kind: 'updated',
     state: { walk: { ...walk, systemNotes, noteIdByPath: indexNotePaths(systemNotes) }, entries }

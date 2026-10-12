@@ -59,6 +59,8 @@ import {
   countProblems,
   headerEntries,
   locate,
+  isRepeatedId,
+  repeatedIdMessage,
   missingConfiguredFolders,
   todayIso,
   pairAction,
@@ -231,12 +233,20 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     onClick: () => openProcessInboxDialog()
   });
 
+  /** Actions that pick "the" note or folder of a number refuse a repeated one. */
+  function refuseRepeated(entry: { id: string; system?: string; title: string }): boolean {
+    if (!index || !isRepeatedId(index, entry)) return false;
+    host.notice(repeatedIdMessage(entry));
+    return true;
+  }
+
   function toggleNoteAndFolder(): void {
     const located = latestLocated;
     if (!located || !walk) {
       host.notice('Esta nota no vive en el sistema JDex.');
       return;
     }
+    if (refuseRepeated(located.entry)) return;
     if (located.atNote) {
       const folderId = located.entry.folderPath
         ? jdexResolveFolderId(walk, located.entry.folderPath)
@@ -256,7 +266,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const note = api.workspace.activeNote();
     latestNote = note;
     const currentIndex = index;
-    const path = currentIndex && walk && note ? jdexNotePath(walk.folderPaths, note) : null;
+    // By id first: two same-title notes have distinct paths only in the walk.
+    const path = currentIndex && walk && note
+      ? walk.systemNotes.find((ref) => ref.id === note.id && ref.title === note.title.normalize('NFC') && ref.folderId === note.folderId)?.path ?? jdexNotePath(walk.folderPaths, note)
+      : null;
     const located =
       currentIndex && path
         ? locate(currentIndex, { jdexFolder: settings.jdexFolder }, path)
@@ -835,6 +848,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       ? { ...entry, notePath: oldPath, title: extractJdPrefix(event.oldTitle)?.title ?? entry.title } : entry) };
     const action = pairAction({ oldPath, newPath, isFolder: false }, beforeIndex, settings);
     if (action.type !== 'rename-partner') return;
+    const renamed = extractJdPrefix(event.newTitle);
+    if (renamed?.number.kind === 'id' && refuseRepeated({ id: renamed.number.extension ? `${renamed.number.id}+` : renamed.number.id, system: renamed.number.system, title: renamed.title })) return;
     const folderId = jdexResolveFolderId(walk, action.partnerPath);
     if (!folderId) return;
     const parentSeparator = action.partnerPath.lastIndexOf('/');
@@ -870,6 +885,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   /** «Ir a este ID»: la carpeta si la tiene (como `toggleNoteAndFolder`), si no la
    *  nota JDex. */
   function gotoJdexEntry(entry: IdEntry, currentWalk: JdexLibraryWalk): void {
+    if (refuseRepeated(entry)) return;
     if (entry.folderPath) {
       const folderId = jdexResolveFolderId(currentWalk, entry.folderPath);
       if (folderId) {
@@ -918,6 +934,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     currentWalk: JdexLibraryWalk,
     currentIndex: JdIndex
   ): void {
+    if (isRepeatedId(currentIndex, entry)) {
+      host.notice(repeatedIdMessage(entry));
+      return;
+    }
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>

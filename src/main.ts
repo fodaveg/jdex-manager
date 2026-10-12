@@ -9,7 +9,7 @@ import { type JdexManagerSettings, type JdexNoteType, mergeSettings, namePrefix 
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
 import type { IdEntry } from "./jd/index";
-import { selectCreationSystem, sameSystem, systemKey } from "./jd/index";
+import { isRepeatedId, repeatedIdMessage, selectCreationSystem, sameSystem, systemKey } from "./jd/index";
 import { pairAction } from "./jd/pair";
 import { extractJdPrefix, normalizeSystemId } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
@@ -185,7 +185,7 @@ export default class JdexManagerPlugin extends Plugin {
             item
               .setTitle(`Open folder of ${loc.entry.id}`)
               .setIcon("folder-open")
-              .onClick(() => void openEntry(this.app, loc.entry, true).then((msg) => msg && new Notice(msg))),
+              .onClick(() => { if (!this.refuseRepeated(index, loc.entry)) void openEntry(this.app, loc.entry, true).then((msg) => msg && new Notice(msg)); }),
           );
         }
         if (!loc.atNote && loc.entry.notePath) {
@@ -193,7 +193,7 @@ export default class JdexManagerPlugin extends Plugin {
             item
               .setTitle(`Open JDex note of ${loc.entry.id}`)
               .setIcon("book-open")
-              .onClick(() => void openEntry(this.app, loc.entry, false).then((msg) => msg && new Notice(msg))),
+              .onClick(() => { if (!this.refuseRepeated(index, loc.entry)) void openEntry(this.app, loc.entry, false).then((msg) => msg && new Notice(msg)); }),
           );
         }
         const entry = this.entryFor(file);
@@ -286,6 +286,7 @@ export default class JdexManagerPlugin extends Plugin {
         if (!this.ready()) return;
         const index = this.cachedIndex();
         new IdSuggestModal(this.app, index, (entry, openFolder) => {
+          if (this.refuseRepeated(index, entry)) return;
           void openEntry(this.app, entry, openFolder).then((msg) => msg && new Notice(msg));
         }).open();
       },
@@ -589,6 +590,14 @@ export default class JdexManagerPlugin extends Plugin {
   private renaming = false;
   private readonly followingSettingPaths = new Set<string>();
 
+  /** Actions that pick "the" note or folder of a number refuse a repeated one (two devices
+   *  created it offline): they would mix two IDs. Returns whether it refused. */
+  private refuseRepeated(index: JdIndex, entry: { id: string; system?: string; title: string }): boolean {
+    if (!isRepeatedId(index, entry)) return false;
+    new Notice(repeatedIdMessage(entry), 10000);
+    return true;
+  }
+
   /** A renamed folder (or ancestor) that a folder setting points at: propose following it.
    *  Declining keeps the old path, which the audit then reports as missing. */
   private async followRenamedFolderSettings(oldPath: string, newPath: string): Promise<void> {
@@ -630,7 +639,12 @@ export default class JdexManagerPlugin extends Plugin {
       new Notice(`${action.id} moved from ${action.from} to ${action.to}. An ID keeps its number; create a new ID in the destination and archive this one.`, 10000);
       return;
     }
-    if (action.type === "rename-partner") {
+    const newName = file.path.slice(file.path.lastIndexOf("/") + 1);
+    const renamed = extractJdPrefix(file instanceof TFile ? newName.replace(/\.md$/, "") : newName);
+    if (action.type === "rename-partner" && renamed?.number.kind === "id" &&
+      this.refuseRepeated(index, { id: renamed.number.extension ? `${renamed.number.id}+` : renamed.number.id, system: renamed.number.system, title: renamed.title })) {
+      // Renaming "the" partner of a repeated number would rename the other ID's file.
+    } else if (action.type === "rename-partner") {
       const isNote = action.partnerPath.endsWith(".md");
       const ok =
         this.settings.renamePairsWithoutAsking ||
@@ -833,11 +847,13 @@ export default class JdexManagerPlugin extends Plugin {
   async toggleNoteAndFolder(): Promise<void> {
     const file = this.app.workspace.getActiveFile();
     if (!file || !this.ready()) return;
-    const loc = locate(this.cachedIndex(), this.settings, file.path);
+    const index = this.cachedIndex();
+    const loc = locate(index, this.settings, file.path);
     if (!loc) {
       new Notice("The active file is not inside an ID.");
       return;
     }
+    if (this.refuseRepeated(index, loc.entry)) return;
     const msg = await openEntry(this.app, loc.entry, loc.atNote);
     if (msg) new Notice(msg);
   }
@@ -973,6 +989,7 @@ export default class JdexManagerPlugin extends Plugin {
     const index = scanVault(this.app, this.settings);
     const entry = index.ids.find((e) => e.id === parent.id && sameSystem(e, parent));
     if (!entry) return;
+    if (this.refuseRepeated(index, entry)) return;
     const lines = [
       `${entry.label} keeps its number forever: the JDex note stays, marked tipo: archivado, with a line saying when and where.`,
       entry.folderPath ? `Its folder moves to ${entry.category}.09 with today's date as prefix.` : "It has no folder.",

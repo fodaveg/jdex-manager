@@ -216,7 +216,8 @@ export function buildIndex(input: IndexInput): JdIndex {
       const mk = mapKey(parent.id, "+", title, parent.system);
       const label = `${key} ${title}`;
       rawIdFolders.push({ id: key, path: f.path, label, ...(parent.system ? { system: parent.system } : {}) });
-      ids.set(mk, { id: key, category: parent.id.slice(0, 2), title, label, folderPath: f.path, ...(parent.system ? { system: parent.system } : {}) });
+      // A repeated child folder keeps its own entry instead of replacing the first one.
+      ids.set(ids.has(mk) ? `${mk}\u0000${f.path}` : mk, { id: key, category: parent.id.slice(0, 2), title, label, folderPath: f.path, ...(parent.system ? { system: parent.system } : {}) });
       continue;
     }
     const parsed = extractJdPrefix(name);
@@ -260,7 +261,9 @@ export function buildIndex(input: IndexInput): JdIndex {
         continue;
       }
       const key = idKey(n.id, n.extension);
-      const mk = mapKey(n.id, n.extension, parsed.title, n.system);
+      let mk = mapKey(n.id, n.extension, parsed.title, n.system);
+      // A second folder with this number gets its own entry: never two folders in one.
+      if (ids.get(mk)?.folderPath !== undefined) mk = `${mk}\u0000${f.path}`;
       rawIdFolders.push({ id: key, path: f.path, label: name, ...(n.system ? { system: n.system } : {}) });
       const entry = ids.get(mk) ?? { id: key, category: n.category, title: parsed.title, label: name, ...(n.system ? { system: n.system } : {}) };
       entry.folderPath = f.path;
@@ -274,6 +277,7 @@ export function buildIndex(input: IndexInput): JdIndex {
 
   // JDex notes: the note names the ID, so its title wins over the folder's.
   if (input.jdexFolder !== "") {
+    const candidates: { path: string; name: string; parsed: NonNullable<ReturnType<typeof extractJdPrefix>> }[] = [];
     for (const path of input.notePaths) {
       const rel = relativeTo(input.jdexFolder, path);
       if (rel === null || rel === "" || rel.includes("/") || !rel.endsWith(".md")) continue;
@@ -282,11 +286,27 @@ export function buildIndex(input: IndexInput): JdIndex {
       if (malformedEntry) malformed.push(malformedEntry);
       const parsed = extractJdPrefix(name);
       if (!parsed) continue;
+      candidates.push({ path, name, parsed });
+      const n = parsed.number;
+      if (n.kind === "id") rawIdNotes.push({ id: idKey(n.id, n.extension), path, label: name, ...(n.system ? { system: n.system } : {}) });
+    }
+    // With a repeated number, the folder pairs with the note of its own title (never with
+    // the other one): those notes go first, the rest keep their order.
+    const pairsWithFolder = ({ parsed }: (typeof candidates)[number]): boolean => {
+      const n = parsed.number;
+      if (n.kind !== "id") return false;
+      const folderEntry = ids.get(mapKey(n.id, n.extension, parsed.title, n.system));
+      return folderEntry?.folderPath !== undefined && titleForCompare(folderEntry.title) === titleForCompare(parsed.title);
+    };
+    const ordered = [...candidates.filter(pairsWithFolder), ...candidates.filter((candidate) => !pairsWithFolder(candidate))];
+    for (const { path, name, parsed } of ordered) {
       const n = parsed.number;
       if (n.kind === "id") {
         const key = idKey(n.id, n.extension);
-        const mk = mapKey(n.id, n.extension, parsed.title, n.system);
-        rawIdNotes.push({ id: key, path, label: name, ...(n.system ? { system: n.system } : {}) });
+        let mk = mapKey(n.id, n.extension, parsed.title, n.system);
+        // A second note with this number (or child title) is its own entry: merging would
+        // pair one note's title with the other's folder.
+        if (ids.get(mk)?.notePath !== undefined) mk = `${mk}\u0000${path}`;
         const entry = ids.get(mk) ?? { id: key, category: n.category, title: parsed.title, label: name, ...(n.system ? { system: n.system } : {}) };
         entry.notePath = path;
         entry.title = parsed.title;
@@ -354,6 +374,41 @@ export function findId(index: JdIndex, id: string, system = index.system ?? ""):
 export function childrenPlus(index: JdIndex, id: string, system = index.system ?? ""): IdEntry[] {
   const n = parseJdNumber(id);
   return index.ids.filter((e) => e.id === `${n?.kind === "id" ? n.id : id}+` && (e.system ?? "") === (n?.system ?? system));
+}
+
+/** Identity of an ID within its system: the number, plus the title for `+` children. */
+export function idIdentityKey(entry: { id: string; system?: string; title: string }): string {
+  return entry.id.endsWith("+") ? systemKey(`${entry.id} ${titleForCompare(entry.title)}`, entry.system) : systemKey(entry.id, entry.system);
+}
+
+function rawIdentityKey(raw: RawIdEntry): string {
+  return idIdentityKey({ id: raw.id, system: raw.system, title: extractJdPrefix(raw.label)?.title ?? "" });
+}
+
+/** Identities used by more than one JDex note or by more than one ID folder (two devices
+ *  creating the same number offline). Never renumbered automatically. */
+export function repeatedIdKeys(index: Pick<JdIndex, "rawIdNotes" | "rawIdFolders">): Set<string> {
+  const repeated = new Set<string>();
+  for (const raw of [index.rawIdNotes, index.rawIdFolders]) {
+    const seen = new Set<string>();
+    for (const entry of raw) {
+      const key = rawIdentityKey(entry);
+      if (seen.has(key)) repeated.add(key);
+      seen.add(key);
+    }
+  }
+  return repeated;
+}
+
+/** Whether `entry`'s number (system + number, and title for `+`) is repeated: actions that
+ *  pick "the" note or folder of that number would mix two IDs. */
+export function isRepeatedId(index: Pick<JdIndex, "rawIdNotes" | "rawIdFolders">, entry: { id: string; system?: string; title: string }): boolean {
+  return repeatedIdKeys(index).has(idIdentityKey(entry));
+}
+
+/** Notice for an action refused on a repeated number. Spanish, like the audit. */
+export function repeatedIdMessage(entry: { id: string; system?: string }): string {
+  return `${systemKey(entry.id, entry.system)} está repetido: resuelve antes el número repetido (Auditoría › IDs duplicados). No se ha cambiado nada.`;
 }
 
 /** Content IDs (.11 to .99, X0 headers excluded) in use in a category, out of the 81 available. */

@@ -13,7 +13,7 @@ describe("renderReport", () => {
   it("has frontmatter, title, summary table and one section per kind", () => {
     expect(report.startsWith("---\ntipo: auditoria\nfecha: 2026-09-10\nhallazgos: ")).toBe(true);
     expect(report).toContain("# Auditoría JD - 2026-09-10");
-    expect(report).toContain("| Carpetas con ID sin nota en el JDex | 2 |");
+    expect(report).toContain("| Carpetas con ID sin nota en el JDex | 1 |");
     expect(report).toContain("| IDs duplicados | 2 |");
     expect(report).toContain("## Notas sin carpeta (informativo)");
     expect(report.indexOf("## Notas sin carpeta (informativo)")).toBeGreaterThan(report.indexOf("## Números fuera de su padre"));

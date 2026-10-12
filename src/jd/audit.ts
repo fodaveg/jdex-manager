@@ -6,7 +6,7 @@
  * Deliberately NOT a finding: sub-folders more than one level deep inside an ID. Projects use them.
  */
 
-import { areaCode, areaOfCategory, sameSystem, systemKey, type IdEntry, type JdIndex } from "./index";
+import { areaCode, areaOfCategory, idIdentityKey, repeatedIdKeys, sameSystem, type IdEntry, type JdIndex } from "./index";
 import { firstSentence } from "./description";
 import { missingPatternFolders } from "./patterns";
 import { extractJdPrefix, isHeader, isReserved, jdexNoteName, parseJdNumber } from "./parse";
@@ -167,10 +167,13 @@ export function auditSystem(input: AuditInput): Finding[] {
   };
 
   const archived = new Set(notes.filter((n) => asString(n.frontmatter?.tipo) === "archivado").map((n) => n.path));
+  // A repeated number only reports duplicate-id: pairing rules would mix the two IDs.
+  const repeated = repeatedIdKeys(index);
 
   // 1 and 2: folder without note, note without folder (ID level). Retired IDs and headers keep their notes without folders by design.
   for (const entry of index.ids) {
     if (entry.notePath && archived.has(entry.notePath)) continue;
+    if (repeated.has(idIdentityKey(entry))) continue;
     if (entry.folderPath && !entry.notePath) {
       const folderName = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
       const child = entry.id.endsWith("+") && folderName.startsWith("+ ");
@@ -205,6 +208,7 @@ export function auditSystem(input: AuditInput): Finding[] {
   // 3: note and folder with the same number but a different title. The note is the source.
   for (const entry of index.ids) {
     if (!entry.notePath || !entry.folderPath) continue;
+    if (repeated.has(idIdentityKey(entry))) continue;
     const folderName = entry.folderPath.slice(entry.folderPath.lastIndexOf("/") + 1);
     const folderPrefix = extractJdPrefix(folderName);
     const childFolder = entry.id.endsWith("+") && folderName.startsWith("+ ");
@@ -263,15 +267,15 @@ export function auditSystem(input: AuditInput): Finding[] {
     });
   }
 
-  // 5: duplicate numbers among notes or among folders.
+  // 5: duplicate numbers among notes or among folders. Several + children of one ID are
+  // expected; two with the same title are not.
   for (const [source, raw] of [
     ["notas", index.rawIdNotes],
     ["carpetas", index.rawIdFolders],
   ] as const) {
     const byId = new Map<string, string[]>();
     for (const r of raw) {
-      if (r.id.endsWith("+")) continue; // several + children of one ID are expected
-      const key = systemKey(r.id, r.system);
+      const key = idIdentityKey({ id: r.id, system: r.system, title: extractJdPrefix(r.label)?.title ?? "" });
       byId.set(key, [...(byId.get(key) ?? []), r.path]);
     }
     for (const [id, paths] of byId) {
