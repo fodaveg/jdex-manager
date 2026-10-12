@@ -1,7 +1,7 @@
 import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { describe, expect, it } from 'vitest';
 import { buildIndex, knownIds, selectCreationSystem, systemKey, DEFAULT_SETTINGS, type IndexInput, type JdexManagerSettings } from '../../src/hebra/engine';
-import { jdexCreationIndex } from '../../src/hebra/jdex-create';
+import { jdexCreationIndex, validateNewChildTitle } from '../../src/hebra/jdex-create';
 import {
   createJdexArea,
   createJdexCategory,
@@ -369,6 +369,22 @@ describe('createJdexChild', () => {
     });
     expect(outcome.note.title).toBe('21.11+ Extensión');
     expect(outcome.note.body).toContain('[[21.11 Hebra]]');
+  });
+
+  it('un padre 21.11+ no produce 21.11++: error claro y nada escrito (26dfbba6)', async () => {
+    const { walk, index } = buildWalkAndIndex([
+      { id: 'n-child', folderId: 'f-jdex', title: '21.11+ Extensión', path: `${JDEX_FOLDER_PATH}/21.11+ Extensión.md` }
+    ]);
+    const library = new FakeJdexVault();
+    library.seedFolder({ id: 'f-jdex', parentId: null, name: '00.00 JDex', createdAt: 0, updatedAt: 0 });
+    const parent = index.ids.find((e) => e.id === '21.11+')!;
+    expect(parent).toBeDefined();
+    expect(validateNewChildTitle(index, parent, 'Nieto')).toBe('Un hijo (+) no puede tener hijos: créalo desde su ID padre.');
+    await expect(
+      createJdexChild(library, markdown, walk, baseSettings(), index, { parent, title: 'Nieto', createFolder: true })
+    ).rejects.toThrow('Un hijo (+) no puede tener hijos');
+    expect(await library.noteRead('fake-note-1')).toBeNull();
+    expect(await library.foldersList()).toHaveLength(1);
   });
 });
 

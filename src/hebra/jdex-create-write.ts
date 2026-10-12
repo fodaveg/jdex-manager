@@ -32,7 +32,7 @@ import {
   type JdexNoteType,
   type TemplateScope
 } from './engine';
-import { requireTitle, validateNewChildTitle, validateNewHeader, validateNewId } from './jdex-create';
+import { isJdexChildEntry, JDEX_CHILD_OF_CHILD_MESSAGE, requireTitle, validateNewChildTitle, validateNewHeader, validateNewId } from './jdex-create';
 import { jdexResolveFolderId, readJdexCreationIndex, type JdexLibraryWalk } from './library-index';
 
 /** Lo que usa este fichero del `vault` de la API. */
@@ -451,6 +451,8 @@ export async function createJdexChild(
   index: JdIndex,
   request: CreateChildRequest
 ): Promise<JdexCreateOutcome> {
+  // Before anything else: a `+` parent would write `21.22++`, a name the parser rejects.
+  if (isJdexChildEntry(request.parent)) throw new Error(JDEX_CHILD_OF_CHILD_MESSAGE);
   const system = request.parent.system ?? '';
   index = selectCreationSystem(index, system);
   const error = validateNewChildTitle(index, request.parent, request.title);

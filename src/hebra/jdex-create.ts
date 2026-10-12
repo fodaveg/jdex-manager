@@ -75,6 +75,15 @@ export function validateNewHeader(index: JdIndex, category: string, raw: string,
   return null;
 }
 
+/** A `+` child is never a parent: `21.22+` would produce `21.22++`, which the parser
+ *  rejects (Obsidian excludes these parents too). Children of an ID are told apart by
+ *  title, without renumbering. */
+export function isJdexChildEntry(entry: Pick<IdEntry, 'id'>): boolean {
+  return entry.id.endsWith('+');
+}
+
+export const JDEX_CHILD_OF_CHILD_MESSAGE = 'Un hijo (+) no puede tener hijos: créalo desde su ID padre.';
+
 /** Un título vacío es el único motivo de rechazo del número: el número del hijo `+` es
  *  fijo (`${parent.id}+`, compartido por todos sus hermanos, distinguidos por título;
  *  copia `CreateChildModal.validate`). */
@@ -83,6 +92,7 @@ export function validateNewChildTitle(
   parent: IdEntry,
   title: string
 ): string | null {
+  if (isJdexChildEntry(parent)) return JDEX_CHILD_OF_CHILD_MESSAGE;
   const titleError = requireTitle(title);
   if (titleError) return titleError;
   const trimmed = titleForCompare(jdexNoteName('', title).trim());

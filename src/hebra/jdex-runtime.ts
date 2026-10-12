@@ -96,7 +96,7 @@ import {
   mountCreateHeaderDialog,
   mountCreateIdDialog
 } from './jdex-create-view';
-import { jdexCreationIndex } from './jdex-create';
+import { isJdexChildEntry, JDEX_CHILD_OF_CHILD_MESSAGE, jdexCreationIndex } from './jdex-create';
 import { jdexTemplatesOutcomeMessage, writeJdexBuiltinTemplates } from './jdex-templates';
 import {
   createJdexArea,
@@ -600,6 +600,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const parent: IdEntry | undefined = latestLocated?.atNote ? latestLocated.entry : undefined;
     if (!parent) {
       host.notice('Abre la nota JDex de un ID para crearle un hijo (+).');
+      return;
+    }
+    if (isJdexChildEntry(parent)) {
+      host.notice(JDEX_CHILD_OF_CHILD_MESSAGE);
       return;
     }
     const currentIndex = index;

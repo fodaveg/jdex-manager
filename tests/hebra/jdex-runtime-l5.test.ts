@@ -4,7 +4,7 @@
 // prefixed systems (D01, D02) from the Create ID dialog.
 import type { PluginFolder } from 'hebra-plugin-api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JDEX_COMMAND_CREATE_ID, activateJdex } from '../../src/hebra/jdex-runtime';
+import { JDEX_COMMAND_CREATE_CHILD, JDEX_COMMAND_CREATE_ID, activateJdex } from '../../src/hebra/jdex-runtime';
 import { FakeJdexVault, createJdexTestApi, fakeFolder, fakeNote } from './support/fakes';
 
 afterEach(() => {
@@ -60,5 +60,31 @@ describe('crear en sistemas con prefijo (27d68243)', () => {
       await vi.waitFor(() => expect(document.querySelector('dialog.hebra-module-modal')).toBeNull());
       expect(await notesIn(vault, 'f-jdex')).toContain(expected);
     }
+  });
+});
+
+describe('no crear hijos de hijos (26dfbba6)', () => {
+  it('con la nota de un hijo 21.11+ abierta, «crear hijo» avisa y no abre el diálogo', async () => {
+    const vault = new FakeJdexVault();
+    for (const folder of [
+      fakeFolder('f-jdex', null, 'JDex'),
+      fakeFolder('f-area', null, '20-29 Productos'),
+      fakeFolder('f-cat', 'f-area', '21 Software'),
+      fakeFolder('f-id', 'f-cat', '21.11 Hebra')
+    ]) vault.seedFolder(folder);
+    vault.seedNote(fakeNote('n-id', 'f-jdex', '# 21.11 Hebra\n'));
+    vault.seedNote(fakeNote('n-child', 'f-jdex', '# 21.11+ Extensión\n'));
+    const { api, fake, workspace } = await createJdexTestApi({ vault, settings: { jdexFolder: 'JDex', systemRoot: '' } });
+    await activateJdex(api);
+
+    workspace.setActiveNote({ id: 'n-child', folderId: 'f-jdex', title: '21.11+ Extensión' });
+    void fake.recorded.commands.find((c) => c.id === JDEX_COMMAND_CREATE_CHILD)!.run();
+    expect(fake.recorded.notices).toContain('Un hijo (+) no puede tener hijos: créalo desde su ID padre.');
+    expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
+
+    // The real parent still offers the dialog.
+    workspace.setActiveNote({ id: 'n-id', folderId: 'f-jdex', title: '21.11 Hebra' });
+    void fake.recorded.commands.find((c) => c.id === JDEX_COMMAND_CREATE_CHILD)!.run();
+    expect(document.querySelector('dialog.hebra-module-modal')?.textContent).toContain('Hijo de 21.11 Hebra (21.11+)');
   });
 });
