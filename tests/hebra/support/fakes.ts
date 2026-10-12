@@ -104,6 +104,32 @@ function notImplemented(what: string): never {
   throw new Error(`FakeJdexVault: «${what}» no está en el doble.`);
 }
 
+/** Hebra's `NOTES_REWRITE_BATCH_MAX` (`hebra/src/lib/library/types.ts`): the host
+ *  facade throws `invalid-argument` above it (`plugins/api/vault-facade.ts`). */
+export const HOST_REWRITE_BATCH_MAX = 200;
+
+/** An error shaped like the host's `PluginApiError` (`isPluginApiError` accepts it). */
+export function hostApiError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { name: 'PluginApiError', code });
+}
+
+/** Throws exactly where the host does when a rewrite batch is too large. */
+export function assertHostRewriteBatchSize(count: number): void {
+  if (count > HOST_REWRITE_BATCH_MAX) {
+    throw hostApiError('invalid-argument', `Como mucho ${HOST_REWRITE_BATCH_MAX} notas por lote (llegaron ${count}).`);
+  }
+}
+
+/** The package fake vault (`createFakePluginApi`) has no batch limit: this adds the host one. */
+export function withHostRewriteBatchLimit<T extends Pick<PluginVault, 'notesRewriteBatch'>>(vault: T): T {
+  const original = vault.notesRewriteBatch.bind(vault);
+  vault.notesRewriteBatch = async (entries, options) => {
+    assertHostRewriteBatchSize(entries.length);
+    return original(entries, options);
+  };
+  return vault;
+}
+
 export class FakeJdexVault implements PluginVault {
   readonly #notes = new Map<string, PluginNote>();
   readonly #folders = new Map<string, PluginFolder>();
@@ -226,6 +252,7 @@ export class FakeJdexVault implements PluginVault {
     entries: readonly PluginNoteRewrite[],
     options?: { cause?: string | null; touchUpdatedAt?: boolean }
   ) {
+    assertHostRewriteBatchSize(entries.length);
     this.rewriteCalls.push({ entries: entries.map((entry) => ({ ...entry })), options });
     const written: string[] = [];
     const stale: string[] = [];

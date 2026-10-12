@@ -52,6 +52,18 @@ describe('mountJdexNormalizeView', () => {
     expect(onApply).toHaveBeenCalledWith(new Set(['b.md']));
   });
 
+  it('shows the error of a failed apply (for example a partial batch write) and re-enables Aplicar', async () => {
+    const onApply = vi.fn(async () => {
+      throw new Error('Se escribieron 200 nota(s) antes del fallo');
+    });
+    const el = document.createElement('div');
+    mountJdexNormalizeView(el, { findings: [finding('a.md', 'A mal.')], onApply });
+    const apply = el.querySelector('.hebra-jdex-dialog-primary') as HTMLButtonElement;
+    apply.click();
+    await vi.waitFor(() => expect(el.textContent).toContain('Se escribieron 200 nota(s) antes del fallo'));
+    expect(apply.disabled).toBe(false);
+  });
+
   it('sin ninguna marcada, «Aplicar» no llama a onApply y avisa', () => {
     const onApply = vi.fn();
     const el = document.createElement('div');

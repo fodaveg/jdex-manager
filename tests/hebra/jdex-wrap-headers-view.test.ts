@@ -35,6 +35,18 @@ describe('mountJdexWrapHeadersView', () => {
     expect(el.querySelector('.hebra-jdex-dialog-primary')?.textContent).toBe('Aplicar (1)');
   });
 
+  it('shows the error of a failed apply and re-enables Aplicar', async () => {
+    const onApply = vi.fn(async () => {
+      throw new Error('Se escribieron 200 nota(s) antes del fallo');
+    });
+    const el = document.createElement('div');
+    mountJdexWrapHeadersView(el, { candidates: [candidate('n1', '21.10 ■ Cabecera')], onApply });
+    const apply = el.querySelector('.hebra-jdex-dialog-primary') as HTMLButtonElement;
+    apply.click();
+    await vi.waitFor(() => expect(el.textContent).toContain('Se escribieron 200 nota(s) antes del fallo'));
+    expect(apply.disabled).toBe(false);
+  });
+
   it('«Aplicar» llama a onApply solo con las marcadas', async () => {
     const onApply = vi.fn(async () => {});
     const el = document.createElement('div');
