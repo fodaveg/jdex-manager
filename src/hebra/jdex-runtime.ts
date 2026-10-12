@@ -157,6 +157,7 @@ import { jdexEditorExtension } from './jdex-editor-extension';
 import { createJdexJournal, jdexDeviceId } from './jdex-journal';
 import { guardJdexJournal, trackJdexModals } from './jdex-lifecycle';
 import { mountJdexJournalView } from './jdex-journal-view';
+import { createJdexDebugLog } from './jdex-debug-log';
 import { createJdexHealthReport } from './jdex-health';
 import { applyJdexRepair } from './jdex-repair';
 import { createJdexSystemReport } from './jdex-system-report';
@@ -205,8 +206,12 @@ export function jdexActivationSettled(cleanup: PluginCleanup): Promise<void> {
   return activationSettled.get(cleanup) ?? Promise.resolve();
 }
 
+/** Feeds the optional debug log note (a no-op while its setting is off); set by `activateJdex`. */
+let debugSink: ((error: unknown, where: string) => void) | null = null;
+
 function report(error: unknown, where: string): void {
   console.error(`[jdex] ${where}`, error);
+  debugSink?.(error, where);
 }
 
 export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> {
@@ -228,6 +233,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   let inboxSummary: JdexInboxSummary | null = null;
   let latestLocated: Location | null = null;
   let latestNote: PluginActiveNote | null = null;
+  const debugLog = createJdexDebugLog(api.vault, () => ({ settings, walk }));
+  debugSink = (error, where) => void debugLog.record(where, error);
   /** Sección del ID (lote 4, tarea 2), `idSectionEl`: la pestaña puede volver a
    *  montarse sobre el mismo `el` mientras sigue abierta (la nota activa cambia);
    *  `idSectionRequest` descarta la respuesta de una petición vieja que llega
@@ -1332,7 +1339,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   function onNotesChanged(event: PluginNotesChange): void {
     // After an undo settles, a change to a note it restored lifts its protection.
     journal.observe(event.ids);
-    if (IRRELEVANT_REASONS.has(event.reason)) return;
+    // The debug log note is written by the plugin itself: never a reason to update the index.
+    if (IRRELEVANT_REASONS.has(event.reason) || debugLog.isOwnChange(event.ids)) return;
     if (!INCREMENTAL_REASONS.has(event.reason)) {
       scheduleRebuild();
       return;
@@ -1350,7 +1358,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     ) {
       return;
     }
-    for (const id of event.ids) pendingIds.add(id);
+    for (const id of event.ids) if (!debugLog.isOwn(id)) pendingIds.add(id);
     armBatchTimer();
   }
 
@@ -1792,6 +1800,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const cleanup: PluginCleanup = () => {
     disposed = true;
     modals.closeAll();
+    debugSink = null;
     offSettingsChange();
     if (rebuildTimer !== null) clearTimeout(rebuildTimer);
     rebuildTimer = null;

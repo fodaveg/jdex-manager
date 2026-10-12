@@ -9,6 +9,7 @@
 
 export * from "./audit";
 export * from "./audit-report";
+export * from "./debug-log";
 export * from "./description";
 export * from "./detect";
 export * from "./files";
