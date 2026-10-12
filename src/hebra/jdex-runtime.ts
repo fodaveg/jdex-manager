@@ -227,7 +227,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   let folderIds = await loadTrackedFolderIds(settingsStorage);
   // Operations still queued when the module is turned off do not write.
   const journal = guardJdexJournal(
-    await createJdexJournal(api.vault, settingsStorage, { device: jdexDeviceId(api.storage.device) }),
+    await createJdexJournal(api.vault, settingsStorage, { device: jdexDeviceId(api.storage.device), onTrimmed: (message) => host.notice(message) }),
     () => disposed
   );
 

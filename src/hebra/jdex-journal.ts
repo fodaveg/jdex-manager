@@ -80,6 +80,41 @@ export interface JdexJournalOptions {
   now?: () => number;
   /** How long after an undo its own change notices may still arrive. */
   settleMs?: number;
+  /** Operations dropped to keep the stored journal within `JDEX_JOURNAL_SETTINGS_BUDGET`. */
+  onTrimmed?: (message: string) => void;
+}
+
+/**
+ * Hebra does not publish a settings blob longer than 256 KiB (`MAX_SYNCED_SETTINGS_CHARS`,
+ * `plugin-sync-controller.ts`): it only logs, and the next reconciliation overwrites the
+ * local value with the remote one, journal and settings included. The journal lives in
+ * that blob, so the whole blob is kept under this budget (with room for the settings).
+ */
+export const JDEX_JOURNAL_SETTINGS_BUDGET = 240 * 1024;
+
+/** Drops the oldest operations (the newest too, if it alone does not fit) until the
+ *  stored value fits `budget`. Dropped operations are remembered as removed. */
+function fitJournal(current: Record<string, unknown>, entries: Operation<JdexJournalEffect>[], removed: string[], budget: number) {
+  const empty = JSON.stringify({ ...current, jdexJournal: [], jdexJournalRemoved: removed, jdexJournalVersion: JOURNAL_VERSION }).length;
+  const sizes = entries.map((entry) => JSON.stringify(entry).length);
+  let total = empty + sizes.reduce((sum, size) => sum + size, 0) + Math.max(0, entries.length - 1);
+  let start = 0;
+  const ids = [...removed];
+  while (start < entries.length && total > budget) {
+    total -= sizes[start] + (entries.length - start > 1 ? 1 : 0);
+    const id = journalOperationId(entries[start]);
+    ids.push(id);
+    total += JSON.stringify(id).length + 1;
+    start += 1;
+  }
+  return { entries: entries.slice(start), removed: ids.slice(-JOURNAL_REMOVED_MAX), dropped: entries.slice(0, start) };
+}
+
+function trimmedMessage(dropped: readonly Operation<JdexJournalEffect>[]): string {
+  const labels = dropped.map((operation) => `«${operation.label}»`).join(', ');
+  return dropped.length === 1
+    ? `${labels} ya no se puede deshacer: el diario de deshacer superaba el tamaño que Hebra sincroniza entre dispositivos.`
+    : `${labels} ya no se pueden deshacer: el diario de deshacer superaba el tamaño que Hebra sincroniza entre dispositivos.`;
 }
 
 /** Raised when the journal could not be saved after a retry; the operation stops. */
@@ -161,12 +196,18 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
   }
   if (recovered) entries = entries.filter((entry) => entry.effects.length > 0);
 
-  const saveOnce = () => updateJdexStoredSettings(storage, (current) => {
-    const merged = mergeJournals({ entries, removed }, storedState(current), JOURNAL_MAX);
-    entries = merged.entries;
-    removed = merged.removed.slice(-JOURNAL_REMOVED_MAX);
-    return { jdexJournal: entries, jdexJournalRemoved: removed, jdexJournalVersion: JOURNAL_VERSION };
-  });
+  const saveOnce = async () => {
+    let dropped: Operation<JdexJournalEffect>[] = [];
+    await updateJdexStoredSettings(storage, (current) => {
+      const merged = mergeJournals({ entries, removed }, storedState(current), JOURNAL_MAX);
+      const fitted = fitJournal(current, merged.entries, merged.removed.slice(-JOURNAL_REMOVED_MAX), JDEX_JOURNAL_SETTINGS_BUDGET);
+      entries = fitted.entries;
+      removed = fitted.removed;
+      dropped = fitted.dropped;
+      return { jdexJournal: entries, jdexJournalRemoved: removed, jdexJournalVersion: JOURNAL_VERSION };
+    });
+    if (dropped.length > 0) options.onTrimmed?.(trimmedMessage(dropped));
+  };
   const persist = async (): Promise<void> => {
     if (readOnly) return;
     try {

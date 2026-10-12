@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, JOURNAL_VERSION, type Operation } from '../../src/heb
 import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { guardJdexJournal } from '../../src/hebra/jdex-lifecycle';
 import { createJdexFolderRenameGuard } from '../../src/hebra/jdex-folder-rename';
+import { rewriteJdexNotes } from '../../src/hebra/jdex-write';
 import { createJdexJournal, type JdexJournal, type JdexJournalEffect } from '../../src/hebra/jdex-journal';
 import { activateJdex } from './support/activate';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
@@ -216,6 +217,47 @@ describe('FH 6: recovery at load touches only this device\'s operations', () => 
     expect(journal.entries()[0].rev).toBeGreaterThan(3);
     const reloaded = await createJdexJournal(journalVault(), storage, { device: 'A' });
     expect(reloaded.entries().map((op) => op.id)).toEqual(['op-own']);
+  });
+});
+
+describe('FH 7: the journal fits in the settings Hebra syncs', () => {
+  /** Hebra does not publish a settings blob longer than this (`MAX_SYNCED_SETTINGS_CHARS`,
+   *  `src/lib/plugins/sync/plugins-doc.ts`), and reconciliation then overwrites it. */
+  const HOST_MAX_SYNCED_SETTINGS_CHARS = 256 * 1024;
+
+  it('a 300-note rewrite of ~2 KB notes stays under the host limit, and the user is told what cannot be undone', async () => {
+    const vault = new FakeJdexVault();
+    vault.seedFolder(fakeFolder('f1', null, '00.00 JDex'));
+    const filler = 'Texto de una nota JDex real con su descripción y enlaces. '.repeat(34);
+    const ids = Array.from({ length: 300 }, (_, i) => `n${i}`);
+    for (const id of ids) vault.seedNote(fakeNote(id, 'f1', `# 21.${id} Nota\n\n${filler}\n<!-- jdex:hijos -->\n<!-- /jdex:hijos -->\n`));
+    const { api } = await createJdexTestApi();
+    const trimmed: string[] = [];
+    const journal = await createJdexJournal(vault, api.storage.settings, { device: 'A', onTrimmed: (message) => trimmed.push(message) });
+    await journal.run('fix', 'Actualizar cabeceras', (tracked) => rewriteJdexNotes(tracked, ids, ({ body }) => body.replace('<!-- /jdex:hijos -->', '- 21.11\n<!-- /jdex:hijos -->')));
+    const size = JSON.stringify(await api.storage.settings.load()).length;
+    console.info(`[FH 7] serialized settings after a 300-note rewrite: ${size} chars (host limit ${HOST_MAX_SYNCED_SETTINGS_CHARS})`);
+    expect(size).toBeLessThanOrEqual(HOST_MAX_SYNCED_SETTINGS_CHARS);
+    expect(trimmed.join(' ')).toContain('Actualizar cabeceras');
+  });
+
+  it('drops the oldest operations first and keeps the later ones undoable', async () => {
+    const vault = new FakeJdexVault();
+    vault.seedFolder(fakeFolder('f1', null, '00.00 JDex'));
+    const filler = 'x'.repeat(2_000);
+    const group = (name: string, count: number) => Array.from({ length: count }, (_, i) => `${name}${i}`);
+    for (const id of [...group('a', 40), ...group('b', 40), 'c0']) vault.seedNote(fakeNote(id, 'f1', `# ${id}\n\n${filler}\n`));
+    const { api } = await createJdexTestApi();
+    const trimmed: string[] = [];
+    const journal = await createJdexJournal(vault, api.storage.settings, { device: 'A', onTrimmed: (message) => trimmed.push(message) });
+    const touch = (ids: string[]) => (tracked: Parameters<typeof rewriteJdexNotes>[0]) => rewriteJdexNotes(tracked, ids, ({ body }) => `${body}editado\n`);
+    await journal.run('fix', 'A', touch(group('a', 40)));
+    await journal.run('fix', 'B', touch(group('b', 40)));
+    await journal.run('fix', 'C', touch(['c0']));
+    expect(journal.entries().map((operation) => operation.label)).toEqual(['B', 'C']);
+    expect(trimmed).toEqual(['«A» ya no se puede deshacer: el diario de deshacer superaba el tamaño que Hebra sincroniza entre dispositivos.']);
+    expect(JSON.stringify(await api.storage.settings.load()).length).toBeLessThanOrEqual(HOST_MAX_SYNCED_SETTINGS_CHARS);
+    expect((await journal.undoLast(journal.entries()[1].id)).undone).toBe(1);
   });
 });
 
