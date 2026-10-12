@@ -21,6 +21,7 @@ import { IdEditorSuggest } from "./ui/autocomplete";
 import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
 import { categoryOfPath, idFolderOfPath, isDatable, locate, zeroOf } from "./jd/files";
+import { fileDate } from "./vault/file-date";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
@@ -699,7 +700,7 @@ export default class JdexManagerPlugin extends Plugin {
         this.app,
         file,
         target.folderPath,
-        zero === "09" ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined,
+        zero === "09" ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined,
       );
       if (to !== from) await this.record("move", `${zero === "09" ? "Archive" : "Send to inbox"} ${file.name}`, [{ kind: "moved", from, to }]);
       new Notice(`Moved to ${to}.`);
@@ -739,7 +740,7 @@ export default class JdexManagerPlugin extends Plugin {
       folder = wanted;
     }
     try {
-      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined;
+      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined;
       const from = file.path;
       const to = await moveInto(this.app, file, folder, date);
       if (to !== from) await this.record("move", `Move ${file.name} to ${entry.id}`, [{ kind: "moved", from, to }]);

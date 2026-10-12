@@ -28,9 +28,9 @@ What works today (0.4.1):
 - **Create header**: `AC.X0 ■ emoji Title` note with `tipo: cabecera`, the next free X0 proposed, and an empty children block that the live header list fills.
 - **Create child ID (+)**: from the command palette on the active JDex note or from the file menu of an ID note or folder. The child is `AC.ID+ Title` with `jd: "AC.ID+"` and a link to its parent; the folder, if asked, is `+ Title` inside the parent folder.
 
-- **Send to inbox / Archive**: move the active file to the `.01` or `.09` of its category (a picker when the file lives outside the system). Archiving adds the creation date as prefix.
+- **Send to inbox / Archive**: move the active file to the `.01` or `.09` of its category (a picker when the file lives outside the system). Archiving adds the date as prefix: the `fecha` / `creado` / `created` / `date` frontmatter value when a note has one, else the file creation time (not verified for files received through Obsidian Sync).
 - **Process inboxes**: walks every `AC.01` and `00.01` file by file with a preview: move to an ID, archive, skip, open or delete. The status bar shows how many files are waiting.
-- **Date file name**: prefixes the creation date to a file inside a content ID (`YYYY-MM-DD` or `YYYY-MM`). Optional automatic dating on creation. JDex notes and management folders are never touched.
+- **Date file name**: prefixes the date (frontmatter first, else creation time) to a file inside a content ID (`YYYY-MM-DD` or `YYYY-MM`). Optional automatic dating on creation. JDex notes and management folders are never touched.
 - **Go to ID**: a picker with note and folder on the same row; Enter opens the note, Cmd/Ctrl+Enter the folder.
 - **Move active file to an ID**: the same picker, from the command palette or the file menu, moves the file into the folder of the chosen ID (offering to create the folder when the ID has none). A setting dates the name on the way.
 - **Search inside the active ID / category**: opens Obsidian's search with `path:"…/21.22 JDex Manager/"` already typed; when the core search plugin is not reachable the query goes to the clipboard.
