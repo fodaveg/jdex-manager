@@ -267,8 +267,20 @@
 }
 
 .hebra-jdex-goto-row button:hover,
-.hebra-jdex-goto-row button:focus-visible {
+.hebra-jdex-goto-row button:focus-visible,
+.hebra-jdex-goto-row button.is-active {
   background: var(--state-hover);
+}
+
+.hebra-jdex-goto-row button.is-active {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: -2px;
+}
+
+.hebra-jdex-goto-status {
+  margin: var(--space-2) var(--space-3) 0;
+  color: var(--muted);
+  font-size: var(--type-ui-sm);
 }
 
 .hebra-jdex-goto-empty {
