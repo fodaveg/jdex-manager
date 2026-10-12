@@ -41,7 +41,6 @@
 import type {
   HebraPluginApi,
   PluginCleanup,
-  PluginFolderRenameEvent,
   PluginModalHandle,
   PluginActiveNote,
   PluginNoteTitleRenamedEvent,
@@ -106,6 +105,9 @@ import {
   mountCreateHeaderDialog,
   mountCreateIdDialog
 } from './jdex-create-view';
+import { isJdexChildEntry, JDEX_CHILD_OF_CHILD_MESSAGE, jdexCreationIndex } from './jdex-create';
+import { jdexTemplatesOutcomeMessage, writeJdexBuiltinTemplates } from './jdex-templates';
+import { createJdexFolderRenameGuard } from './jdex-folder-rename';
 import {
   createJdexArea,
   createJdexCategory,
@@ -125,8 +127,8 @@ import { applyJdexWrap, findJdexWrapCandidates } from './jdex-wrap-headers';
 import { mountJdexWrapHeadersView } from './jdex-wrap-headers-view';
 import {
   jdexRenameNoticeMessage,
-  jdexRenameWarning,
-  jdexRenameWarningMessage
+  jdexPairNoticeMessage,
+  jdexRenameWarning
 } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import { mountJdexGotoView } from './jdex-goto-view';
@@ -141,7 +143,7 @@ import {
   trashJdexInboxNote
 } from './jdex-inbox-process';
 import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
-import { registerJdexActiveNoteCommands } from './jdex-active-note-commands';
+import { jdexEntryJdPath, registerJdexActiveNoteCommands } from './jdex-active-note-commands';
 export {
   JDEX_COMMAND_ARCHIVE_NOTE,
   JDEX_COMMAND_COPY_JD_PATH,
@@ -183,6 +185,7 @@ export const JDEX_COMMAND_PROCESS_INBOX = 'jdex-procesar-inbox';
 export const JDEX_COMMAND_UNDO = 'jdex-deshacer-ultima-operacion';
 export const JDEX_COMMAND_HEALTH = 'jdex-informe-de-salud';
 export const JDEX_COMMAND_SYSTEM_REPORT = 'jdex-informe-del-sistema';
+export const JDEX_COMMAND_WRITE_TEMPLATES = 'jdex-escribir-plantillas-integradas';
 
 /** Reconstruir el índice tras un `library-changed` no en CADA aviso (una biblioteca que
  *  sincroniza muchas notas seguidas dispararía varias reconstrucciones completas). */
@@ -518,14 +521,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentIndex = selectCreationSystem(index, namePrefix(settings));
+    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
         mountCreateIdDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
+            return jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
           },
           categories: currentIndex.categories,
           createFolderDefault: settings.createFolderByDefault,
@@ -564,7 +567,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       return;
     }
     const currentWalk = walk;
-    const currentIndex = selectCreationSystem(index, namePrefix(settings));
+    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
@@ -649,14 +652,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       host.notice('No hay ninguna categoría en el sistema: crea una primero.');
       return;
     }
-    const currentIndex = selectCreationSystem(index, namePrefix(settings));
+    const currentIndex = jdexCreationIndex(index, namePrefix(settings));
     let handle: PluginModalHandle | undefined;
     handle = host.openModal(
       (el) =>
         mountCreateHeaderDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
+            return jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
           },
           categories: currentIndex.categories,
           onSubmit: async (request) => {
@@ -690,6 +693,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const parent: IdEntry | undefined = latestLocated?.atNote ? latestLocated.entry : undefined;
     if (!parent) {
       host.notice('Abre la nota JDex de un ID para crearle un hijo (+).');
+      return;
+    }
+    if (isJdexChildEntry(parent)) {
+      host.notice(JDEX_CHILD_OF_CHILD_MESSAGE);
       return;
     }
     const currentIndex = index;
@@ -808,7 +815,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           candidates,
           onApply: async (chosenIds) => {
             await journal.run('fix', 'Envolver cabeceras', async (vault) => {
-              await applyJdexWrap(vault, candidates, [...chosenIds]);
+              const wrapped = await applyJdexWrap(vault, candidates, [...chosenIds]);
+              for (const warning of wrapped.warnings) host.notice(warning);
               await afterJdexWrite(true, vault);
             });
             handle?.close();
@@ -822,38 +830,21 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   // categoría al renombrar o mover -------------------------------------------
 
   /** `api.workspace.onBeforeFolderRename`: Hebra llama esto ANTES de
-   *  `folderRename`/`folderMove`. Sin índice aún cargado, deja pasar (más seguro
-   *  que bloquear una carpeta cualquiera mientras el módulo arranca). */
-  async function confirmRename(event: PluginFolderRenameEvent): Promise<boolean> {
-    if (!walk || !index) return true;
-    const warning = jdexRenameWarning(event, walk, index, settings);
-    if (!warning) return true;
-    return new Promise<boolean>((resolve) => {
-      let decided = false;
-      const settle = (value: boolean): void => {
-        if (decided) return;
-        decided = true;
-        resolve(value);
-      };
-      let handle: PluginModalHandle | undefined;
-      handle = host.openModal(
-        (el) =>
-          mountJdexRenameWarningView(el, {
-            message: jdexRenameWarningMessage(warning),
-            onContinue: () => {
-              settle(true);
-              handle?.close();
-            },
-            onCancel: () => {
-              settle(false);
-              handle?.close();
-            }
-          }),
-        // Escape o clic fuera cierran sin decidir: la opción segura es cancelar.
-        { title: 'JDex: confirmar', onClosed: () => settle(false) }
-      );
-    });
-  }
+   *  `folderRename`/`folderMove`. A change that needs a warning is refused at once and
+   *  redone by the plugin only if the user confirms (`jdex-folder-rename.ts`): Hebra lets
+   *  a guard through after 5 s, so waiting for the answer is not safe. Sin índice aún
+   *  cargado, deja pasar. */
+  const folderRenameGuard = createJdexFolderRenameGuard({
+    ui: host,
+    markdown: api.markdown,
+    snapshot: () => (walk && index ? { walk, index, settings } : null),
+    write: (label, action) => journal.run('move', label, async (vault) => {
+      await action(vault);
+      await afterJdexWrite(true, vault);
+    }),
+    report
+  });
+  const confirmRename = folderRenameGuard.confirm;
 
   // ---- Lote 5: avisar tras renombrar el TÍTULO de una nota JDex, sin bloquear
   // el guardado (encargo de David, 29 sep 2026) ---------------------------------
@@ -888,7 +879,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const expectedParentId = jdexResolveFolderId(walk, parentPath);
     const oldName = action.partnerPath.slice(action.partnerPath.lastIndexOf('/') + 1);
     const newName = action.newPartnerPath.slice(action.newPartnerPath.lastIndexOf('/') + 1);
-    host.notice(`El título cambió. Renombrar carpeta «${oldName}» a «${newName}».`, () => {
+    const renamePartnerFolder = (): void => {
       // The notice outlives the module: pressing it after turning JDex off does nothing.
       if (disposed) return;
       void journal.run('move', `Renombrar carpeta ${oldName}`, async (vault) => {
@@ -900,7 +891,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         await vault.folderRename(folderId, newName);
         await afterJdexWrite(true, vault);
       }).catch((error: unknown) => host.notice(error instanceof Error ? error.message : String(error)));
-    });
+    };
+    // The title is already saved here (this event comes after the save), so the folder
+    // follows a rename that really happened. The setting skips the question.
+    if (settings.renamePairsWithoutAsking) renamePartnerFolder();
+    else host.notice(jdexPairNoticeMessage('folder', oldName, newName), renamePartnerFolder);
   }
 
   // ---- Lote 3, tarea 2: ir a un ID, mover la nota a un ID, buscar dentro de un
@@ -986,6 +981,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             `«${entry.label}» se retira: se marca archivado con la fecha de hoy y, si ` +
             `tiene carpeta, se mueve a la .09 de su categoría. El número NUNCA se ` +
             `reutiliza. ¿Confirmas?`,
+          confirmLabel: 'Retirar',
           onContinue: () => {
             handle?.close();
             void runRetireEntry(entry, currentWalk, currentIndex);
@@ -1069,7 +1065,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           onCopyPath: (entry) => {
             handle?.close();
             const path = entry.folderPath ?? entry.notePath;
-            if (path !== undefined) void copyToClipboard(path, 'Ruta copiada.');
+            if (path !== undefined) void copyToClipboard(path, entry.folderPath ? 'Ruta de la carpeta copiada.' : 'Ruta de la nota copiada.');
+          },
+          onCopyJdPath: (entry) => {
+            handle?.close();
+            // Same text as the «copiar la ruta JD de esta nota» command (`jdexEntryJdPath`).
+            const text = jdexEntryJdPath(currentIndex, settings.jdexFolder, entry);
+            if (text === null) host.notice(`${entry.label} no tiene nota ni carpeta.`);
+            else void copyToClipboard(text, 'Ruta JD copiada.');
           },
           onRetire: (entry) => {
             handle?.close();
@@ -1352,6 +1355,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const paths = jdexFolderPaths(folders.filter((folder) => folder.id !== api.vault.rootFolderId()), api.vault.rootFolderId());
     pendingFolderPaths = paths;
     scheduleRebuild();
+    folderRenameGuard.foldersChanged(folders);
   });
   const offNotes = api.workspace.onNotesChange(onNotesChanged);
 
@@ -1715,8 +1719,27 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     report(error, 'extension-del-editor');
   }
 
+  /** «Escribir plantillas integradas»: the four built-in templates into `templatesFolder`,
+   *  never over a note that already has the name. */
+  async function writeBuiltinTemplates(): Promise<string> {
+    await rebuild();
+    if (!walk) throw new Error('El índice JDex aún no está listo.');
+    const currentWalk = walk;
+    const outcome = await journal.run('create-structure', 'Escribir plantillas integradas', (vault) => writeJdexBuiltinTemplates(vault, api.markdown, currentWalk, settings));
+    await rebuild();
+    return jdexTemplatesOutcomeMessage(outcome);
+  }
+  const offCommandWriteTemplates = host.registerCommand({
+    id: JDEX_COMMAND_WRITE_TEMPLATES,
+    name: 'JDex: escribir plantillas integradas en la carpeta de plantillas',
+    run: async () => {
+      try { host.notice(await writeBuiltinTemplates()); } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+    }
+  });
+
   const offSettingsPanel = host.settingsPanel((el) =>
     mountJdexSettingsPanel(el, {
+      writeTemplates: writeBuiltinTemplates,
       get: () => settings,
       save: (next) => {
         // A path changed by hand stops following the folder it pointed at before.
@@ -1775,6 +1798,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandUndo();
     offCommandHealth();
     offCommandSystemReport();
+    offCommandWriteTemplates();
     offAuditView();
     offIdSectionActiveNote();
     offIdSectionView();

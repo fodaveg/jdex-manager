@@ -50,7 +50,7 @@ describe('Hebra: create category and area revalidate the number at confirm (8cb1
     const { vault, fake, workspace, cleanup } = await setup();
     const dialog = openDialog(fake, JDEX_COMMAND_CREATE_CATEGORY);
     const select = dialog.querySelector('select') as HTMLSelectElement;
-    select.value = '20';
+    select.value = '20-29';
     select.dispatchEvent(new Event('change'));
     const [number, title] = [...dialog.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
     expect(number.value).toBe('22');
@@ -70,7 +70,7 @@ describe('Hebra: create category and area revalidate the number at confirm (8cb1
     const { vault, fake, workspace, cleanup } = await setup();
     const dialog = openDialog(fake, JDEX_COMMAND_CREATE_CATEGORY);
     const select = dialog.querySelector('select') as HTMLSelectElement;
-    select.value = '20';
+    select.value = '20-29';
     select.dispatchEvent(new Event('change'));
     const [, title] = [...dialog.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
     type(title, 'Mía');

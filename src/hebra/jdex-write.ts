@@ -25,11 +25,42 @@ export interface JdexNoteBody {
 const REWRITE_ATTEMPTS = 2;
 
 /**
+ * Host limit: Hebra rejects a `notesRewriteBatch` with more than 200 entries with
+ * `invalid-argument` (`NOTES_REWRITE_BATCH_MAX`, `hebra/src/lib/library/types.ts`,
+ * checked in `plugins/api/vault-facade.ts`). It counts the notes that need a write,
+ * not every note of the JDex, so larger rewrites are split into batches of this size.
+ */
+export const JDEX_REWRITE_BATCH_MAX = 200;
+
+/**
+ * A batch failed after earlier batches of the same rewrite were already written.
+ * `written` lists them (they are in the journal of the running operation, so «Deshacer
+ * la última operación» reverts them); `unwritten` lists the notes that were not written.
+ */
+export class JdexPartialRewriteError extends Error {
+  readonly written: readonly string[];
+  readonly unwritten: readonly string[];
+  constructor(written: readonly string[], unwritten: readonly string[], cause: unknown) {
+    super(
+      `Se escribieron ${written.length} nota(s) antes del fallo y ${unwritten.length} quedaron sin escribir. ` +
+        `Lo escrito queda en el diario y se puede deshacer. Causa: ${cause instanceof Error ? cause.message : String(cause)}`
+    );
+    this.name = 'JdexPartialRewriteError';
+    this.written = written;
+    this.unwritten = unwritten;
+  }
+}
+
+/**
  * Reescribe cada nota de `ids` con `nextBody(current)`: `null` o el mismo cuerpo =
  * sin cambios, no se escribe (así «sin marcadores, no se toca» del contrato del 28 sep
  * es gratis: la función pura de quien llama devuelve `null`). `cause` deja una
  * instantánea de «Versiones anteriores» cuando SÍ cambia, como el resto de reescrituras
  * en lote de la app. Una nota protegida (`locked`, sin cuerpo) no se toca nunca.
+ *
+ * The writes go in batches of `JDEX_REWRITE_BATCH_MAX`. Run inside `journal.run`, every
+ * batch lands in the same journal operation, so the whole rewrite is one undo entry.
+ * If a later batch throws, `JdexPartialRewriteError` says what was already written.
  */
 export async function rewriteJdexNotes(
   library: JdexRewriteLibrary,
@@ -51,9 +82,23 @@ export async function rewriteJdexNotes(
       entries.push({ id, body, expected: note.revision });
     }
     if (entries.length === 0) return { written, skipped };
-    const result = await library.notesRewriteBatch(entries, { cause: cause ?? null });
-    written.push(...result.written);
-    pending = result.stale;
+    const stale: string[] = [];
+    for (let from = 0; from < entries.length; from += JDEX_REWRITE_BATCH_MAX) {
+      const batch = entries.slice(from, from + JDEX_REWRITE_BATCH_MAX);
+      let result: Awaited<ReturnType<JdexRewriteLibrary['notesRewriteBatch']>>;
+      try {
+        result = await library.notesRewriteBatch(batch, { cause: cause ?? null });
+      } catch (error) {
+        // Nothing written yet in this rewrite: the original error is clearer as is.
+        if (written.length === 0) throw error;
+        const done = new Set(written);
+        const unwritten = [...stale, ...entries.slice(from).map((entry) => entry.id)].filter((id) => !done.has(id));
+        throw new JdexPartialRewriteError([...written], unwritten, error);
+      }
+      written.push(...result.written);
+      stale.push(...result.stale);
+    }
+    pending = stale;
   }
   skipped.push(...pending);
   return { written, skipped };

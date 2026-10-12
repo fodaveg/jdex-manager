@@ -15,6 +15,7 @@ import type { PluginMarkdown } from 'hebra-plugin-api';
 import type { Finding } from './engine';
 import { rewriteJdexNotes, type JdexRewriteLibrary } from './jdex-write';
 import { readJdexFrontmatter } from './frontmatter';
+import { setJdexProperties } from './jdex-property';
 
 /** Los hallazgos de `frontmatter-mismatch` de `findings`, limitados a `path` cuando se
  *  da (comando «de esta nota»); todos, sin filtrar, para «de toda la JDex». Uno por
@@ -76,16 +77,24 @@ export async function applyJdexFrontmatterFixes(
       if (!set) return null;
       const expected = expectedById.get(current.id);
       const frontmatter = readJdexFrontmatter(current.body, markdown) ?? {};
-      let next = current.body;
+      const writable: Record<string, string> = {};
       for (const [key, value] of Object.entries(set)) {
         if (expected && Object.prototype.hasOwnProperty.call(expected, key) && JSON.stringify(frontmatter[key]) !== JSON.stringify(expected[key])) {
           unavailable.add(current.id);
           warnings.add(`${pathById.get(current.id)}: se omitió ${key} porque cambió desde la auditoría.`);
           continue;
         }
-        next = markdown.setProperty(next, key, value);
+        writable[key] = value;
       }
-      return next === current.body ? null : next;
+      // An unchanged body from setProperty is not «nothing to do»: the host refuses
+      // frontmatter it cannot patch safely. Such a note is skipped whole, with a warning.
+      const written = setJdexProperties(markdown, (body) => readJdexFrontmatter(body, markdown), current.body, writable);
+      if (written.unwritten.length > 0) {
+        unavailable.add(current.id);
+        warnings.add(`${pathById.get(current.id)}: no se pudo escribir ${written.unwritten.join(', ')} porque el frontmatter tiene una clave repetida o un formato que no se puede modificar sin riesgo.`);
+        return null;
+      }
+      return written.body === current.body ? null : written.body;
     },
     'Antes de normalizar el frontmatter JDex'
   );

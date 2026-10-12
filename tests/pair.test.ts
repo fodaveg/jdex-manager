@@ -6,6 +6,16 @@ import { FOLDERS, JDEX, NOTES } from "./fixtures";
 const settings = { jdexFolder: JDEX, systemRoot: "" };
 const CAT = "20-29 Trabajo y productos/21 Productos de software propios";
 
+describe("pairAction for + children uses the same sanitised names", () => {
+  const parent = `${CAT}/21.22 JDex Manager`;
+  it("renaming a child note to a name a folder cannot take proposes a sanitised folder", () => {
+    const index = buildIndex({ systemRoot: "", folderPaths: [...FOLDERS, `${parent}/+ A`], jdexFolder: JDEX, notePaths: [...NOTES, `${JDEX}/21.22+ A.md`] });
+    expect(pairAction({ oldPath: `${JDEX}/21.22+ A.md`, newPath: `${JDEX}/21.22+ Z? #tag.md`, isFolder: false }, index, settings)).toMatchObject({
+      type: "rename-partner", partnerPath: `${parent}/+ A`, newPartnerPath: `${parent}/+ Z`,
+    });
+  });
+});
+
 describe("pairAction", () => {
   const parent = `${CAT}/21.22 JDex Manager`;
   const folders = [...FOLDERS, `${parent}/+ A`, `${parent}/+ B`];

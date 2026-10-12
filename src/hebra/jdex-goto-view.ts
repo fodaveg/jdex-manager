@@ -28,7 +28,10 @@ export interface JdexGotoViewOptions {
   onMoveNoteHere(entry: IdEntry): void;
   onSearchWithin(entry: IdEntry): void;
   onCopyId(entry: IdEntry): void;
+  /** The folder path, or the note path when the ID has no folder (the button says which). */
   onCopyPath(entry: IdEntry): void;
+  /** The JD path as text, `21 Productos … › 21.22 JDex Manager` (Obsidian's «Copy JD path»). */
+  onCopyJdPath(entry: IdEntry): void;
   onRetire(entry: IdEntry): void;
   /** Fecha de la nota JDex ya retirada, o `null` si sigue activa. */
   retiredAt?(entry: IdEntry): string | null;
@@ -117,7 +120,8 @@ export function mountJdexGotoView(el: HTMLElement, options: JdexGotoViewOptions)
         options.onSearchWithin(entry)
       ),
       actionButton('Copiar ID', acts.copyId, () => options.onCopyId(entry)),
-      actionButton('Copiar ruta', acts.copyPath, () => options.onCopyPath(entry)),
+      actionButton('Copiar ruta JD', acts.copyId, () => options.onCopyJdPath(entry)),
+      actionButton(entry.folderPath ? 'Copiar ruta de carpeta' : 'Copiar ruta de la nota', acts.copyPath, () => options.onCopyPath(entry)),
       actionButton(acts.retire.disabled && acts.retire.reason.startsWith('Ya retirado') ? acts.retire.reason : 'Retirar este ID', acts.retire, () => options.onRetire(entry))
     );
     back.focus();

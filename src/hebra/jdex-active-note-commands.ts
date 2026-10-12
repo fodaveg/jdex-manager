@@ -6,7 +6,7 @@
  * enabled/disabled flag, so "disabled outside an ID" is a notice, never a silent no-op.
  */
 import type { HebraPluginApi, PluginActiveNote } from 'hebra-plugin-api';
-import { locate, sameSystem, systemKey, type DateFormat, type JdIndex } from './engine';
+import { locate, sameSystem, systemKey, type DateFormat, type IdEntry, type JdIndex } from './engine';
 import { archiveJdexInboxNote, sendJdexNoteToInbox } from './jdex-inbox-process';
 import type { JdexJournal } from './jdex-journal';
 import { jdexNotePath, type JdexLibraryWalk, type JdexNoteRef } from './library-index';
@@ -37,6 +37,15 @@ export function jdexLocateActiveNote(
   const located = locate(index, { jdexFolder }, path);
   if (!located) return null;
   return { ref: { id: note.id, folderId: note.folderId, title: note.title, path }, located };
+}
+
+/** The JD path of an ID as text («21 Productos … › 21.22 JDex Manager», Obsidian's «Copy
+ *  JD path»), never a physical path. The ONE implementation: the active-note command and
+ *  the «Copiar ruta JD» action of «Ir a un ID» both copy this. `null` for an entry with
+ *  neither note nor folder. */
+export function jdexEntryJdPath(index: JdIndex, jdexFolder: string, entry: IdEntry): string | null {
+  const path = entry.notePath ?? entry.folderPath;
+  return path ? (locate(index, { jdexFolder }, path)?.text ?? null) : null;
 }
 
 /** Folder path and label of the category of a located note, from the system folders. */
@@ -126,7 +135,7 @@ export function registerJdexActiveNoteCommands(deps: JdexActiveNoteCommandsDeps)
         const ctx = resolve(true);
         if (!ctx) return;
         // The JD text («Categoría › ID»), never the physical path of the library.
-        await deps.copy(ctx.located.text, 'Ruta JD copiada.');
+        await deps.copy(jdexEntryJdPath(ctx.state.index, ctx.state.jdexFolder, ctx.located.entry) ?? ctx.located.text, 'Ruta JD copiada.');
       }
     }),
     api.ui.registerCommand({

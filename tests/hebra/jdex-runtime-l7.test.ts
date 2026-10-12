@@ -62,7 +62,7 @@ describe('L7 runtime Hebra', () => {
     workspace.emitTitleRenamed({ noteId: 'n-id', folderId: 'jdex', oldTitle: '21.11 Antes #claude', newTitle: '21.11 Después #claude', undo: vi.fn() });
     expect((await vault.foldersList()).find((folder) => folder.id === 'id')?.name).toBe('21.11 Antes');
     const rename = document.querySelector<HTMLButtonElement>('.hebra-module-notice button')!;
-    expect(rename.textContent).toContain('Renombrar carpeta');
+    expect(rename.textContent).toContain('Pulsa aquí para renombrarla');
     rename.click();
     await vi.waitFor(async () => expect((await vault.foldersList()).find((folder) => folder.id === 'id')?.name).toBe('21.11 Después'));
     expect((await vault.noteRead('n-id'))?.title).toBe('21.11 Después #claude');
@@ -81,7 +81,7 @@ describe('L7 runtime Hebra', () => {
     vault.saveElsewhere('n-id', '# 21.11 Después/otra barra #claude\n');
     workspace.emitTitleRenamed({ noteId: 'n-id', folderId: 'jdex', oldTitle: '21.11 Antes/con barra #claude', newTitle: '21.11 Después/otra barra #claude', undo: vi.fn() });
     const rename = document.querySelector<HTMLButtonElement>('.hebra-module-notice button')!;
-    expect(rename.textContent).toContain('Renombrar carpeta');
+    expect(rename.textContent).toContain('Pulsa aquí para renombrarla');
     expect(rename.textContent).toContain('21.11 Después–otra barra');
     rename.click();
     await vi.waitFor(async () => expect((await vault.foldersList()).find((folder) => folder.id === 'id')?.name).toBe('21.11 Después–otra barra'));

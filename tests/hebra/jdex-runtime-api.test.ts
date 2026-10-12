@@ -83,32 +83,23 @@ describe('guardia de renombrado (workspace.onBeforeFolderRename)', () => {
     expect(workspace.guardCount).toBe(0);
   });
 
-  it('renumerar un ID pregunta; «Continuar» deja pasar y «Cancelar» lo impide', async () => {
+  it('renumerar un ID se para al momento y pregunta; solo «Renombrar igualmente» lo hace (a17a3b63)', async () => {
     const { vault } = buildFixture();
     const { api, workspace } = await createJdexTestApi({ vault });
     await activateJdex(api);
+    const event = { kind: 'folder-rename', folderId: 'f-hebra', newName: '21.12 Hebra' } as const;
 
-    const continued = workspace.askFolderRename({
-      kind: 'folder-rename',
-      folderId: 'f-hebra',
-      newName: '21.12 Hebra'
-    });
-    await vi.waitFor(() => expect(document.querySelector('dialog.hebra-module-modal')).toBeTruthy());
+    // Refused before any answer: Hebra would let a pending guard through after 5 s.
+    expect(await workspace.askFolderRename(event)).toBe(false);
     expect(document.body.textContent).toContain('«21.11» pasaría a «21.12»');
-    click(document.querySelector('dialog .hebra-jdex-dialog-primary'));
-    expect(await continued).toBe(true);
+    click([...document.querySelectorAll('dialog button')].find((b) => b.textContent === 'Cancelar'));
     expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
+    expect((await vault.foldersList()).find((f) => f.id === 'f-hebra')?.name).toBe('21.11 Hebra');
 
-    const cancelled = workspace.askFolderRename({
-      kind: 'folder-rename',
-      folderId: 'f-hebra',
-      newName: '21.12 Hebra'
-    });
-    await vi.waitFor(() => expect(document.querySelector('dialog.hebra-module-modal')).toBeTruthy());
-    click(
-      [...document.querySelectorAll('dialog button')].find((b) => b.textContent === 'Cancelar')
-    );
-    expect(await cancelled).toBe(false);
+    expect(await workspace.askFolderRename(event)).toBe(false);
+    click(document.querySelector('dialog .hebra-jdex-dialog-primary'));
+    expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
+    await vi.waitFor(async () => expect((await vault.foldersList()).find((f) => f.id === 'f-hebra')?.name).toBe('21.12 Hebra'));
   });
 
   it('un renombrado que no cambia el número del ID (o una carpeta ajena) pasa sin preguntar', async () => {

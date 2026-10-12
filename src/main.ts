@@ -2,6 +2,7 @@ import { type App, Notice, normalizePath, Plugin, PluginSettingTab, Setting, typ
 import { healthFileName, renderHealthReport } from "./jd/health";
 import { todayIso } from "./jd/template";
 import { ensureFolder } from "./vault/create";
+import { writeDailyReport } from "./vault/report-write";
 import { openGlobalSearch, pathQuery } from "./vault/search";
 import { describeUndo, durableEffect, type Effect, type Operation, type OperationKind, pushOperation } from "./jd/journal";
 import { undoOperation } from "./vault/journal";
@@ -26,7 +27,7 @@ import { fileDate } from "./vault/file-date";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
-import { headersToMigrate, updateHeaders } from "./vault/headers";
+import { applyHeaderWraps, headersToMigrate, updateHeaders } from "./vault/headers";
 import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex } from "./vault/structure";
 import { retireId } from "./vault/retire";
 import { formatCategoryPatterns, parseCategoryPatterns } from "./jd/patterns";
@@ -642,8 +643,11 @@ export default class JdexManagerPlugin extends Plugin {
       "Wrap",
     );
     if (!ok) return;
-    for (const t of todo) await this.app.vault.modify(t.file, t.next);
-    new Notice(`Markers added to ${todo.length} note(s).`);
+    const wrapped = await applyHeaderWraps(this.app, todo);
+    await this.record("fix", "Wrap header lists in markers", wrapped.effects);
+    new Notice(wrapped.skipped.length === 0
+      ? `Markers added to ${wrapped.written.length} note(s).`
+      : `Markers added to ${wrapped.written.length} note(s). Skipped ${wrapped.skipped.length} edited after the preview: ${wrapped.skipped.join(", ")}`, 10000);
     await this.refreshHeaders(undefined, true);
   }
 
@@ -869,16 +873,8 @@ export default class JdexManagerPlugin extends Plugin {
     const content = renderHealthReport(index, filePaths, date, { maxFiles: this.settings.healthMaxFiles, nearlyFull: 70 });
     const path = normalizePath(`${this.settings.reportsFolder}/${healthFileName(date)}`);
     try {
-      const existing = this.app.vault.getAbstractFileByPath(path);
-      let file: TFile;
-      if (existing instanceof TFile) {
-        await this.app.vault.modify(existing, content);
-        file = existing;
-      } else if (existing) throw new Error(`${path} exists and is not a note.`);
-      else {
-        await ensureFolder(this.app, this.settings.reportsFolder);
-        file = await this.app.vault.create(path, content);
-      }
+      // A health report of the day edited by hand is kept; the new one goes to «(2)».
+      const { file } = await writeDailyReport(this.app, this.settings.reportsFolder, path, content);
       await this.app.workspace.getLeaf(false).openFile(file);
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));

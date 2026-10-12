@@ -126,20 +126,23 @@ describe("Obsidian: unloading stops writes and closes dialogs (0ebb2751)", () =>
   it("a maintenance pass stops before its next write once stopped", async () => {
     const fm = { descripcion: "x" } as Record<string, unknown>;
     const note = Object.assign(new TFile(), { path: "J/21.11 Note.md", name: "21.11 Note.md", basename: "21.11 Note", extension: "md", stat: { ctime: 1, mtime: 1 } });
-    const processFrontMatter = vi.fn(async (_file: TFile, apply: (value: Record<string, unknown>) => void) => apply(fm));
+    let body = "---\ndescripcion: x\n---\n# 21.11 Note\n";
+    // Frontmatter fixes write line by line through `vault.process`.
+    const process = vi.fn(async (_file: TFile, transform: (current: string) => string) => (body = transform(body)));
     const app = {
-      vault: { getAllLoadedFiles: () => [Object.assign(new TFolder(), { path: "J" }), note], getMarkdownFiles: () => [note], getAbstractFileByPath: (path: string) => (path === note.path ? note : null), cachedRead: async () => "# 21.11 Note\n", read: async () => "# 21.11 Note\n", process: vi.fn() },
+      vault: { getAllLoadedFiles: () => [Object.assign(new TFolder(), { path: "J" }), note], getMarkdownFiles: () => [note], getAbstractFileByPath: (path: string) => (path === note.path ? note : null), cachedRead: async () => body, read: async () => body, process },
       metadataCache: { getFileCache: () => ({ frontmatter: fm }) },
-      fileManager: { processFrontMatter },
+      fileManager: { processFrontMatter: vi.fn() },
     } as unknown as App;
     const settings = mergeSettings({ jdexFolder: "J", automaticMaintenance: true });
     const effects: Effect[] = [];
     await maintainSystem(app, settings, effects, undefined, () => true);
-    expect(processFrontMatter).not.toHaveBeenCalled();
+    expect(process).not.toHaveBeenCalled();
     expect(effects).toEqual([]);
     // Control: not stopped, it writes the derived fields.
     await maintainSystem(app, settings, effects, undefined, () => false);
-    expect(processFrontMatter).toHaveBeenCalled();
+    expect(process).toHaveBeenCalled();
+    expect(body).toContain("jd:");
   });
 
   it("after unload, automatic maintenance does not start and a pending rename does not write", async () => {
