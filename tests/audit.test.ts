@@ -28,6 +28,10 @@ describe("proposed folder names of + children", () => {
   it("a child name that is not a valid file name is sanitised like any JDex name", () => {
     expect(createFolderPath(audit(["JDex/21.22+ Plan? fase*1.md"], []))).toBe(`${PARENT}/+ Plan fase1`);
   });
+
+  it("a child note with an empty title proposes no folder named `+` alone", () => {
+    expect(createFolderPath(audit(["JDex/21.22+ ----.md"], []))).toBeUndefined();
+  });
 });
 
 describe("auditSystem", () => {

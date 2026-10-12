@@ -1,40 +1,23 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, expect, it, vi } from 'vitest';
-import { type App, TFile, TFolder } from 'obsidian';
 import { mergeSettings } from '../src/jd/settings';
 import type { Effect } from '../src/jd/journal';
 import { maintainSystem } from '../src/vault/maintenance';
 import { onceNotifier } from '../src/vault/maintenance-gate';
 import { collectAudit } from '../src/vault/audit';
 import { createSystemReport } from '../src/vault/system-report';
-import { readFrontmatter } from '../src/vault/frontmatter-lines';
+import { FakeObsidianVault } from './support/fake-obsidian-vault';
 
 function fixture() {
-  const folderPaths = ['J', 'Reports', '20-29 Area', '20-29 Area/21 Cat', '20-29 Area/21 Cat/21.01 Inbox', '20-29 Area/21 Cat/21.11 Different'];
-  const folders = folderPaths.map((path) => Object.assign(new TFolder(), { path }));
+  const v = new FakeObsidianVault();
+  for (const path of ['J', 'Reports', '20-29 Area/21 Cat/21.01 Inbox', '20-29 Area/21 Cat/21.11 Different']) v.folder(path);
   // The frontmatter lives in the text, as in a vault; the metadata cache derives from it.
   const manual = '---\ndescripcion: Manual description\n---\n';
-  const bodies = new Map([
-    ['J/21.11 Note.md', `${manual}# 21.11 Note\n\nManual prose.\n`],
-    ['J/21.10 ■ Header.md', `${manual}# 21.10 ■ Header\n\n<!-- jdex:hijos -->\n<!-- /jdex:hijos -->\n`],
-    ['J/00.00 Index.md', `${manual}# 00.00 Index\n\n<!-- jdex:indice -->\n<!-- /jdex:indice -->\n`],
-    ['20-29 Area/21 Cat/21.01 Inbox/old.pdf', 'pdf'],
-  ]);
-  const fm = { get: (path: string) => readFrontmatter(bodies.get(path) ?? '') ?? undefined };
-  const files = [...bodies.keys()].map((path) => Object.assign(new TFile(), { path, name: path.split('/').pop(), basename: path.split('/').pop()!.replace(/\.[^.]+$/, ''), extension: path.endsWith('.md') ? 'md' : 'pdf', parent: { path: path.slice(0, path.lastIndexOf('/')) }, stat: { ctime: 1, mtime: 1 } }));
-  const create = vi.fn(async (path: string, body: string) => {
-    const file = Object.assign(new TFile(), { path, basename: path.split('/').pop()!.slice(0, -3), extension: 'md', parent: { path: 'Reports' }, stat: { ctime: files.length, mtime: files.length } });
-    bodies.set(path, body); files.push(file); return file;
-  });
-  const app = { vault: {
-    getAllLoadedFiles: () => [...folders, ...files], getMarkdownFiles: () => files.filter((file) => file.extension === 'md'),
-    getAbstractFileByPath: (path: string) => [...folders, ...files].find((file) => file.path === path) ?? null,
-    read: async (file: TFile) => bodies.get(file.path)!, cachedRead: async (file: TFile) => bodies.get(file.path)!,
-    process: vi.fn(async (file: TFile, transform: (current: string) => string) => { const body = transform(bodies.get(file.path)!); bodies.set(file.path, body); return body; }), create,
-  }, metadataCache: { getFileCache: (file: TFile) => ({ frontmatter: fm.get(file.path) }) }, fileManager: {
-    renameFile: vi.fn(), trashFile: vi.fn(),
-  } } as unknown as App;
-  return { app, bodies, fm, files, settings: mergeSettings({ jdexFolder: 'J', reportsFolder: 'Reports' }) };
+  v.file('J/21.11 Note.md', `${manual}# 21.11 Note\n\nManual prose.\n`);
+  v.file('J/21.10 ■ Header.md', `${manual}# 21.10 ■ Header\n\n<!-- jdex:hijos -->\n<!-- /jdex:hijos -->\n`);
+  v.file('J/00.00 Index.md', `${manual}# 00.00 Index\n\n<!-- jdex:indice -->\n<!-- /jdex:indice -->\n`);
+  v.file('20-29 Area/21 Cat/21.01 Inbox/old.pdf', 'pdf');
+  return { app: v.app, v, bodies: v.bodies, fm: v.frontmatter, settings: mergeSettings({ jdexFolder: 'J', reportsFolder: 'Reports' }) };
 }
 
 describe('Obsidian optional maintenance', () => {

@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
-import { type App, TFile } from "obsidian";
-import { parse, stringify } from "yaml";
+/* eslint-disable @typescript-eslint/unbound-method -- vi.fn members of the vault double are read as values to assert on. */
+import { describe, expect, it } from "vitest";
 import { buildIndex } from "../src/jd/index";
 import type { Effect, Operation } from "../src/jd/journal";
 import { applyFix } from "../src/vault/audit";
 import { undoOperation } from "../src/vault/journal";
 import { retireId } from "../src/vault/retire";
+import { FakeObsidianVault } from "./support/fake-obsidian-vault";
 
 const NOTE = "J/21.11 Nota.md";
 const BODY = [
@@ -20,42 +20,12 @@ const BODY = [
   "",
 ].join("\n");
 
-/**
- * Obsidian 1.14.4's processFrontMatter, as read from obsidian-1.14.4.asar: parse the
- * block to an object, run the callback, stringify the object and splice it back.
- */
-function obsidianProcessFrontMatter(text: string, fn: (fm: Record<string, unknown>) => void): string {
-  const match = /^---\n([\s\S]*?\n)---(?:\n|$)/u.exec(text);
-  const fm = (match ? (parse(match[1]) as Record<string, unknown> | null) : null) ?? {};
-  fn(fm);
-  const out = stringify(fm);
-  return match ? text.slice(0, 4) + out + text.slice(4 + match[1].length) : `---\n${out}---\n${text}`;
-}
-
+/** The shared vault double: `processFrontMatter` is its mock, and the text is the only state. */
 function textVault(initial: Record<string, string>, folders: string[] = []) {
-  const bodies = new Map(Object.entries(initial));
-  const fileAt = (path: string) => Object.assign(new TFile(), { path, basename: path.slice(path.lastIndexOf("/") + 1, -3), extension: "md" });
-  const processFrontMatter = vi.fn(async (file: TFile, fn: (fm: Record<string, unknown>) => void) => {
-    bodies.set(file.path, obsidianProcessFrontMatter(bodies.get(file.path)!, fn));
-  });
-  const renameFile = vi.fn(async () => {});
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => (bodies.has(path) ? fileAt(path) : folders.includes(path) ? { path } : null),
-      read: async (file: TFile) => bodies.get(file.path)!,
-      process: async (file: TFile, update: (current: string) => string) => {
-        const next = update(bodies.get(file.path)!);
-        bodies.set(file.path, next);
-        return next;
-      },
-      modify: async (file: TFile, text: string) => {
-        bodies.set(file.path, text);
-      },
-    },
-    fileManager: { processFrontMatter, renameFile },
-    metadataCache: { getFileCache: () => null },
-  } as unknown as App;
-  return { app, bodies, processFrontMatter, renameFile };
+  const v = new FakeObsidianVault();
+  for (const folder of folders) v.folder(folder);
+  for (const [path, body] of Object.entries(initial)) v.file(path, body);
+  return { app: v.app, bodies: v.bodies, processFrontMatter: v.app.fileManager.processFrontMatter, renameFile: v.app.fileManager.renameFile };
 }
 
 describe("Obsidian frontmatter writes touch only their keys", () => {
@@ -96,7 +66,7 @@ describe("Obsidian frontmatter writes touch only their keys", () => {
 
   it("retiring keeps comments and the unquoted jd text, and records an exact rewrite", async () => {
     const folder = "20-29 Area/21 Cat/21.11 Nota";
-    const { app, bodies, processFrontMatter } = textVault({ [NOTE]: BODY }, [folder]);
+    const { app, bodies, processFrontMatter } = textVault({ [NOTE]: BODY }, [folder, "20-29 Area/21 Cat/21.09 Archivo"]);
     const index = buildIndex({ systemRoot: "", jdexFolder: "J", notePaths: [NOTE], folderPaths: ["20-29 Area", "20-29 Area/21 Cat", folder, "20-29 Area/21 Cat/21.09 Archivo"] });
     const effects: Effect[] = [];
     await retireId(app, index, index.ids.find((entry) => entry.id === "21.11")!, undefined, effects);
@@ -112,7 +82,7 @@ describe("Obsidian frontmatter writes touch only their keys", () => {
   it("retiring a note whose frontmatter cannot be patched fails before touching the folder", async () => {
     const folder = "20-29 Area/21 Cat/21.11 Nota";
     const duplicated = "---\ntipo: id\ntipo: otro\n---\n# 21.11 Nota\n";
-    const { app, bodies, renameFile } = textVault({ [NOTE]: duplicated }, [folder]);
+    const { app, bodies, renameFile } = textVault({ [NOTE]: duplicated }, [folder, "20-29 Area/21 Cat/21.09 Archivo"]);
     const index = buildIndex({ systemRoot: "", jdexFolder: "J", notePaths: [NOTE], folderPaths: ["20-29 Area", "20-29 Area/21 Cat", folder, "20-29 Area/21 Cat/21.09 Archivo"] });
     const effects: Effect[] = [];
     await expect(retireId(app, index, index.ids.find((entry) => entry.id === "21.11")!, undefined, effects)).rejects.toThrow(/no se puede modificar sin riesgo/);

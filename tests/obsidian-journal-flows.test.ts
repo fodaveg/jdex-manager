@@ -12,7 +12,7 @@ import { CreateCategoryModal } from "../src/ui/create-structure";
 import { ProcessInboxModal } from "../src/ui/inbox";
 import { PluginDataFile, UndoShield, undoLastOperation } from "../src/vault/journal-store";
 import { MaintenanceGate, onceNotifier } from "../src/vault/maintenance-gate";
-import { fakeVault, type FakeVault } from "./obsidian-journal-fake";
+import { fakeVault, type FakeVault } from "./support/fake-obsidian-vault";
 
 const ROOT_FOLDERS = ["J", "20-29 Area", "20-29 Area/21 Cat", "20-29 Area/21 Cat/21.01 Inbox", "20-29 Area/21 Cat/21.09 Archive"];
 

@@ -24,7 +24,7 @@
  */
 import type { PluginFolder, PluginFolderRenameEvent, PluginMarkdown, PluginModalHandle, PluginUi, PluginVault } from 'hebra-plugin-api';
 import { extractJdPrefix, isRepeatedId, repeatedIdMessage, type JdIndex } from './engine';
-import { jdexFolderPairRename, jdexPairNoticeMessage, jdexRenameWarning, jdexRenameWarningMessage } from './jdex-rename-guard';
+import { jdexFolderPairBlockedByRepeat, jdexFolderPairRename, jdexPairNoticeMessage, jdexRenameWarning, jdexRenameWarningMessage } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import type { JdexLibraryWalk } from './library-index';
 
@@ -118,6 +118,14 @@ export function createJdexFolderRenameGuard(deps: JdexFolderRenameDeps): JdexFol
   function trackPair(event: PluginFolderRenameEvent, snapshot: JdexFolderRenameSnapshot): void {
     const action = jdexFolderPairRename(event, snapshot.walk, snapshot.index, snapshot.settings);
     const oldPath = snapshot.walk.folderPaths.get(event.folderId);
+    if (!action && event.kind === 'folder-rename' && jdexFolderPairBlockedByRepeat(event, snapshot.walk, snapshot.index, snapshot.settings)) {
+      // The number is repeated: the folder rename goes ahead, its note does not follow.
+      const renamed = extractJdPrefix(event.newName);
+      if (renamed?.number.kind === 'id') {
+        deps.ui.notice(repeatedIdMessage({ id: renamed.number.extension ? `${renamed.number.id}+` : renamed.number.id, system: renamed.number.system }));
+      }
+      return;
+    }
     if (!action || oldPath === undefined || event.kind !== 'folder-rename') return;
     const note = snapshot.walk.systemNotes.find((entry) => entry.path === action.partnerPath);
     if (!note) return;

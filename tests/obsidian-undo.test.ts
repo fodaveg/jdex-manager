@@ -4,7 +4,7 @@ import { type Effect, type Operation, removeInsertedLine, undoWarnings } from ".
 import { applyFix } from "../src/vault/audit";
 import { undoOperation } from "../src/vault/journal";
 import { retireId } from "../src/vault/retire";
-import { fakeVault } from "./obsidian-journal-fake";
+import { fakeVault } from "./support/fake-obsidian-vault";
 
 const NOTE = "J/21.11 Note.md";
 const op = (effects: Effect[], kind: Operation["kind"] = "fix"): Operation => ({ kind, label: "Test", at: "2026-10-12T10:00:00.000Z", effects });

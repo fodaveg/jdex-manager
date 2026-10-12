@@ -17,9 +17,10 @@ export function guardJdexJournal(journal: JdexJournal, isDisposed: () => boolean
       if (isDisposed()) throw new Error(JDEX_DISPOSED_MESSAGE);
       return action(vault);
     }, ...rest);
-  const undoLast: JdexJournal['undoLast'] = async (...args) => {
+  const undoLast: JdexJournal['undoLast'] = async (expectedId) => {
     if (isDisposed()) throw new Error(JDEX_DISPOSED_MESSAGE);
-    return journal.undoLast(...args);
+    // The confirmed operation must reach the journal: it refuses when another one is now last.
+    return journal.undoLast(expectedId);
   };
   // Everything else (status, discard, merge…) goes to the journal unchanged.
   return new Proxy(journal, {
