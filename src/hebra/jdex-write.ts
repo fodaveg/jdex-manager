@@ -74,9 +74,12 @@ export async function rewriteJdexNotes(
   ids: readonly string[],
   nextBody: (current: JdexNoteBody) => string | null,
   cause?: string | null
-): Promise<{ written: string[]; skipped: string[] }> {
+): Promise<{ written: string[]; skipped: string[]; held?: string[] }> {
   const written: string[] = [];
   const skipped: string[] = [];
+  /** Held back by the journal (an automatic run over what an undo restored): skipped
+   *  without a retry, and without the «changed meanwhile» warning. */
+  const held: string[] = [];
   let pending = ids;
   for (let attempt = 0; attempt < REWRITE_ATTEMPTS && pending.length > 0; attempt += 1) {
     const entries: PluginNoteRewrite[] = [];
@@ -88,7 +91,7 @@ export async function rewriteJdexNotes(
       if (body === null || body === note.body) continue;
       entries.push({ id, body, expected: note.revision });
     }
-    if (entries.length === 0) return { written, skipped };
+    if (entries.length === 0) return held.length > 0 ? { written, skipped: [...skipped, ...held], held } : { written, skipped };
     const stale: string[] = [];
     for (let from = 0; from < entries.length; from += JDEX_REWRITE_BATCH_MAX) {
       const batch = entries.slice(from, from + JDEX_REWRITE_BATCH_MAX);
@@ -104,9 +107,10 @@ export async function rewriteJdexNotes(
       }
       written.push(...result.written);
       stale.push(...result.stale);
+      held.push(...((result as { held?: string[] }).held ?? []));
     }
     pending = stale;
   }
-  skipped.push(...pending);
-  return { written, skipped };
+  skipped.push(...pending, ...held);
+  return held.length > 0 ? { written, skipped, held } : { written, skipped };
 }

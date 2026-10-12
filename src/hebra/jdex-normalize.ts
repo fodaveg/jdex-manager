@@ -98,6 +98,8 @@ export async function applyJdexFrontmatterFixes(
     },
     'Antes de normalizar el frontmatter JDex'
   );
-  for (const id of result.skipped) warnings.add(`${pathById.get(id)}: no se pudo escribir porque la nota cambió durante los dos intentos.`);
+  // A note an undo just restored is held back on purpose: no «changed» warning for it.
+  const held = new Set(result.held);
+  for (const id of result.skipped) if (!held.has(id)) warnings.add(`${pathById.get(id)}: no se pudo escribir porque la nota cambió durante los dos intentos.`);
   return { ...result, skipped: [...new Set([...result.skipped, ...unavailable])], warnings: [...warnings] };
 }

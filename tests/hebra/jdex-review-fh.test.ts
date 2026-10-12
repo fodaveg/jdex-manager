@@ -361,6 +361,23 @@ describe('FH 11: active-note commands resolve the note like the path item', () =
   });
 });
 
+describe('FH 12: an automatic rewrite counts the notes an undo protects as skipped', () => {
+  it('reports the protected note in skipped, not lost between written and stale', async () => {
+    const vault = new FakeJdexVault();
+    vault.seedFolder(fakeFolder('f1', null, '00.00 JDex'));
+    vault.seedNote(fakeNote('n1', 'f1', '# Uno\n'));
+    vault.seedNote(fakeNote('n2', 'f1', '# Dos\n'));
+    const { api } = await createJdexTestApi();
+    const journal = await createJdexJournal(vault, api.storage.settings, { device: 'A', now: () => 0 });
+    await journal.run('fix', 'Normalizar', (tracked) => rewriteJdexNotes(tracked, ['n1'], ({ body }) => `${body}editado\n`));
+    await journal.undoLast(journal.entries()[0].id);
+    const result = await journal.run('fix', 'Cabeceras vivas', (tracked) => rewriteJdexNotes(tracked, ['n1', 'n2'], ({ body }) => `${body}vivo\n`), { automatic: true });
+    expect(result.written).toEqual(['n2']);
+    expect(result.skipped).toEqual(['n1']);
+    expect((await vault.noteRead('n1'))?.body).toBe('# Uno\n');
+  });
+});
+
 async function setupWithHarness() {
   const vault = libraryVault();
   const harness = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX, reportsFolder: REPORTS } });

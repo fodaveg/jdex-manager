@@ -320,8 +320,11 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
         },
         notesRewriteBatch: async (requests, batchOptions) => {
           const allowed = automatic ? requests.filter((request) => !protectedIds.has(request.id)) : requests;
-          if (allowed.length === 0) return { written: [], stale: [], committed: [] };
-          return rewriteWithIntents(allowed, batchOptions);
+          // What an undo just restored is held back, and said so (`held`): neither written
+          // nor stale, the caller counts it as skipped instead of losing it.
+          const held = requests.filter((request) => !allowed.includes(request)).map((request) => request.id);
+          if (allowed.length === 0) return { written: [], stale: [], committed: [], held };
+          return { ...(await rewriteWithIntents(allowed, batchOptions)), held };
         },
         noteSave: async (input) => {
           if (automatic && protectedIds.has(input.id)) throw new Error('Esta nota acaba de restaurarse al deshacer; no se reescribe automáticamente.');
