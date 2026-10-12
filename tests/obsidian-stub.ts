@@ -1,4 +1,10 @@
 /* Minimal stand-in for the `obsidian` package so pure logic can be tested in Node. */
+import { parse } from "yaml";
+
+/** Obsidian 1.14.4's `parseYaml` is the `yaml` package's `parse` with default options. */
+export function parseYaml(text: string): unknown {
+  return parse(text) as unknown;
+}
 export function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
 }

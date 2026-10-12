@@ -6,17 +6,20 @@ import type { Effect } from '../src/jd/journal';
 import { maintainSystem } from '../src/vault/maintenance';
 import { collectAudit } from '../src/vault/audit';
 import { createSystemReport } from '../src/vault/system-report';
+import { readFrontmatter } from '../src/vault/frontmatter-lines';
 
 function fixture() {
   const folderPaths = ['J', 'Reports', '20-29 Area', '20-29 Area/21 Cat', '20-29 Area/21 Cat/21.01 Inbox', '20-29 Area/21 Cat/21.11 Different'];
   const folders = folderPaths.map((path) => Object.assign(new TFolder(), { path }));
+  // The frontmatter lives in the text, as in a vault; the metadata cache derives from it.
+  const manual = '---\ndescripcion: Manual description\n---\n';
   const bodies = new Map([
-    ['J/21.11 Note.md', '# 21.11 Note\n\nManual prose.\n'],
-    ['J/21.10 ■ Header.md', '# 21.10 ■ Header\n\n<!-- jdex:hijos -->\n<!-- /jdex:hijos -->\n'],
-    ['J/00.00 Index.md', '# 00.00 Index\n\n<!-- jdex:indice -->\n<!-- /jdex:indice -->\n'],
+    ['J/21.11 Note.md', `${manual}# 21.11 Note\n\nManual prose.\n`],
+    ['J/21.10 ■ Header.md', `${manual}# 21.10 ■ Header\n\n<!-- jdex:hijos -->\n<!-- /jdex:hijos -->\n`],
+    ['J/00.00 Index.md', `${manual}# 00.00 Index\n\n<!-- jdex:indice -->\n<!-- /jdex:indice -->\n`],
     ['20-29 Area/21 Cat/21.01 Inbox/old.pdf', 'pdf'],
   ]);
-  const fm = new Map<string, Record<string, unknown>>([...bodies.keys()].map((path) => [path, { descripcion: 'Manual description' }]));
+  const fm = { get: (path: string) => readFrontmatter(bodies.get(path) ?? '') ?? undefined };
   const files = [...bodies.keys()].map((path) => Object.assign(new TFile(), { path, name: path.split('/').pop(), basename: path.split('/').pop()!.replace(/\.[^.]+$/, ''), extension: path.endsWith('.md') ? 'md' : 'pdf', parent: { path: path.slice(0, path.lastIndexOf('/')) }, stat: { ctime: 1, mtime: 1 } }));
   const create = vi.fn(async (path: string, body: string) => {
     const file = Object.assign(new TFile(), { path, basename: path.split('/').pop()!.slice(0, -3), extension: 'md', parent: { path: 'Reports' }, stat: { ctime: files.length, mtime: files.length } });
@@ -28,7 +31,7 @@ function fixture() {
     read: async (file: TFile) => bodies.get(file.path)!, cachedRead: async (file: TFile) => bodies.get(file.path)!,
     process: vi.fn(async (file: TFile, transform: (current: string) => string) => { const body = transform(bodies.get(file.path)!); bodies.set(file.path, body); return body; }), create,
   }, metadataCache: { getFileCache: (file: TFile) => ({ frontmatter: fm.get(file.path) }) }, fileManager: {
-    processFrontMatter: async (file: TFile, apply: (fm: Record<string, unknown>) => void) => apply(fm.get(file.path)!), renameFile: vi.fn(), trashFile: vi.fn(),
+    renameFile: vi.fn(), trashFile: vi.fn(),
   } } as unknown as App;
   return { app, bodies, fm, files, settings: mergeSettings({ jdexFolder: 'J', reportsFolder: 'Reports' }) };
 }
@@ -48,8 +51,12 @@ describe('Obsidian optional maintenance', () => {
     expect(app.fileManager.renameFile).not.toHaveBeenCalled();
     expect(app.fileManager.trashFile).not.toHaveBeenCalled();
     expect(app.vault.create).not.toHaveBeenCalled();
-    expect(effects.some((effect) => effect.kind === 'frontmatter')).toBe(true);
-    expect(effects.filter((effect) => effect.kind === 'note-rewrite')).toHaveLength(2);
+    // Frontmatter fixes are exact rewrites now, like the managed blocks.
+    const rewritten = effects.flatMap((effect) => effect.kind === 'note-rewrite' ? [effect.path] : []);
+    expect(rewritten).toContain('J/21.11 Note.md');
+    expect(rewritten).toContain('J/21.10 ■ Header.md');
+    expect(rewritten).toContain('J/00.00 Index.md');
+    expect(effects.some((effect) => effect.kind === 'frontmatter')).toBe(false);
     const next: Effect[] = [];
     await maintainSystem(app, settings, next);
     expect(next).toEqual([]);

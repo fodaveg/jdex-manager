@@ -14,7 +14,7 @@
  *   `markdown.setProperty` de doble (el del host falso lanza «no implementado»).
  * - `fakeSetProperty`: LA parte que no es de este repo. El escritor de propiedades de
  *   verdad es el de Hebra (`setMarkdownProperty`, conserva el frontmatter byte a byte);
- *   aquí va su port fiel (`host-set-property.ts`), medido contra el host, para que las
+ *   aquí va su port fiel (`src/vault/frontmatter-lines.ts`), medido contra el host, para que las
  *   pruebas del adaptador vean el cuerpo que llegaría a Hebra.
  */
 import { vi } from 'vitest';
@@ -44,7 +44,7 @@ import type {
   PluginWorkspace
 } from 'hebra-plugin-api';
 import { createFakePluginApi, FAKE_ROOT_FOLDER_ID, type FakePluginApi } from 'hebra-plugin-api/testing';
-import { hostSetProperty } from './host-set-property';
+import { setFrontmatterProperty } from '../../../src/vault/frontmatter-lines';
 
 export { FAKE_ROOT_FOLDER_ID };
 
@@ -445,7 +445,7 @@ export class FakeJdexVault implements PluginVault {
 
 /**
  * Doble de `api.markdown.setProperty`: el port fiel de `setMarkdownProperty` de Hebra
- * (`support/host-set-property.ts`), comprobado contra casos medidos en el host. Incluye
+ * (`src/vault/frontmatter-lines.ts`), comprobado contra casos medidos en el host. Incluye
  * los casos «no parcheable» (clave repetida, línea raíz no reconocida…), en los que el
  * host devuelve el cuerpo sin cambios, y `null`, que deja la clave vacía.
  */
@@ -454,7 +454,8 @@ export function fakeSetProperty(
   key: string,
   value: string | readonly string[] | null
 ): string {
-  return hostSetProperty(body, key, value);
+  // The host returns the body unchanged where the port refuses.
+  return setFrontmatterProperty(body, key, value) ?? body;
 }
 
 // ---- workspace ----

@@ -9,8 +9,9 @@ import { patternFor } from "../jd/patterns";
 import { allFolderPaths, scanVault } from "./scan";
 import { ensureFolder } from "./create";
 import { writeDailyReport } from "./report-write";
+import { patchFrontmatter, readFrontmatter } from "./frontmatter-lines";
 import { resolveTemplate } from "./templates";
-import { durableEffect, type Effect } from "../jd/journal";
+import type { Effect } from "../jd/journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
 import type { JdIndex } from "../jd/index";
 
@@ -95,28 +96,35 @@ export async function runAudit(app: App, settings: JdexManagerSettings): Promise
 }
 
 /**
- * Applies one mechanical fix. Frontmatter edits go through Obsidian so the rest of the note is kept.
- * Audited values are checked inside the writer; fields edited since the audit are skipped.
- * Only actual edits are appended to `effects`, when given, so the operation can be undone.
+ * Applies one mechanical fix. Frontmatter edits touch only the lines of their keys
+ * (`patchFrontmatter`, never `processFrontMatter`, which reserialises the whole block
+ * and drops the user's comments). Audited values are checked inside the writer; fields
+ * edited since the audit are skipped. Only actual edits are appended to `effects`, when
+ * given, as exact rewrites so the operation can be undone.
  */
 export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?: JdexManagerSettings): Promise<void> {
   if (fix.type === "frontmatter") {
     const file = app.vault.getAbstractFileByPath(fix.path);
     if (!(file instanceof TFile)) throw new Error(`${fix.path} no es una nota.`);
-    const previous: Record<string, unknown> = {};
     const skipped: string[] = [];
-    await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+    let refused: string[] = [];
+    let rewrite: Effect | null = null;
+    await app.vault.process(file, (current) => {
+      const fm = readFrontmatter(current) ?? {};
+      const set: Record<string, string> = {};
       for (const [key, value] of Object.entries(fix.set)) {
-        if (fix.expected && JSON.stringify(fm[key]) !== JSON.stringify(fix.expected[key])) {
-          skipped.push(key);
-          continue;
-        }
-        previous[key] = fm[key];
-        fm[key] = value;
+        if (fix.expected && JSON.stringify(fm[key]) !== JSON.stringify(fix.expected[key])) skipped.push(key);
+        else set[key] = value;
       }
+      const patched = patchFrontmatter(current, set);
+      refused = patched.refused;
+      if (refused.length > 0 || patched.body === current) return current;
+      rewrite = { kind: "note-rewrite", path: fix.path, before: current, after: patched.body };
+      return patched.body;
     });
-    if (Object.keys(previous).length > 0) effects?.push(durableEffect({ kind: "frontmatter", path: fix.path, previous }));
+    if (rewrite) effects?.push(rewrite);
     if (skipped.length > 0) new Notice(`${fix.path}: se omitió ${skipped.join(", ")} porque cambió desde la auditoría.`);
+    if (refused.length > 0) new Notice(`${fix.path}: no se escribió ${refused.join(", ")} porque el frontmatter tiene una clave repetida o un formato que no se puede modificar sin riesgo.`, 10000);
     return;
   }
   if (fix.type === "folders") {

@@ -1,15 +1,21 @@
 /**
- * Faithful port of Hebra's `api.markdown.setProperty` (`setMarkdownProperty` in
- * `hebra/src/lib/notes/markdown.ts`, with `findFrontmatterAtStart` from
- * `markdown/dialect.ts` and the key rules of `notes/frontmatter-key.ts`).
+ * Frontmatter writes that touch only the line(s) of the key, for Obsidian. Obsidian's
+ * `processFrontMatter` (1.14.4: parse the block to an object, run the callback,
+ * stringify the object, splice it back) drops every comment and rewrites quoting, list
+ * style and unquoted numbers (`jd: 21.20` comes back as `jd: 21.2`), so the plugin no
+ * longer uses it to write.
  *
- * The host patches one root key in place and returns the body UNCHANGED whenever the
- * frontmatter is not safe to patch: a repeated key (case-insensitive), a root line it
- * does not recognise, `key:value` without a space, a tab-indented continuation, or an
- * opening `---` without a closing delimiter. `null` keeps the key with an empty value.
- * `tests/hebra/host-set-property.test.ts` checks this port against outputs measured on
- * the real host (`tests/hebra/fixtures/host-set-property-cases.json`).
+ * This is a faithful port of Hebra's `setMarkdownProperty` (`hebra/src/lib/notes/
+ * markdown.ts`, with `findFrontmatterAtStart` from `markdown/dialect.ts` and the key
+ * rules of `notes/frontmatter-key.ts`), so both hosts patch frontmatter the same way.
+ * It refuses (returns `null`) whenever the block is not safe to patch: a repeated key
+ * (case-insensitive), a root line it does not recognise, `key:value` without a space, a
+ * tab-indented continuation, or an opening `---` without a closing delimiter. A `null`
+ * value keeps the key with an empty value. `tests/hebra/host-set-property.test.ts`
+ * checks it against outputs measured on the real Hebra host
+ * (`tests/hebra/fixtures/host-set-property-cases.json`).
  */
+import { parseYaml } from 'obsidian';
 
 const PLAIN_KEY_WORD_SOURCE = '[\\p{L}\\p{N}\\p{M}_-]+';
 const PLAIN_KEY_SOURCE = `[\\p{L}_][\\p{L}\\p{N}\\p{M}_-]*(?:[ \\t]+${PLAIN_KEY_WORD_SOURCE})*`;
@@ -140,20 +146,20 @@ function splice(source: string, from: number, to: number, insert: string): strin
   return source.slice(0, from) + insert + source.slice(to);
 }
 
-function replaceField(markdown: string, name: string, serializedValue: string): string {
+function replaceField(markdown: string, name: string, serializedValue: string): string | null {
   const frontmatter = frontmatterAtStart(markdown);
   const newline = markdown.includes('\r\n') ? '\r\n' : '\n';
   const separator = serializedValue === '' ? '' : ' ';
   const token = PLAIN_KEY_PATTERN.test(name) ? name : JSON.stringify(name);
   const defaultLine = `${token}:${separator}${serializedValue}${newline}`;
   if (!frontmatter) {
-    if (/^(?:\uFEFF)?---(?:\r?\n|$)/.test(markdown)) return markdown;
+    if (/^(?:\uFEFF)?---(?:\r?\n|$)/.test(markdown)) return null;
     const bodyFrom = markdown.startsWith('\uFEFF') ? 1 : 0;
     const body = markdown.slice(bodyFrom);
     const trimmed = body.replace(/^\s+/, '');
     return splice(markdown, bodyFrom, bodyFrom + body.length - trimmed.length, `---${newline}${defaultLine}---${newline}${newline}`);
   }
-  if (!frontmatter.safeToPatch) return markdown;
+  if (!frontmatter.safeToPatch) return null;
   const existing = frontmatter.fields.get(name.toLowerCase());
   if (existing) {
     const preserved = preservedFieldComments(existing.value);
@@ -164,9 +170,47 @@ function replaceField(markdown: string, name: string, serializedValue: string): 
   return splice(markdown, frontmatter.contentTo, frontmatter.contentTo, defaultLine);
 }
 
-/** Same contract as Hebra's `api.markdown.setProperty` for text and list values. */
-export function hostSetProperty(markdown: string, name: string, value: string | readonly string[] | null): string {
+export type FrontmatterLineValue = string | readonly string[] | null;
+
+/** The YAML text between the delimiters of the frontmatter at the start, or `null`. */
+export function frontmatterSource(markdown: string): string | null {
+  const span = findFrontmatter(markdown);
+  if (!span) return null;
+  const firstNewline = markdown.indexOf('\n');
+  return markdown.slice(firstNewline + 1, span.contentTo);
+}
+
+/** The frontmatter as Obsidian reads it (`parseYaml`), or `null` without one or when unreadable. */
+export function readFrontmatter(markdown: string): Record<string, unknown> | null {
+  const source = frontmatterSource(markdown);
+  if (source === null) return null;
+  try {
+    const value: unknown = parseYaml(source);
+    return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes one root key, touching only its line(s). `null` when it cannot be done
+ * safely (the cases above, or an empty key): the caller must not fall back to
+ * reserialising the whole block.
+ */
+export function setFrontmatterProperty(markdown: string, name: string, value: FrontmatterLineValue): string | null {
   const normalizedName = name.trim();
-  if (!normalizedName || /[\r\n]/u.test(normalizedName)) return markdown;
+  if (!normalizedName || /[\r\n]/u.test(normalizedName)) return null;
   return replaceField(markdown, normalizedName, value === null ? '' : JSON.stringify(value));
+}
+
+/** Writes every key of `set`, or none: `refused` lists the keys that could not be written safely. */
+export function patchFrontmatter(markdown: string, set: Readonly<Record<string, FrontmatterLineValue>>): { body: string; refused: string[] } {
+  let body = markdown;
+  const refused: string[] = [];
+  for (const [key, value] of Object.entries(set)) {
+    const next = setFrontmatterProperty(body, key, value);
+    if (next === null) refused.push(key);
+    else body = next;
+  }
+  return refused.length > 0 ? { body: markdown, refused } : { body, refused };
 }
