@@ -7,10 +7,12 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "audit:bundled": "node scripts/audit-bundled.mjs",
     "build:hebra": "node scripts/build-hebra.mjs",
     "lint": "eslint .",
-    "test": "vitest run --maxWorkers=1 --minWorkers=1",
-    "check": "npm run lint && npm run build && npm run build:hebra && npm run test"
+    "test": "vitest run --maxWorkers=1",
+    "test:coverage": "vitest run --maxWorkers=1 --coverage",
+    "check": "npm run lint && npm run build && npm run build:hebra && npm run test:coverage"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -19,22 +21,24 @@
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.35.1",
     "@typescript-eslint/parser": "^8.35.1",
-    "esbuild": "0.17.3",
+    "@vitest/coverage-v8": "^5.0.4",
+    "esbuild": "0.28.2",
     "eslint": "^9.30.1",
     "eslint-plugin-obsidianmd": "^0.2.9",
     "happy-dom": "^20.14.5",
     "hebra-plugin-api": "github:fodaveg/hebra-plugin-api#v1.2.0",
-    "obsidian": "latest",
+    "obsidian": "~1.14.4",
     "tslib": "2.4.0",
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.35.1",
-    "vitest": "^2.1.9",
+    "vite": "^7.0.0",
+    "vitest": "^5.0.4",
     "yaml": "^2.9.1"
   },
   "overrides": {
     "obsidian": {
-      "@codemirror/state": "$@codemirror/state",
-      "@codemirror/view": "$@codemirror/view"
+      "@codemirror/state": "^6.7.1",
+      "@codemirror/view": "^6.43.9"
     }
   }
 }
