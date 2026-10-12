@@ -16,8 +16,21 @@ export interface JdexTemplatesOutcome {
   readonly existing: readonly string[];
 }
 
+/** Titles of the notes directly in `folderId`, read from the library itself: the templates
+ *  folder may lie outside the walk, which then lists none of its notes. */
+async function titlesIn(library: Pick<PluginVault, 'notesPage'>, folderId: string): Promise<Set<string>> {
+  const titles = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page = await library.notesPage(cursor, 200, { kind: 'folder', folderId });
+    for (const item of page.items) titles.add(item.title.normalize('NFC'));
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return titles;
+}
+
 export async function writeJdexBuiltinTemplates(
-  library: Pick<PluginVault, 'noteCreate'>,
+  library: Pick<PluginVault, 'noteCreate' | 'notesPage'>,
   markdown: Pick<PluginMarkdown, 'withTitle'>,
   walk: JdexLibraryWalk,
   settings: Pick<JdexManagerSettings, 'templatesFolder' | 'templateNames'>
@@ -29,9 +42,10 @@ export async function writeJdexBuiltinTemplates(
   if (folderId === null) throw new Error(`La carpeta de plantillas («${settings.templatesFolder}») no existe.`);
   const created: string[] = [];
   const existing: string[] = [];
+  const inFolder = await titlesIn(library, folderId);
   for (const type of TEMPLATE_TYPES) {
     const name = settings.templateNames[type];
-    if (walk.systemNotes.some((note) => note.folderId === folderId && note.title === name)) {
+    if (inFolder.has(name.normalize('NFC')) || walk.systemNotes.some((note) => note.folderId === folderId && note.title === name)) {
       existing.push(name);
       continue;
     }

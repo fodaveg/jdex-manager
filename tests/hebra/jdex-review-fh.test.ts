@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, JOURNAL_VERSION, type Operation } from '../../src/heb
 import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { guardJdexJournal } from '../../src/hebra/jdex-lifecycle';
 import { createJdexFolderRenameGuard } from '../../src/hebra/jdex-folder-rename';
+import { writeJdexBuiltinTemplates } from '../../src/hebra/jdex-templates';
 import { JDEX_REWRITE_BATCH_MAX, JdexPartialRewriteError, rewriteJdexNotes } from '../../src/hebra/jdex-write';
 import { createJdexJournal, JdexJournalSaveError, type JdexJournal, type JdexJournalEffect } from '../../src/hebra/jdex-journal';
 import { activateJdex } from './support/activate';
@@ -307,6 +308,23 @@ describe('FH 9: a path edited by hand in the panel stops following the old folde
     const again = await activateJdex(api);
     expect((await api.storage.settings.load<{ reportsFolder: string }>())?.reportsFolder).toBe('Informes nuevos');
     await again();
+  });
+});
+
+describe('FH 10: built-in templates are not written twice into a folder outside the walk', () => {
+  it('a second run finds the four templates by name in the real folder', async () => {
+    const library = new FakeJdexVault();
+    library.seedFolder(fakeFolder('f-templates', null, 'Plantillas'));
+    // The templates folder is outside the system walk: the walk lists none of its notes.
+    const walk = { rootFolderId: 'root', folderPaths: new Map([['f-templates', 'Plantillas']]), systemFolderPaths: [], systemNotes: [] };
+    const settings = { ...DEFAULT_SETTINGS, templatesFolder: 'Plantillas' };
+    const markdown = { withTitle: (body: string, title: string) => `# ${title}\n\n${body}` };
+    expect((await writeJdexBuiltinTemplates(library, markdown, walk, settings)).created).toHaveLength(4);
+    const again = await writeJdexBuiltinTemplates(library, markdown, walk, settings);
+    expect(again.created).toEqual([]);
+    expect(again.existing).toHaveLength(4);
+    const page = await library.notesPage(null, 100, { kind: 'folder', folderId: 'f-templates' });
+    expect(page.items).toHaveLength(4);
   });
 });
 
