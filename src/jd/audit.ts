@@ -193,7 +193,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         : categoryFolder(entry.category, entry.system);
       // A + child folder is `+ Title`: same sanitising as any JDex name and never its tags.
       const name = entry.id.endsWith("+") ? jdexNoteName("+", titleForCompare(entry.title)) : jdexNoteName(entry.id, titleForCompare(entry.title), entry.system ?? "");
-      const path = parent ? `${parent}/${name}` : undefined;
+      const path = parent && name !== "+" ? `${parent}/${name}` : undefined;
       const pattern = path && !entry.id.endsWith("+") ? input.patternFor?.(entry.category) ?? [] : [];
       findings.push({
         kind: "note-without-folder",

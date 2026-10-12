@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildIndex } from "../src/jd/index";
-import { pairAction } from "../src/jd/pair";
+import { pairAction, pairBlockedByRepeat } from "../src/jd/pair";
 import { FOLDERS, JDEX, NOTES } from "./fixtures";
 
 const settings = { jdexFolder: JDEX, systemRoot: "" };
@@ -169,5 +169,26 @@ describe("pairAction", () => {
     expect(pairAction({ oldPath: "Notas/Hola.md", newPath: "Notas/Adiós.md", isFolder: false }, index, settings)).toEqual({ type: "none" });
     expect(pairAction({ oldPath: "Otro/21.22 JDex Manager.md", newPath: "Otro/21.22 X.md", isFolder: false }, index, settings)).toEqual({ type: "none" });
     expect(pairAction({ oldPath: `${JDEX}/21.21 Temas de Obsidian.md`, newPath: `${JDEX}/21.21 Temas.md`, isFolder: false }, index, settings)).toEqual({ type: "none" });
+  });
+});
+
+describe("pairAction on repeated numbers and empty titles", () => {
+  const parent = `${CAT}/21.22 JDex Manager`;
+  const oldPath = `${JDEX}/21.22+ A.md`;
+  const newPath = `${JDEX}/21.22+ Z.md`;
+
+  it("proposes nothing when the number is repeated (it could rename toward the other ID)", () => {
+    const build = (folders: string[]) => buildIndex({ systemRoot: "", folderPaths: [...FOLDERS, ...folders], jdexFolder: JDEX, notePaths: [...NOTES, oldPath] });
+    expect(pairAction({ oldPath, newPath, isFolder: false }, build([`${parent}/+ A`]), settings).type).toBe("rename-partner");
+    // Two folders `+ A` under the same parent: the `+` identity is repeated.
+    const repeated = buildIndex({ systemRoot: "", folderPaths: [...FOLDERS, `${parent}/+ A`, `${CAT}/21.22 JDex Manager/+ A`], jdexFolder: JDEX, notePaths: [...NOTES, oldPath, `${JDEX}/21.22+ A #otra.md`] });
+    expect(pairAction({ oldPath, newPath, isFolder: false }, repeated, settings)).toEqual({ type: "none" });
+    expect(pairBlockedByRepeat({ oldPath, newPath, isFolder: false }, repeated, settings)).toBe(true);
+    expect(pairBlockedByRepeat({ oldPath, newPath, isFolder: false }, build([`${parent}/+ A`]), settings)).toBe(false);
+  });
+
+  it("proposes no `+` alone when the new title is empty", () => {
+    const index = buildIndex({ systemRoot: "", folderPaths: [...FOLDERS, `${parent}/+ A`], jdexFolder: JDEX, notePaths: [...NOTES, oldPath] });
+    expect(pairAction({ oldPath, newPath: `${JDEX}/21.22+ ----.md`, isFolder: false }, index, settings)).toEqual({ type: "none" });
   });
 });

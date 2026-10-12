@@ -1,0 +1,36 @@
+{
+  "source": "Hebra repo, read on 12 Oct 2026 (read-only; the host was not executed): src/lib/library/sqlite-engine.ts notesRewriteBatch (~3755-3830) and folderTrashEmpty (~2554), src/lib/plugins/api/vault-facade.ts notesRewriteBatch (~341), src/lib/notes/markdown.ts firstHeading/decodeScalar, src/lib/library/derive.ts TITLE_MAX_LENGTH. Cases marked needsHost are NOT confirmed against a running host.",
+  "titles": [
+    { "name": "H1 on the first line", "body": "# Hola\n", "title": "Hola" },
+    { "name": "H1 after blank lines", "body": "\n\n# Hola\n", "title": "Hola" },
+    { "name": "H1 after the frontmatter", "body": "---\ntipo: id\n---\n\n# Hola\n", "title": "Hola" },
+    { "name": "an H1 that is not on the first non-blank line is body", "body": "intro\n\n# Capítulo\n", "title": "" },
+    { "name": "closing hashes are dropped", "body": "# Hola ##\n", "title": "Hola" },
+    { "name": "title: wins over the H1", "body": "---\ntitle: Frontmatter\n---\n# Cuerpo\n", "title": "Frontmatter" },
+    { "name": "double-quoted title: is JSON-decoded", "body": "---\ntitle: \"A \\\"B\\\"\"\n---\n", "title": "A \"B\"" },
+    { "name": "single-quoted title: decodes the doubled quote", "body": "---\ntitle: 'It''s'\n---\n", "title": "It's" },
+    { "name": "empty title: falls back to the H1", "body": "---\ntitle:\n---\n# Cuerpo\n", "title": "Cuerpo" },
+    { "name": "title is cut at 200 characters", "body": "# {A*250}\n", "title": "{A*200}" },
+    { "name": "a cut never splits a surrogate pair", "body": "# {A*199}😀\n", "title": "{A*199}" }
+  ],
+  "rewriteRevision": [
+    { "name": "default: same sequence and same hash", "strict": false, "seq": "same", "hash": "same", "outcome": "written" },
+    { "name": "default: same sequence, other hash", "strict": false, "seq": "same", "hash": "other", "outcome": "written" },
+    { "name": "default: newer sequence, same hash", "strict": false, "seq": "newer", "hash": "same", "outcome": "written" },
+    { "name": "default: newer sequence and other hash", "strict": false, "seq": "newer", "hash": "other", "outcome": "stale" },
+    { "name": "strict: same sequence and same hash", "strict": true, "seq": "same", "hash": "same", "outcome": "written" },
+    { "name": "strict: same sequence, other hash", "strict": true, "seq": "same", "hash": "other", "outcome": "stale" },
+    { "name": "strict: newer sequence, same hash", "strict": true, "seq": "newer", "hash": "same", "outcome": "stale" },
+    { "name": "strict: newer sequence and other hash", "strict": true, "seq": "newer", "hash": "other", "outcome": "stale" }
+  ],
+  "folderTrashEmpty": [
+    { "name": "empty folder with the expected name and parent", "expected": { "name": "70 Adjuntos", "parent": "f1" }, "children": [], "result": true },
+    { "name": "a null parent means the root", "folderAtRoot": true, "expected": { "name": "70 Adjuntos", "parent": null }, "children": [], "result": true },
+    { "name": "other name", "expected": { "name": "Otro", "parent": "f1" }, "children": [], "result": false },
+    { "name": "other parent", "expected": { "name": "70 Adjuntos", "parent": "f2" }, "children": [], "result": false },
+    { "name": "a live subfolder blocks it", "expected": { "name": "70 Adjuntos", "parent": "f1" }, "children": ["folder"], "result": false },
+    { "name": "a note inside blocks it", "expected": { "name": "70 Adjuntos", "parent": "f1" }, "children": ["note"], "result": false },
+    { "name": "a trashed note inside blocks it", "expected": { "name": "70 Adjuntos", "parent": "f1" }, "children": ["trashed-note"], "result": false },
+    { "name": "the root never goes", "target": "root", "expected": { "name": "", "parent": null }, "children": [], "result": false }
+  ]
+}
