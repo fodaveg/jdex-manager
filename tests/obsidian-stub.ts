@@ -63,11 +63,16 @@ export class Component {
   onunload(): void {}
   /** Events handed to `registerEvent`, so a test can see what a view or plugin subscribed to. */
   declare registeredEvents: unknown[] | undefined;
+  /** Cleanups registered with `register`, run by the test when it unloads the plugin. */
+  declare registered: Array<() => unknown> | undefined;
+  register(callback: () => unknown): void {
+    (this.registered ??= []).push(callback);
+  }
   registerEvent(ref: unknown): void {
     (this.registeredEvents ??= []).push(ref);
   }
 }
-unmodelled(Component, ["addChild", "removeChild", "register", "registerDomEvent", "registerInterval"]);
+unmodelled(Component, ["addChild", "removeChild", "registerDomEvent", "registerInterval"]);
 
 export class Plugin extends Component {
   app: unknown;

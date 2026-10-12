@@ -33,7 +33,7 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
   const systemId = typeof source.systemId === 'string' ? normalizeSystemId(source.systemId) : null;
   if (systemId !== null) out.systemId = systemId;
   for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'autocomplete', 'prefixNamesWithSystem',
-    'createFolderByDefault', 'descriptionIsFinding', 'noteWithoutFolderIsFinding', 'renamePairsWithoutAsking'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+    'createFolderByDefault', 'descriptionIsFinding', 'noteWithoutFolderIsFinding', 'renamePairsWithoutAsking', 'debugLog'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
   if (source.autocompleteInsert === 'link' || source.autocompleteInsert === 'number') out.autocompleteInsert = source.autocompleteInsert;
   // Template names: each type keeps its default unless a non-empty name was stored.
   if (typeof source.templateNames === 'object' && source.templateNames !== null && !Array.isArray(source.templateNames)) {

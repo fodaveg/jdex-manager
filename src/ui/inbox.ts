@@ -1,6 +1,7 @@
 import { type App, Modal, Notice, Setting, TFile } from "obsidian";
 import { categoryOfPath, type DateFormat, zeroOf } from "../jd/files";
 import type { JdIndex } from "../jd/index";
+import { trackModal } from "./modal-registry";
 import { confirm } from "./confirm";
 import { IdSuggestModal } from "./go-to-id";
 import { fileDate } from "../vault/file-date";
@@ -31,6 +32,7 @@ export class ProcessInboxModal extends Modal {
   }
 
   onOpen(): void {
+    trackModal(this);
     void this.render();
   }
 
