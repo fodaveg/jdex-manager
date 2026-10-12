@@ -11,6 +11,7 @@ import { createId } from "../src/ui/create-id";
 import { CreateCategoryModal } from "../src/ui/create-structure";
 import { ProcessInboxModal } from "../src/ui/inbox";
 import { PluginDataFile, UndoShield, undoLastOperation } from "../src/vault/journal-store";
+import { MaintenanceGate, onceNotifier } from "../src/vault/maintenance-gate";
 import { fakeVault, type FakeVault } from "./obsidian-journal-fake";
 
 const ROOT_FOLDERS = ["J", "20-29 Area", "20-29 Area/21 Cat", "20-29 Area/21 Cat/21.01 Inbox", "20-29 Area/21 Cat/21.09 Archive"];
@@ -43,6 +44,8 @@ async function plugin(v: FakeVault, extra: Record<string, unknown> = {}) {
     renaming: false,
     maintenanceRunning: false,
     maintenanceTimer: null,
+    maintenanceGate: new MaintenanceGate(),
+    maintenanceWarn: onceNotifier(() => {}),
     indexCache: null,
     inboxBar: null,
     shield: new UndoShield(1500, () => now),
@@ -216,7 +219,7 @@ describe("Undo is not redone by automatic writes", () => {
     const { p, data, shield } = await plugin(v);
     const created = (p as unknown as { journalOperation(kind: string, label: string): { push(...e: unknown[]): number } }).journalOperation("create-id", "Create 21.11 Note");
     v.file("J/21.11 Note.md", "# 21.11 Note\n", { jd: "21.11", tipo: "id" });
-    created.push({ kind: "created-note", path: "J/21.11 Note.md", content: "# 21.11 Note\n" });
+    created.push({ kind: "created-note", path: "J/21.11 Note.md", content: v.bodies.get("J/21.11 Note.md")! });
     await p.refreshHeaders(undefined, false);
     expect(data.journal.entries.map((op) => op.label)).toEqual(["Create 21.11 Note", "Update header lists"]);
     const undo = () => undoLastOperation({ app: v.app, data, shield, confirm: async () => true, notice: () => {}, setRenaming: () => {} });

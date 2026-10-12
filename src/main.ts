@@ -2,6 +2,7 @@ import { type App, Notice, normalizePath, Plugin, PluginSettingTab, Setting, typ
 import { healthFileName, renderHealthReport } from "./jd/health";
 import { todayIso } from "./jd/template";
 import { ensureFolder } from "./vault/create";
+import { writeDailyReport } from "./vault/report-write";
 import { openGlobalSearch, pathQuery } from "./vault/search";
 import type { Effect, OperationKind } from "./jd/journal";
 import { deviceIdentity, discardLastOperation, PluginDataFile, type RecordingEffects, UndoShield, undoLastOperation } from "./vault/journal-store";
@@ -18,15 +19,16 @@ import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
 import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
 import { IdSuggestModal, openEntry } from "./ui/go-to-id";
 import { ProcessInboxModal } from "./ui/inbox";
+import { FolderSuggest } from "./ui/folder-suggest";
 import { IdEditorSuggest } from "./ui/autocomplete";
 import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
 import { categoryOfPath, idFolderOfPath, isDatable, locate, zeroOf } from "./jd/files";
+import { fileDate } from "./vault/file-date";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
-import { headersToMigrate, updateHeaders } from "./vault/headers";
-import { wrapFirstLinkList } from "./jd/headers";
+import { applyHeaderWraps, headersToMigrate, updateHeaders } from "./vault/headers";
 import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex } from "./vault/structure";
 import { retireId } from "./vault/retire";
 import { formatCategoryPatterns, parseCategoryPatterns } from "./jd/patterns";
@@ -35,6 +37,7 @@ import { registerReadingLinks } from "./vault/reading-links";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
 import { maintainSystem } from "./vault/maintenance";
+import { MaintenanceGate, onceNotifier } from "./vault/maintenance-gate";
 import { createSystemReport } from "./vault/system-report";
 
 export default class JdexManagerPlugin extends Plugin {
@@ -62,6 +65,8 @@ export default class JdexManagerPlugin extends Plugin {
   }
   private maintenanceTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
   private maintenanceRunning = false;
+  private maintenanceGate = new MaintenanceGate();
+  private maintenanceWarn = onceNotifier((message) => void new Notice(message));
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -96,6 +101,13 @@ export default class JdexManagerPlugin extends Plugin {
     registerReadingLinks(this, {
       index: () => this.cachedIndex(),
       enabled: () => this.settings.readingLinks && this.settings.jdexFolder !== "",
+      choose: (entries) =>
+        new Promise<IdEntry | null>((resolve) => {
+          const modal = new IdSuggestModal(this.app, { ...this.cachedIndex(), ids: entries }, (e) => resolve(e), "Which one?");
+          modal.setInstructions([{ command: "↵", purpose: "open the note" }]);
+          modal.onClose = () => resolve(null);
+          modal.open();
+        }),
     });
 
     // Folders are only known once the vault has loaded; detect then, and only into empty fields.
@@ -358,12 +370,10 @@ export default class JdexManagerPlugin extends Plugin {
       this.refreshInboxCount();
       this.queueMaintenance(file);
     }));
+    // The index is built from paths only, so a modify never invalidates it.
     this.registerEvent(this.app.vault.on("modify", (file) => {
       this.undoShield.observe(file.path);
       this.queueMaintenance(file);
-      if (!(file instanceof TFile) || file.extension !== "md" || this.settings.jdexFolder === "") return;
-      const rel = relativeTo(this.settings.jdexFolder, file.path);
-      if (rel !== null && rel !== "" && !rel.includes("/")) this.invalidateIndex();
     }));
     this.registerEvent(this.app.vault.on("create", (file) => {
       this.undoShield.observe(file.path);
@@ -400,14 +410,22 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   /**
-   * Coalesces vault changes; events produced by maintenance, by the plugin's own renames or by an
-   * undo (while it runs and while its events settle) never enqueue another pass.
+   * Coalesces vault changes; the pass's own writes never enqueue another pass, foreign ones during
+   * it enqueue one. Events of an undo (while it runs and while they settle) never enqueue a pass.
    */
   private queueMaintenance(file: TAbstractFile, oldPath?: string): void {
-    if (!this.settings.automaticMaintenance || this.maintenanceRunning || this.renaming || !this.app.workspace.layoutReady) return;
+    if (!this.settings.automaticMaintenance || !this.app.workspace.layoutReady) return;
     if (this.undoShield.settling && (this.undoShield.protects(file.path) || (oldPath !== undefined && this.undoShield.protects(oldPath)))) return;
     const relevant = (path: string) => relativeTo(this.settings.systemRoot, path) !== null || relativeTo(this.settings.jdexFolder, path) !== null;
     if (!relevant(file.path) && !(oldPath && relevant(oldPath))) return;
+    if (this.maintenanceRunning) {
+      this.maintenanceGate.observe(file.path, oldPath);
+      return;
+    }
+    this.scheduleMaintenance();
+  }
+
+  private scheduleMaintenance(): void {
     if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
     this.maintenanceTimer = activeWindow.setTimeout(() => {
       this.maintenanceTimer = null;
@@ -422,19 +440,27 @@ export default class JdexManagerPlugin extends Plugin {
   async maintainAutomatically(): Promise<void> {
     if (!this.settings.automaticMaintenance || this.maintenanceRunning) return;
     this.maintenanceRunning = true;
+    this.maintenanceGate.begin();
+    let again = false;
     try {
+      // Waits for an undo in progress; leaves alone what that undo restored.
       await this.data.journal.exclusive(async () => {
         const effects = this.journalOperation("fix", "Automatic JDex maintenance");
         try {
-          await maintainSystem(this.app, this.settings, effects, (path) => this.undoShield.protects(path));
+          await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn, (path) => this.undoShield.protects(path));
         } catch (error) {
           new Notice(`Automatic maintenance stopped: ${String(error)}`);
         }
         await effects.flush().catch(() => undefined);
+        again = await this.maintenanceGate.finish(effects, async (path) => {
+          const f = this.app.vault.getAbstractFileByPath(path);
+          return f instanceof TFile ? await this.app.vault.read(f) : null;
+        });
       });
     } finally {
       this.maintenanceRunning = false;
     }
+    if (again) this.scheduleMaintenance();
   }
 
   /** Runs only on command; each report contains audit, health and changes since the previous. */
@@ -622,25 +648,36 @@ export default class JdexManagerPlugin extends Plugin {
       "Wrap",
     );
     if (!ok) return;
-    const effects = this.journalOperation("fix", "Wrap header lists in markers");
-    for (const t of todo) {
-      // Recomputed on the live body, so an edit since the preview is kept and journaled exactly.
-      await this.app.vault.process(t.file, (current) => {
-        const next = wrapFirstLinkList(current);
-        if (next === null || next === current) return current;
-        effects.push({ kind: "note-rewrite", path: t.file.path, before: current, after: next });
-        return next;
-      });
-    }
-    await effects.flush().catch(() => undefined);
-    new Notice(`Markers added to ${todo.length} note(s).`);
+    const wrapped = await applyHeaderWraps(this.app, todo);
+    await this.record("fix", "Wrap header lists in markers", wrapped.effects);
+    new Notice(wrapped.skipped.length === 0
+      ? `Markers added to ${wrapped.written.length} note(s).`
+      : `Markers added to ${wrapped.written.length} note(s). Skipped ${wrapped.skipped.length} edited after the preview: ${wrapped.skipped.join(", ")}`, 10000);
     await this.refreshHeaders(undefined, true);
   }
 
   private renaming = false;
+  /** Renames the plugin itself performs for a pair (old path to new path); only these are ignored. */
+  private ownRenames?: Map<string, string>;
+  private renameQueue?: Promise<void>;
+
+  private isOwnRename(oldPath: string, newPath: string): boolean {
+    for (const [from, to] of this.ownRenames ?? []) {
+      if (oldPath === from ? newPath === to : oldPath.startsWith(`${from}/`) && newPath === `${to}${oldPath.slice(from.length)}`) return true;
+    }
+    return false;
+  }
+
+  /** Renames are handled one at a time, so a foreign one during a pair's prompt is not lost or mixed up. */
+  async onRename(file: TAbstractFile, oldPath: string): Promise<void> {
+    if (this.renaming || this.isOwnRename(oldPath, file.path)) return;
+    const run = (this.renameQueue ?? Promise.resolve()).then(() => this.handleRename(file, oldPath));
+    this.renameQueue = run.catch(() => undefined);
+    return run;
+  }
 
   /** Rename in pairs, the "never renumber" warning and the moved-category warning. */
-  async onRename(file: TAbstractFile, oldPath: string): Promise<void> {
+  private async handleRename(file: TAbstractFile, oldPath: string): Promise<void> {
     if (this.renaming || this.settings.jdexFolder === "") return;
     if (this.undoShield.settling && (this.undoShield.protects(file.path) || this.undoShield.protects(oldPath))) return;
     const index = scanVault(this.app, this.settings);
@@ -668,14 +705,14 @@ export default class JdexManagerPlugin extends Plugin {
           "Rename",
         ));
       if (ok) {
-        this.renaming = true;
+        (this.ownRenames ??= new Map()).set(action.partnerPath, action.newPartnerPath);
         const effects = this.journalOperation("move", `Rename ${action.partnerPath} with its pair`);
         try {
           await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath }, effects);
         } catch (error) {
           new Notice(error instanceof Error ? error.message : String(error));
         } finally {
-          this.renaming = false;
+          this.ownRenames?.delete(action.partnerPath);
           await effects.flush().catch(() => undefined);
         }
       }
@@ -720,7 +757,7 @@ export default class JdexManagerPlugin extends Plugin {
         this.app,
         file,
         target.folderPath,
-        zero === "09" ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined,
+        zero === "09" ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined,
       );
       if (to !== from) await this.record("move", `${zero === "09" ? "Archive" : "Send to inbox"} ${file.name}`, [{ kind: "moved", from, to, ...identity }]);
       new Notice(`Moved to ${to}.`);
@@ -761,7 +798,7 @@ export default class JdexManagerPlugin extends Plugin {
       folder = wanted;
     }
     try {
-      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined;
+      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined;
       const from = file.path;
       const identity = movedIdentity(file);
       const to = await moveInto(this.app, file, folder, date);
@@ -808,20 +845,8 @@ export default class JdexManagerPlugin extends Plugin {
     const path = normalizePath(`${this.settings.reportsFolder}/${healthFileName(date)}`);
     const effects = this.journalOperation("fix", "Create health report");
     try {
-      const existing = this.app.vault.getAbstractFileByPath(path);
-      let file: TFile;
-      if (existing instanceof TFile) {
-        await this.app.vault.process(existing, (current) => {
-          if (current !== content) effects.push({ kind: "note-rewrite", path, before: current, after: content });
-          return content;
-        });
-        file = existing;
-      } else if (existing) throw new Error(`${path} exists and is not a note.`);
-      else {
-        await ensureFolder(this.app, this.settings.reportsFolder, effects);
-        file = await this.app.vault.create(path, content);
-        effects.push({ kind: "created-note", path, content });
-      }
+      // A health report of the day edited by hand is kept; the new one goes to «(2)».
+      const { file } = await writeDailyReport(this.app, this.settings.reportsFolder, path, content, effects);
       await this.app.workspace.getLeaf(false).openFile(file);
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));
@@ -1109,7 +1134,7 @@ class JdexManagerSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
-  // `getSettingDefinitions` arrived in Obsidian 1.13; this plugin supports 1.4.16, so it renders the tab itself.
+  // `getSettingDefinitions` arrived in Obsidian 1.13; manifest.json minAppVersion is 1.7.2 (checked by npm run check:min-app), so it renders the tab itself.
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
@@ -1157,21 +1182,25 @@ class JdexManagerSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("System identifier")
       .setDesc("Only with several Johnny.Decimal systems: a letter and two digits (D01). Names like D01.21.22 are then understood. Empty = single system.")
-      .addText((text) =>
+      .addText((text) => {
+        // Typing `D01` passes through `D` and `D0`: saving on each keystroke is silent, and the
+        // warning waits until the field loses focus, once.
         text
           .setPlaceholder("Empty = single system")
           .setValue(this.plugin.settings.systemId)
           .onChange(async (value) => {
             const id = normalizeSystemId(value);
-            if (id === null) {
-              // eslint-disable-next-line obsidianmd/ui/sentence-case
-              new Notice("A system identifier is a capital letter and two digits, like D01.");
-              return;
-            }
+            if (id === null) return;
             this.plugin.settings.systemId = id;
             await this.plugin.saveSettings();
-          }),
-      );
+          });
+        text.inputEl.addEventListener("blur", () => {
+          if (normalizeSystemId(text.getValue()) === null) {
+            // eslint-disable-next-line obsidianmd/ui/sentence-case
+            new Notice("A system identifier is a capital letter and two digits, like D01. The value was not saved.");
+          }
+        });
+      });
 
     new Setting(containerEl)
       .setName("Prefix new names with the system identifier")
@@ -1471,14 +1500,16 @@ class JdexManagerSettingTab extends PluginSettingTab {
     new Setting(this.containerEl)
       .setName(name)
       .setDesc(desc)
-      .addText((text) =>
-        text
+      .addText((text) => {
+        // The suggestions are a help; the field stays free text.
+        new FolderSuggest(this.app, text.inputEl);
+        return text
           .setPlaceholder(placeholder)
           .setValue(get())
           .onChange(async (value) => {
             set(value.trim().replace(/^\/+|\/+$/g, ""));
             await this.plugin.saveSettings();
-          }),
-      );
+          });
+      });
   }
 }

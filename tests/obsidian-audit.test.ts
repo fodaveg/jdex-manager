@@ -57,17 +57,16 @@ beforeEach(() => {
 describe("Obsidian audit fixes", () => {
   it("removes originally absent frontmatter after a repair journal survives JSON storage", async () => {
     const file = Object.assign(new TFile(), { path: "JDex/21.22 X.md" });
-    const fm: Record<string, unknown> = { descripcion: "Texto existente", area: null };
-    const app = { vault: { getAbstractFileByPath: () => file },
-      fileManager: { processFrontMatter: async (_file: TFile, write: (value: Record<string, unknown>) => void) => { write(fm); } } } as unknown as App;
+    const original = "---\ndescripcion: Texto existente\narea:\n---\n# 21.22 X\n";
+    const state = { body: original };
+    const app = { vault: { getAbstractFileByPath: () => file,
+      process: async (_file: TFile, update: (current: string) => string) => (state.body = update(state.body)) } } as unknown as App;
     const effects: Effect[] = [];
     await applyFix(app, { type: "frontmatter", path: file.path, set: { jd: "21.22", tipo: "id", area: "20-29", categoria: "21" } }, effects);
+    expect(state.body).toContain('categoria: "21"');
     const reloaded = JSON.parse(JSON.stringify({ kind: "fix", label: "Reparar", at: "2026-10-05", effects })) as Operation;
     await undoOperation(app, reloaded);
-    expect(fm).toEqual({ descripcion: "Texto existente", area: null });
-    expect(fm).not.toHaveProperty("jd");
-    expect(fm).not.toHaveProperty("tipo");
-    expect(fm).not.toHaveProperty("categoria");
+    expect(state.body).toBe(original);
   });
 
   it("normalizes every frontmatter writer before saving the Obsidian journal", async () => {
@@ -221,23 +220,20 @@ describe("Obsidian audit fixes", () => {
       notes: [{ path, frontmatter: fm, body: "Descripción propuesta." }], filePaths: [path],
     });
     const file = Object.assign(new TFile(), { path });
-    const cachedFrontmatter = { ...fm };
+    // After the audit: the description was written by hand and tipo changed elsewhere.
+    const state = { body: '---\njd: wrong\ndescripcion: "Descripción manual posterior."\ntipo: archivado\n---\nDescripción propuesta.\n' };
     const app = {
-      vault: { getAbstractFileByPath: () => file },
-      metadataCache: { getFileCache: () => ({ frontmatter: cachedFrontmatter }) },
-      fileManager: { processFrontMatter: async (_file: TFile, write: (current: Record<string, unknown>) => void) => {
-        fm.tipo = "archivado";
-        write(fm);
-      } },
+      vault: { getAbstractFileByPath: () => file,
+        process: async (_file: TFile, update: (current: string) => string) => (state.body = update(state.body)) },
     } as unknown as App;
-    fm.descripcion = "Descripción manual posterior.";
+    const before = state.body;
     const effects: Effect[] = [];
     for (const finding of findings.filter((f) => f.fix?.type === "frontmatter")) await applyFix(app, finding.fix!, effects);
-    expect(fm.descripcion).toBe("Descripción manual posterior.");
-    expect(fm.jd).toBe("21.22");
-    expect(fm.tipo).toBe("archivado");
+    expect(state.body).toContain('descripcion: "Descripción manual posterior."');
+    expect(state.body).toContain('jd: "21.22"');
+    expect(state.body).toContain("tipo: archivado");
     expect(effects).toHaveLength(1);
-    expect(effects[0]).toEqual({ kind: "frontmatter", path, previous: { jd: "wrong" }, written: { jd: "21.22" } });
+    expect(effects[0]).toEqual({ kind: "note-rewrite", path, before, after: state.body });
     expect(ui.messages.join(" ")).toContain("descripcion porque cambió desde la auditoría");
   });
 
@@ -270,9 +266,9 @@ describe("Obsidian audit fixes", () => {
   it("enables a repair after explicit selection and writes the selected description", async () => {
     const path = 'JDex/21.22 X.md';
     const file = Object.assign(new TFile(), { path });
-    const fm: Record<string, unknown> = {};
-    const write = vi.fn(async (_file: TFile, update: (current: Record<string, unknown>) => void) => update(fm));
-    const app = { vault: { getAbstractFileByPath: () => file }, fileManager: { processFrontMatter: write } } as unknown as App;
+    const state = { body: '# 21.22 X\n' };
+    const write = vi.fn(async (_file: TFile, update: (current: string) => string) => (state.body = update(state.body)));
+    const app = { vault: { getAbstractFileByPath: () => file, process: write } } as unknown as App;
     const finding: Finding = { kind: 'missing-description', paths: [path], message: 'Descripción.',
       fix: { type: 'frontmatter', path, set: { descripcion: 'Seleccionada.' } } };
     const done = vi.fn(async () => {});
@@ -284,7 +280,7 @@ describe("Obsidian audit fixes", () => {
     ui.buttons[0].click?.();
     await vi.waitFor(() => expect(done).toHaveBeenCalledTimes(1));
     expect(write).toHaveBeenCalledTimes(1);
-    expect(fm.descripcion).toBe('Seleccionada.');
+    expect(state.body).toContain('descripcion: "Seleccionada."');
     expect(modal.effects).toHaveLength(1);
     expect(ui.messages).toContain('Arreglos procesados: 1; omitidos o fallidos: 0.');
   });

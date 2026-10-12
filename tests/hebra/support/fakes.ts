@@ -14,8 +14,8 @@
  *   `markdown.setProperty` de doble (el del host falso lanza «no implementado»).
  * - `fakeSetProperty`: LA parte que no es de este repo. El escritor de propiedades de
  *   verdad es el de Hebra (`setMarkdownProperty`, conserva el frontmatter byte a byte);
- *   aquí solo se imita su formato (`clave: "valor"`, JSON) para que las pruebas del
- *   adaptador vean el cuerpo que llegaría a Hebra.
+ *   aquí va su port fiel (`src/vault/frontmatter-lines.ts`), medido contra el host, para que las
+ *   pruebas del adaptador vean el cuerpo que llegaría a Hebra.
  */
 import { vi } from 'vitest';
 import type {
@@ -44,6 +44,7 @@ import type {
   PluginWorkspace
 } from 'hebra-plugin-api';
 import { createFakePluginApi, FAKE_ROOT_FOLDER_ID, type FakePluginApi } from 'hebra-plugin-api/testing';
+import { setFrontmatterProperty } from '../../../src/vault/frontmatter-lines';
 
 export { FAKE_ROOT_FOLDER_ID };
 
@@ -101,6 +102,32 @@ export function fakeFolder(id: string, parentId: string | null, name: string): P
 
 function notImplemented(what: string): never {
   throw new Error(`FakeJdexVault: «${what}» no está en el doble.`);
+}
+
+/** Hebra's `NOTES_REWRITE_BATCH_MAX` (`hebra/src/lib/library/types.ts`): the host
+ *  facade throws `invalid-argument` above it (`plugins/api/vault-facade.ts`). */
+export const HOST_REWRITE_BATCH_MAX = 200;
+
+/** An error shaped like the host's `PluginApiError` (`isPluginApiError` accepts it). */
+export function hostApiError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { name: 'PluginApiError', code });
+}
+
+/** Throws exactly where the host does when a rewrite batch is too large. */
+export function assertHostRewriteBatchSize(count: number): void {
+  if (count > HOST_REWRITE_BATCH_MAX) {
+    throw hostApiError('invalid-argument', `Como mucho ${HOST_REWRITE_BATCH_MAX} notas por lote (llegaron ${count}).`);
+  }
+}
+
+/** The package fake vault (`createFakePluginApi`) has no batch limit: this adds the host one. */
+export function withHostRewriteBatchLimit<T extends Pick<PluginVault, 'notesRewriteBatch'>>(vault: T): T {
+  const original = vault.notesRewriteBatch.bind(vault);
+  vault.notesRewriteBatch = async (entries, options) => {
+    assertHostRewriteBatchSize(entries.length);
+    return original(entries, options);
+  };
+  return vault;
 }
 
 export class FakeJdexVault implements PluginVault {
@@ -225,6 +252,7 @@ export class FakeJdexVault implements PluginVault {
     entries: readonly PluginNoteRewrite[],
     options?: { cause?: string | null; touchUpdatedAt?: boolean }
   ) {
+    assertHostRewriteBatchSize(entries.length);
     this.rewriteCalls.push({ entries: entries.map((entry) => ({ ...entry })), options });
     const written: string[] = [];
     const stale: string[] = [];
@@ -415,40 +443,27 @@ export class FakeJdexVault implements PluginVault {
 
 // ---- markdown ----
 
-/** El `markdown` del host falso: `frontmatterRange` y `withTitle` son aproximaciones del de Hebra. */
-const MARKDOWN: PluginMarkdown = createFakePluginApi().api.markdown;
-
 /**
- * Doble de `api.markdown.setProperty` (ver la cabecera): `clave: "valor"` en JSON, la línea
- * existente sustituida (o quitada con `null`) o una línea nueva antes del cierre del
- * frontmatter, que se crea si no hay. No imita los casos «no parcheable» de Hebra.
+ * Doble de `api.markdown.setProperty`: el port fiel de `setMarkdownProperty` de Hebra
+ * (`src/vault/frontmatter-lines.ts`), comprobado contra casos medidos en el host. Incluye
+ * los casos «no parcheable» (clave repetida, línea raíz no reconocida…), en los que el
+ * host devuelve el cuerpo sin cambios, y `null`, que deja la clave vacía.
  */
 export function fakeSetProperty(
   body: string,
   key: string,
   value: string | readonly string[] | null
 ): string {
-  const range = MARKDOWN.frontmatterRange(body);
-  const line = value === null ? null : `${key}: ${JSON.stringify(value)}`;
-  if (!range) {
-    return line === null ? body : `---\n${line}\n---\n${body}`;
-  }
-  const block = body.slice(0, range.end);
-  const rest = body.slice(range.end);
-  const lines = block.split('\n');
-  const existing = lines.findIndex((entry) => new RegExp(`^${key}\\s*:`, 'u').test(entry));
-  if (existing >= 0) {
-    if (line === null) lines.splice(existing, 1);
-    else lines[existing] = line;
-  } else if (line !== null) {
-    // Antes del delimitador de cierre: la última línea con contenido del bloque.
-    const closing = block.endsWith('\n') ? lines.length - 2 : lines.length - 1;
-    lines.splice(closing, 0, line);
-  }
-  return lines.join('\n') + rest;
+  // The host returns the body unchanged where the port refuses.
+  return setFrontmatterProperty(body, key, value) ?? body;
 }
 
 // ---- workspace ----
+
+/** Hebra's per-guard deadline in `confirmFolderRename` (`src/lib/plugins/api/
+ *  workspace-bridge.ts`, `FOLDER_RENAME_GUARD_TIMEOUT_MS`): past it the guard counts as
+ *  allowing the change. Keep in step with the host. */
+export const FOLDER_RENAME_GUARD_TIMEOUT_MS = 5_000;
 
 /** `workspace` que el test dispara a mano (como Hebra al abrir una nota, cambiar carpetas…). */
 export class FakeWorkspace {
@@ -497,12 +512,39 @@ export class FakeWorkspace {
     for (const listener of [...this.#titleListeners]) listener(event);
   }
 
-  /** Como Hebra antes de `folderRename`/`folderMove`: se pregunta a las guardias en orden y
-   *  basta un `false`. */
+  /** Faults the host would report (`workspace.onBeforeFolderRename`): a guard that threw or
+   *  did not answer in time. */
+  readonly guardFaults: unknown[] = [];
+
+  /** Like Hebra's `confirmFolderRename` (`workspace-bridge.ts`): the guards are asked in
+   *  order and one `false` is enough; each one gets `FOLDER_RENAME_GUARD_TIMEOUT_MS`, and a
+   *  guard that throws or does not answer in time is reported and counts as ALLOW. */
   async askFolderRename(event: PluginFolderRenameEvent): Promise<boolean> {
     for (const guard of [...this.#guards]) {
-      if (!(await guard(event))) return false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const deadline = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`la guardia no respondió en ${FOLDER_RENAME_GUARD_TIMEOUT_MS / 1000} s`)),
+            FOLDER_RENAME_GUARD_TIMEOUT_MS
+          );
+        });
+        if ((await Promise.race([guard(event), deadline])) === false) return false;
+      } catch (error) {
+        this.guardFaults.push(error);
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    return true;
+  }
+
+  /** Like Hebra's sidebar (`LibraryApp.svelte`, `onrenamefolder`/`onmovefolder`): asks the
+   *  guards and, if they allow it, renames or moves the folder in `vault`. */
+  async changeFolderAsHost(vault: PluginVault, event: PluginFolderRenameEvent): Promise<boolean> {
+    if (!(await this.askFolderRename(event))) return false;
+    if (event.kind === 'folder-rename') await vault.folderRename(event.folderId, event.newName);
+    else await vault.folderMove(event.folderId, event.newParentId);
     return true;
   }
 
@@ -524,7 +566,7 @@ function domUi(base: PluginUi): PluginUi {
       document.body.append(dialog);
       const cleanup = mount(dialog);
       let closed = false;
-      return {
+      const handle: PluginModalHandle = {
         close() {
           if (closed) return;
           closed = true;
@@ -533,6 +575,13 @@ function domUi(base: PluginUi): PluginUi {
           options?.onClosed?.();
         }
       };
+      // Escape on a `<dialog>` fires `cancel`; the host closes the modal (and calls
+      // `onClosed`) without any button. Tests dispatch `new Event('cancel')`.
+      dialog.addEventListener('cancel', (event) => {
+        event.preventDefault();
+        handle.close();
+      });
+      return handle;
     },
     notice(text, onClick) {
       base.notice(text, onClick);

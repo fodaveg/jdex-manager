@@ -168,3 +168,36 @@ describe('mountJdexAuditView', () => {
     expect(el.querySelector('.hebra-jdex-audit-apply')).toBeNull();
   });
 });
+
+describe('mountJdexAuditView: efecto de cada arreglo', () => {
+  const rename: Finding = { kind: 'name-mismatch', paths: ['A/21.13 Uno.md', 'A/21.13 Dos'], message: '21.13: la nota se llama «Uno» y la carpeta «Dos».',
+    fix: { type: 'rename', from: 'A/21.13 Dos', to: 'A/21.13 Uno' } };
+  const trash: Finding = { kind: 'duplicate-id', paths: ['x (conflicted).md', 'x.md'], message: '21.14 está repetido en 2 notas.',
+    fix: { type: 'trash', path: 'x (conflicted).md', identicalTo: 'x.md' } };
+
+  it('pinta el efecto de rename y trash y qué lado se toca', () => {
+    const el = document.createElement('div');
+    mountJdexAuditView(el, { findings: () => [rename, trash], openPath: vi.fn(), repair: vi.fn() });
+    const effects = [...el.querySelectorAll('.hebra-jdex-audit-effect')].map((n) => n.textContent);
+    expect(effects).toEqual(['A/21.13 Dos → A/21.13 Uno', 'Papelera: x (conflicted).md']);
+    const sides = [...el.querySelectorAll('.hebra-jdex-audit-effect-side')].map((n) => n.textContent);
+    expect(sides).toEqual([
+      'Se renombra la carpeta para que coincida con la nota; la nota no cambia.',
+      'Va a la papelera la copia x (conflicted).md; se conserva x.md (contenido idéntico).'
+    ]);
+  });
+
+  it('cada casilla Reparar tiene un nombre accesible único con el mensaje del hallazgo', () => {
+    const el = document.createElement('div');
+    mountJdexAuditView(el, { findings: () => [rename, trash], openPath: vi.fn(), repair: vi.fn() });
+    const names = [...el.querySelectorAll('.hebra-jdex-repair-select')].map((n) => n.getAttribute('aria-label'));
+    expect(names).toEqual([`Reparar: ${rename.message}`, `Reparar: ${trash.message}`]);
+    expect(new Set(names).size).toBe(2);
+  });
+
+  it('una fila sin arreglo no pinta efecto', () => {
+    const el = document.createElement('div');
+    mountJdexAuditView(el, { findings: () => [{ kind: 'duplicate-id', paths: ['a', 'b'], message: 'dup.' }], openPath: vi.fn() });
+    expect(el.querySelector('.hebra-jdex-audit-effect')).toBeNull();
+  });
+});

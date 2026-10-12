@@ -42,6 +42,8 @@ export {
   expectedFrontmatter,
   // audit-report.ts — títulos legibles de cada tipo de hallazgo.
   KIND_TITLES,
+  describeFix,
+  describeFixSide,
   reportFileName,
   // settings.ts — ajustes del motor y sus valores por defecto.
   DEFAULT_SETTINGS,
@@ -55,6 +57,7 @@ export {
   isHeader,
   nextFreeId,
   jdexNoteName,
+  normalizeSystemId,
   // structure.ts — números y nombres de estructura nueva (área, categoría, cabecera).
   nextFreeArea,
   nextFreeCategory,
@@ -94,6 +97,7 @@ export {
   // JD son clicables… y autocompletado»). El motor solo ENCUENTRA; el host pinta el
   // enlace y ofrece las sugerencias (`jdex-editor-extension.ts`).
   findJdNumbers,
+  entriesByNumber,
   pushOperation, appendOperation, JOURNAL_MAX, JOURNAL_VERSION, JOURNAL_REMOVED_MAX, mergeJournals, withJournalIds, newJournalId, journalOperationId, patternFor, parseCategoryPatterns, formatCategoryPatterns,
   healthFileName, renderHealthReport,
   systemReportName, renderSystemReport, previousSystemSnapshot

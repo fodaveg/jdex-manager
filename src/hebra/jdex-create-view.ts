@@ -168,12 +168,10 @@ export function mountCreateCategoryDialog(
   options: CreateCategoryDialogOptions
 ): void {
   let area = options.areas[0];
-  let number = area
-    ? (nextFreeCategory(
-        area.number,
-        options.index.categories.map((c) => c.number)
-      ) ?? '')
-    : '';
+  // Only the categories of the area's own system count: D01.21 does not occupy 21 or D02.21.
+  const sameSystemCategories = (): string[] =>
+    options.index.categories.filter((c) => (c.system ?? '') === (area?.system ?? '')).map((c) => c.number);
+  let number = area ? (nextFreeCategory(area.number, sameSystemCategories()) ?? '') : '';
   let title = '';
   let createFolder = options.createFolderDefault;
   let createInbox = true;
@@ -181,17 +179,13 @@ export function mountCreateCategoryDialog(
 
   const areaField = selectField(
     'Área',
-    options.areas.map((a) => ({ value: String(a.number), label: a.label })),
-    area ? String(area.number) : '',
+    options.areas.map((a) => ({ value: systemKey(a.code, a.system), label: a.label })),
+    area ? systemKey(area.code, area.system) : '',
     (value) => {
-      const next = options.areas.find((a) => a.number === Number(value));
+      const next = options.areas.find((a) => systemKey(a.code, a.system) === value);
       if (!next) return;
       area = next;
-      number =
-        nextFreeCategory(
-          area.number,
-          options.index.categories.map((c) => c.number)
-        ) ?? '';
+      number = nextFreeCategory(area.number, sameSystemCategories()) ?? '';
       numberField.input.value = number;
       refresh();
     }
@@ -256,7 +250,7 @@ export function mountCreateCategoryDialog(
     if (value < area.number || value > area.number + 9)
       return `La categoría tiene que estar dentro de ${areaCode(area.number)}.`;
     if (value === area.number) return `${number} es la categoría de gestión del área.`;
-    if (options.index.categories.some((c) => c.number === number)) return `${number} ya existe.`;
+    if (sameSystemCategories().includes(number)) return `${number} ya existe.`;
     return null;
   }
 

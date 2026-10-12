@@ -10,7 +10,15 @@
  *   a abrir «Procesar inbox» la trae otra vez).
  * - Abrir: como Omitir, y además abre la nota (`context.openNoteById`) para que se
  *   pueda mirar; el diálogo sigue con la siguiente en vez de cerrarse, para no cortar
- *   el recorrido por una sola nota.
+ *   el recorrido por una sola nota. DECISIÓN (audit 12 oct 2026, finding 11): se
+ *   mantiene así; en Obsidian el diálogo se cierra porque su modal tapa la nota.
+ * - Papelera (audit 12 oct 2026): con confirmación; la nota se recupera de la papelera
+ *   de Hebra o con «deshacer».
+ * - Vista previa: los primeros 600 caracteres de la nota, como en Obsidian.
+ * - Mover a un ID sin carpeta: solo si el usuario marca «Incluir IDs sin carpeta» y
+ *   confirma; nunca se crea una carpeta sin que lo pida.
+ * Hebra NO fecha el nombre al mover (Obsidian tiene el ajuste `dateOnMove`); solo
+ * «Archivar» pone la fecha de creación delante.
  *
  * Se lanza desde ⌘K y al pulsar «Inbox: N» en la barra de estado (`jdex-runtime.ts`).
  */
@@ -30,7 +38,15 @@ export interface JdexInboxProcessViewOptions {
   archiveTarget?(note: JdexNoteRef): string | null;
   onArchive(note: JdexNoteRef): Promise<void>;
   onOpen(note: JdexNoteRef): void;
+  /** First characters of the note body; `null` when it cannot be read (protected note). */
+  readPreview?(note: JdexNoteRef): Promise<string | null>;
+  /** Send the note to the library trash. Without it the button is not shown. */
+  onTrash?(note: JdexNoteRef): Promise<void>;
+  /** Move to an ID that has no folder, creating it. Without it only IDs with a folder are offered. */
+  onMoveCreatingFolder?(note: JdexNoteRef, entry: IdEntry): Promise<void>;
 }
+
+export const JDEX_INBOX_PREVIEW_CHARS = 600;
 
 export function mountJdexInboxProcessView(
   el: HTMLElement,
@@ -93,7 +109,60 @@ export function mountJdexInboxProcessView(
         advance();
       })
     );
-    noteView.append(heading, origin, actions);
+    if (options.onTrash) actions.append(actionButton('Papelera…', () => confirmTrash(note)));
+    noteView.append(heading, origin);
+    if (options.readPreview) {
+      const preview = document.createElement('pre');
+      preview.className = 'hebra-jdex-inbox-preview';
+      preview.setAttribute('aria-label', 'Vista previa de la nota');
+      preview.textContent = 'Cargando…';
+      noteView.append(preview);
+      void options.readPreview(note).then(
+        (text) => {
+          if (queue[0] !== note) return;
+          preview.textContent =
+            text === null
+              ? 'No se puede mostrar una vista previa de esta nota.'
+              : text === ''
+                ? '(nota vacía)'
+                : text.length > JDEX_INBOX_PREVIEW_CHARS
+                  ? `${text.slice(0, JDEX_INBOX_PREVIEW_CHARS)}…`
+                  : text;
+        },
+        () => {
+          if (queue[0] === note) preview.textContent = 'No se pudo leer la nota.';
+        }
+      );
+    }
+    noteView.append(actions);
+  }
+
+  /** Inline confirmation: nothing is trashed by a single click. */
+  function confirmTrash(note: JdexNoteRef): void {
+    noteView.replaceChildren();
+    const message = document.createElement('p');
+    message.textContent = `«${note.title}» irá a la papelera de Hebra. Podrás recuperarla desde ella o con «deshacer».`;
+    const actions = document.createElement('div');
+    actions.className = 'hebra-jdex-goto-actions';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'hebra-jdex-dialog-primary';
+    confirm.textContent = 'Mandar a la papelera';
+    confirm.addEventListener('click', () => void runTrash(note));
+    actions.append(confirm, actionButton('Cancelar', () => render()));
+    noteView.append(message, actions);
+    confirm.focus();
+  }
+
+  async function runTrash(note: JdexNoteRef): Promise<void> {
+    status.textContent = '';
+    try {
+      await options.onTrash?.(note);
+      advance();
+    } catch (error) {
+      render();
+      status.textContent = error instanceof Error ? error.message : String(error);
+    }
   }
 
   function openMove(note: JdexNoteRef): void {
@@ -110,12 +179,60 @@ export function mountJdexInboxProcessView(
       render();
     });
     movePanel.append(back);
-    mountJdexIdPicker(movePanel, {
-      entries: options.entries,
-      filter: (entry) => entry.folderPath !== undefined,
-      placeholder: 'Busca el ID de destino…',
-      onSelect: (entry) => void runMove(note, entry)
-    });
+    const pickerHost = document.createElement('div');
+    let includeWithoutFolder = false;
+    const mountPicker = (): void => {
+      pickerHost.replaceChildren();
+      mountJdexIdPicker(pickerHost, {
+        entries: options.entries,
+        filter: (entry) => includeWithoutFolder || entry.folderPath !== undefined,
+        placeholder: 'Busca el ID de destino…',
+        onSelect: (entry) =>
+          entry.folderPath === undefined ? confirmCreateFolder(note, entry) : void runMove(note, entry)
+      });
+    };
+    if (options.onMoveCreatingFolder) {
+      const label = document.createElement('label');
+      label.className = 'hebra-jdex-inbox-optional';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.addEventListener('change', () => {
+        includeWithoutFolder = toggle.checked;
+        mountPicker();
+      });
+      label.append(toggle, ' Incluir IDs sin carpeta (la carpeta solo se crea si lo confirmas)');
+      movePanel.append(label);
+    }
+    movePanel.append(pickerHost);
+    mountPicker();
+  }
+
+  /** A destination ID without a folder: ask before creating it. */
+  function confirmCreateFolder(note: JdexNoteRef, entry: IdEntry): void {
+    movePanel.replaceChildren();
+    const message = document.createElement('p');
+    message.textContent = `«${entry.label}» no tiene carpeta. ¿Crearla y mover «${note.title}» ahí?`;
+    const actions = document.createElement('div');
+    actions.className = 'hebra-jdex-goto-actions';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'hebra-jdex-dialog-primary';
+    confirm.textContent = 'Crear carpeta y mover';
+    confirm.addEventListener('click', () => void runMoveCreating(note, entry));
+    actions.append(confirm, actionButton('Cancelar', () => openMove(note)));
+    movePanel.append(message, actions);
+    confirm.focus();
+  }
+
+  async function runMoveCreating(note: JdexNoteRef, entry: IdEntry): Promise<void> {
+    status.textContent = '';
+    try {
+      await options.onMoveCreatingFolder?.(note, entry);
+      advance();
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : String(error);
+      openMove(note);
+    }
   }
 
   async function runMove(note: JdexNoteRef, entry: IdEntry): Promise<void> {

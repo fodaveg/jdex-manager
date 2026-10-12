@@ -10,7 +10,7 @@ import { systemIndexFile, updateSystemIndex } from "./structure";
  * Caller owns serialization and persists effects even when a later step fails.
  * `skip` leaves out paths an undo just restored, so maintenance does not redo what was undone.
  */
-export async function maintainSystem(app: App, settings: JdexManagerSettings, effects: Effect[], skip: (path: string) => boolean = () => false): Promise<void> {
+export async function maintainSystem(app: App, settings: JdexManagerSettings, effects: Effect[], warn?: (message: string) => void, skip: (path: string) => boolean = () => false): Promise<void> {
   if (!settings.automaticMaintenance || settings.jdexFolder === "") return;
   const { index, findings } = await collectAudit(app, settings);
   const derived = new Set(["jd", "tipo", "area", "categoria"]);
@@ -25,5 +25,5 @@ export async function maintainSystem(app: App, settings: JdexManagerSettings, ef
   }
   await updateHeaders(app, index, undefined, effects, skip);
   const indexNote = systemIndexFile(app, settings, index);
-  if (!indexNote || !skip(indexNote.path)) await updateSystemIndex(app, settings, index, false, effects);
+  if (!indexNote || !skip(indexNote.path)) await updateSystemIndex(app, settings, index, false, effects, warn);
 }

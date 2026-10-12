@@ -3,7 +3,7 @@
  * No Obsidian imports.
  */
 
-import { countProblems, FINDING_KINDS, type Finding, type FindingKind } from "./audit";
+import { countProblems, FINDING_KINDS, type Finding, type FindingKind, type Fix } from "./audit";
 
 export const KIND_TITLES: Record<FindingKind, string> = {
   "folder-without-note": "Carpetas con ID sin nota en el JDex",
@@ -21,6 +21,22 @@ export const KIND_TITLES: Record<FindingKind, string> = {
   "note-without-folder": "Notas sin carpeta (informativo)",
   "inbox-stale": "Elementos antiguos en el inbox (informativo)",
 };
+
+/** One line with the effect of a non-frontmatter fix: `from → to`, `Papelera: path` or `Crear path`. */
+export function describeFix(fix: Exclude<Fix, { type: "frontmatter" }>): string {
+  if (fix.type === "rename") return `${fix.from} → ${fix.to}`;
+  if (fix.type === "move") return fix.items.map(({ from, to }) => `${from} → ${to}`).join("; ");
+  if (fix.type === "trash") return `Papelera: ${fix.path}`;
+  if (fix.type === "create-note" || fix.type === "create-folder") return `Crear ${fix.path}`;
+  return `Crear ${fix.paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(", ")}`;
+}
+
+/** Which side a fix touches, so "Reparar" never hides what is renamed or discarded. */
+export function describeFixSide(fix: Fix): string | null {
+  if (fix.type === "rename") return "Se renombra la carpeta para que coincida con la nota; la nota no cambia.";
+  if (fix.type === "trash") return `Va a la papelera la copia ${fix.path}; se conserva ${fix.identicalTo} (contenido idéntico).`;
+  return null;
+}
 
 export function reportFileName(date: string): string {
   return `Auditoría JD - ${date}.md`;

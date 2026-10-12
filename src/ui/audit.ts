@@ -1,17 +1,9 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 import { FINDING_KINDS, type Finding, type Fix } from "../jd/audit";
-import { KIND_TITLES } from "../jd/audit-report";
+import { describeFix, KIND_TITLES } from "../jd/audit-report";
 import type { JdexManagerSettings } from "../settings";
 import type { Effect } from "../jd/journal";
 import { applyFix } from "../vault/audit";
-
-function describeFix(fix: Exclude<Fix, { type: "frontmatter" }>): string {
-  if (fix.type === "rename") return `${fix.from} → ${fix.to}`;
-  if (fix.type === "move") return fix.items.map(({ from, to }) => `${from} → ${to}`).join("; ");
-  if (fix.type === "trash") return `Papelera: ${fix.path}`;
-  if (fix.type === "create-note" || fix.type === "create-folder") return `Crear ${fix.path}`;
-  return `Crear ${fix.paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).join(", ")}`;
-}
 
 /** Creation first, then naming and metadata, moves, and finally trash. */
 function fixOrder(fix: Fix): number {

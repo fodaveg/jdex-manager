@@ -6,7 +6,7 @@
  * empieza en los valores por defecto del motor (`DEFAULT_SETTINGS`).
  */
 import type { PluginSettingsStorage } from 'hebra-plugin-api';
-import { DEFAULT_SETTINGS, detectFolders, fillEmpty, type JdexManagerSettings } from './engine';
+import { DEFAULT_SETTINGS, detectFolders, fillEmpty, normalizeSystemId, type JdexManagerSettings } from './engine';
 
 /** Lo único que este fichero pide a `api.storage.settings`. */
 export type JdexSettingsStorage = Pick<PluginSettingsStorage, 'load' | 'save'>;
@@ -22,13 +22,29 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
     'systemRoot',
     'templatesFolder',
     'reportsFolder',
-    'systemId', 'systemIndexNote', 'subfolderPattern'
+    'systemIndexNote', 'subfolderPattern'
   ];
   for (const key of strings) {
     const value = source[key];
     if (typeof value === 'string') (out as Record<string, unknown>)[key] = value;
   }
-  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  // `D01` (a capital letter and two digits) or empty: anything else would name notes
+  // the parser cannot read back, so it is dropped instead of stored.
+  const systemId = typeof source.systemId === 'string' ? normalizeSystemId(source.systemId) : null;
+  if (systemId !== null) out.systemId = systemId;
+  for (const key of ['createPatternByDefault', 'liveHeaders', 'automaticMaintenance', 'structureNotesAreFindings', 'autocomplete', 'prefixNamesWithSystem',
+    'createFolderByDefault', 'descriptionIsFinding', 'noteWithoutFolderIsFinding', 'renamePairsWithoutAsking'] as const) if (typeof source[key] === 'boolean') out[key] = source[key];
+  if (source.autocompleteInsert === 'link' || source.autocompleteInsert === 'number') out.autocompleteInsert = source.autocompleteInsert;
+  // Template names: each type keeps its default unless a non-empty name was stored.
+  if (typeof source.templateNames === 'object' && source.templateNames !== null && !Array.isArray(source.templateNames)) {
+    const stored = source.templateNames as Record<string, unknown>;
+    const names = { ...DEFAULT_SETTINGS.templateNames };
+    for (const type of Object.keys(names) as (keyof typeof names)[]) {
+      const value = stored[type];
+      if (typeof value === 'string' && value.trim() !== '') names[type] = value.trim();
+    }
+    out.templateNames = names;
+  }
   if (source.dateFormat === 'YYYY-MM-DD' || source.dateFormat === 'YYYY-MM') out.dateFormat = source.dateFormat;
   if (typeof source.inboxStaleDays === 'number' && Number.isInteger(source.inboxStaleDays) && source.inboxStaleDays >= 1) out.inboxStaleDays = source.inboxStaleDays;
   if (typeof source.healthMaxFiles === 'number' && Number.isFinite(source.healthMaxFiles) && source.healthMaxFiles >= 0) out.healthMaxFiles = source.healthMaxFiles;
@@ -38,21 +54,25 @@ function normalizeStored(raw: unknown): Partial<JdexManagerSettings> {
   return out;
 }
 
+/** En Hebra el autocompletado inserta el número a secas (así lo hacía antes de existir el
+ *  ajuste); el `link` del motor es el valor por defecto de Obsidian y aquí es opt-in. */
+export const HEBRA_DEFAULTS: JdexManagerSettings = { ...DEFAULT_SETTINGS, autocompleteInsert: 'number' };
+
 /** Ajustes guardados de esta biblioteca, sobre los valores por defecto del motor; sin
- *  nada guardado (o corrupto), `DEFAULT_SETTINGS` tal cual. */
+ *  nada guardado (o corrupto), los valores por defecto (`HEBRA_DEFAULTS`). */
 export async function loadJdexSettings(storage: JdexSettingsStorage): Promise<JdexManagerSettings> {
   try {
     const raw = await storage.load<unknown>();
-    if (raw === null) return DEFAULT_SETTINGS;
+    if (raw === null) return HEBRA_DEFAULTS;
     return jdexSettingsFromStored(raw);
   } catch {
-    return DEFAULT_SETTINGS;
+    return HEBRA_DEFAULTS;
   }
 }
 
 /** Ajustes a partir de un valor guardado (el de `storage.settings.onChange`, por ejemplo). */
 export function jdexSettingsFromStored(raw: unknown): JdexManagerSettings {
-  return raw === null ? DEFAULT_SETTINGS : { ...DEFAULT_SETTINGS, ...normalizeStored(raw) };
+  return raw === null ? HEBRA_DEFAULTS : { ...HEBRA_DEFAULTS, ...normalizeStored(raw) };
 }
 
 /**

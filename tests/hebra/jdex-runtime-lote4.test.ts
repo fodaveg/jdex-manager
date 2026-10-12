@@ -148,6 +148,24 @@ describe('activate — lote 4, «Procesar inbox»', () => {
     expect(document.body.textContent).toContain('La bandeja de entrada está vacía');
   });
 
+  it('muestra la vista previa y manda a la papelera solo tras confirmar, con entrada en el diario', async () => {
+    const fixture = buildFixture();
+    const { api, fake } = await setup(fixture);
+    await activateJdex(api);
+
+    void findCommand(fake, JDEX_COMMAND_PROCESS_INBOX).run();
+    const dialog = document.body.querySelector('dialog.hebra-module-modal')!;
+    await vi.waitFor(() => expect(dialog.querySelector('.hebra-jdex-inbox-preview')?.textContent).toContain('Suelta 1'));
+    const buttonOf = (text: string) => [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)!;
+    buttonOf('Papelera…').click();
+    expect((await fixture.library.noteRead('n-inbox-1'))?.trashedAt).toBeNull();
+    buttonOf('Mandar a la papelera').click();
+    await vi.waitFor(() => expect(dialog.textContent).toContain('Suelta 2'));
+    expect((await fixture.library.noteRead('n-inbox-1'))?.trashedAt).not.toBeNull();
+    const saved = await api.storage.settings.load<{ jdexJournal: { label: string }[] }>();
+    expect(saved?.jdexJournal.at(-1)?.label).toContain('Papelera desde el inbox');
+  });
+
   it('Omitir y Abrir avanzan sin escribir; Abrir llama a openNoteById', async () => {
     const fixture = buildFixture();
     const { api, fake, workspace } = await setup(fixture);

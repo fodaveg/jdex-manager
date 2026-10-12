@@ -6,7 +6,7 @@
  * en cada reconstrucción del índice (`jdex-runtime.ts`, `fillEmpty`): solo rellena lo que
  * está vacío, así que un campo escrito aquí a mano nunca se pisa sola.
  */
-import { formatCategoryPatterns, parseCategoryPatterns, type JdexManagerSettings } from './engine';
+import { formatCategoryPatterns, normalizeSystemId, parseCategoryPatterns, type JdexManagerSettings } from './engine';
 
 export interface JdexSettingsPanelOptions {
   get(): JdexManagerSettings;
@@ -15,6 +15,9 @@ export interface JdexSettingsPanelOptions {
   /** `host.pickFolder()` traducido a ruta completa. `null` = no tocar el campo: la API
    *  devuelve `null` al cancelar y también al elegir «Raíz» (para la raíz se vacía el campo). */
   pickFolder(): Promise<string | null>;
+  /** «Escribir plantillas integradas»: writes the missing ones and returns the message to
+   *  show (or throws with it). Absent = no button. */
+  writeTemplates?(): Promise<string>;
 }
 
 interface FieldSpec {
@@ -41,6 +44,8 @@ function folderField(
   label.textContent = spec.label;
   const input = document.createElement('input');
   input.type = 'text';
+  input.id = fieldId(spec.key);
+  label.htmlFor = input.id;
   input.value = options.get()[spec.key];
   input.placeholder = 'Sin configurar';
   const commit = (): void => {
@@ -53,6 +58,7 @@ function folderField(
   const pick = document.createElement('button');
   pick.type = 'button';
   pick.textContent = 'Elegir carpeta…';
+  pick.setAttribute('aria-label', `Elegir carpeta: ${spec.label}`);
   pick.addEventListener('click', () => {
     void options.pickFolder().then((path) => {
       if (path === null) return;
@@ -62,9 +68,41 @@ function folderField(
   });
   const hint = document.createElement('small');
   hint.textContent = spec.hint;
+  hint.id = `${input.id}-hint`;
+  input.setAttribute('aria-describedby', hint.id);
   row.append(label, input, pick, hint);
   return row;
 }
+
+/** Unique ids for `<label for>` and `aria-describedby`: the panel can be mounted twice. */
+let fieldSerial = 0;
+function fieldId(name: string): string {
+  fieldSerial += 1;
+  return `hebra-jdex-setting-${name}-${fieldSerial}`;
+}
+
+/** A labelled control: the input nested in its `<label>`, so it has an accessible name. */
+function labelledRow(text: string, control: HTMLElement, controlFirst = false): HTMLLabelElement {
+  const row = document.createElement('label');
+  row.className = 'hebra-jdex-settings-row';
+  if (controlFirst) row.append(control, document.createTextNode(text));
+  else row.append(document.createTextNode(text), control);
+  return row;
+}
+
+const TEMPLATE_LABELS: readonly [keyof JdexManagerSettings['templateNames'], string][] = [
+  ['id', 'Nombre de la plantilla de ID'],
+  ['cabecera', 'Nombre de la plantilla de cabecera'],
+  ['categoria', 'Nombre de la plantilla de categoría'],
+  ['area', 'Nombre de la plantilla de área']
+];
+
+const EXTRA_TOGGLES: readonly [string, 'createFolderByDefault' | 'descriptionIsFinding' | 'noteWithoutFolderIsFinding' | 'renamePairsWithoutAsking'][] = [
+  ['Crear también la carpeta al crear (valor inicial de la casilla)', 'createFolderByDefault'],
+  ['Avisar de notas JDex sin descripción', 'descriptionIsFinding'],
+  ['Contar como problema una nota JDex sin carpeta', 'noteWithoutFolderIsFinding'],
+  ['Renombrar la pareja nota y carpeta sin preguntar', 'renamePairsWithoutAsking']
+];
 
 export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPanelOptions): void {
   const container = document.createElement('div');
@@ -82,13 +120,40 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     systemIdInput.type = 'text';
     systemIdInput.value = options.get().systemId;
     systemIdInput.placeholder = 'D01, con varios sistemas en la misma biblioteca';
+    systemIdInput.id = fieldId('systemId');
+    systemIdLabel.htmlFor = systemIdInput.id;
+    const systemIdError = document.createElement('small');
+    systemIdError.className = 'hebra-jdex-settings-error';
+    systemIdError.setAttribute('role', 'alert');
+    systemIdError.id = `${systemIdInput.id}-error`;
+    systemIdInput.setAttribute('aria-describedby', systemIdError.id);
     systemIdInput.addEventListener('change', () => {
       const current = options.get();
-      if (current.systemId === systemIdInput.value) return;
-      options.save({ ...current, systemId: systemIdInput.value });
+      // Same rule as the Obsidian plugin (`normalizeSystemId`): a capital letter and two
+      // digits, or empty. Anything else is rejected and the stored value stays.
+      const normalized = normalizeSystemId(systemIdInput.value);
+      if (normalized === null) {
+        systemIdError.textContent = `«${systemIdInput.value.trim()}» no es un id de sistema: una letra y dos cifras, como D01.`;
+        systemIdInput.setAttribute('aria-invalid', 'true');
+        systemIdInput.value = current.systemId;
+        return;
+      }
+      systemIdError.textContent = '';
+      systemIdInput.removeAttribute('aria-invalid');
+      systemIdInput.value = normalized;
+      if (current.systemId === normalized) return;
+      options.save({ ...current, systemId: normalized });
     });
-    systemIdRow.append(systemIdLabel, systemIdInput);
+    systemIdRow.append(systemIdLabel, systemIdInput, systemIdError);
     container.append(systemIdRow);
+    const prefixRow = document.createElement('label');
+    prefixRow.className = 'hebra-jdex-settings-row';
+    const prefixInput = document.createElement('input');
+    prefixInput.type = 'checkbox';
+    prefixInput.checked = options.get().prefixNamesWithSystem;
+    prefixInput.addEventListener('change', () => options.save({ ...options.get(), prefixNamesWithSystem: prefixInput.checked }));
+    prefixRow.append(prefixInput, document.createTextNode('Poner el id de sistema delante de los nombres nuevos (D01.21.22 Título)'));
+    container.append(prefixRow);
 
     for (const [labelText, value, save] of [
       ['Patrón de subcarpetas', options.get().subfolderPattern, (value: string) => options.save({ ...options.get(), subfolderPattern: value })],
@@ -104,7 +169,7 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       row.append(input);
       container.append(row);
     }
-    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings']] as const) {
+    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings'], ['Autocompletar IDs al teclear NN.', 'autocomplete']] as const) {
       const row = document.createElement('label');
       row.className = 'hebra-jdex-settings-row';
       const input = document.createElement('input');
@@ -114,6 +179,59 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       row.append(input, document.createTextNode(labelText));
       container.append(row);
     }
+    for (const [labelText, key] of EXTRA_TOGGLES) {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = options.get()[key];
+      input.addEventListener('change', () => options.save({ ...options.get(), [key]: input.checked }));
+      container.append(labelledRow(labelText, input, true));
+    }
+    for (const [type, labelText] of TEMPLATE_LABELS) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = options.get().templateNames[type];
+      input.addEventListener('change', () => {
+        const current = options.get();
+        const name = input.value.trim();
+        // A template needs a name: empty restores the stored one.
+        if (name === '') { input.value = current.templateNames[type]; return; }
+        if (name === current.templateNames[type]) return;
+        options.save({ ...current, templateNames: { ...current.templateNames, [type]: name } });
+      });
+      container.append(labelledRow(labelText, input));
+    }
+    if (options.writeTemplates) {
+      const writeTemplates = (): Promise<string> => options.writeTemplates!();
+      const templatesRow = document.createElement('div');
+      templatesRow.className = 'hebra-jdex-settings-row';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Escribir plantillas integradas';
+      const status = document.createElement('small');
+      status.setAttribute('role', 'status');
+      status.id = fieldId('templates-status');
+      button.setAttribute('aria-describedby', status.id);
+      button.addEventListener('click', () => {
+        button.disabled = true;
+        void writeTemplates()
+          .then((message) => { status.textContent = message; })
+          .catch((error: unknown) => { status.textContent = error instanceof Error ? error.message : String(error); })
+          .finally(() => { button.disabled = false; });
+      });
+      templatesRow.append(button, status);
+      container.append(templatesRow);
+    }
+    const healthMax = document.createElement('input');
+    healthMax.type = 'number';
+    healthMax.min = '0';
+    healthMax.step = '1';
+    healthMax.value = String(options.get().healthMaxFiles);
+    healthMax.addEventListener('change', () => {
+      const value = Number(healthMax.value);
+      if (!Number.isInteger(value) || value < 0) { healthMax.value = String(options.get().healthMaxFiles); return; }
+      options.save({ ...options.get(), healthMaxFiles: value });
+    });
+    container.append(labelledRow('Ficheros por ID a partir de los que el informe de salud avisa', healthMax));
     const dateRow = document.createElement('label');
     dateRow.className = 'hebra-jdex-settings-row';
     dateRow.append(document.createTextNode('Formato de fecha al archivar'));
@@ -145,6 +263,22 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     });
     staleRow.append(staleDays);
     container.append(staleRow);
+    const insertRow = document.createElement('label');
+    insertRow.className = 'hebra-jdex-settings-row';
+    insertRow.append(document.createTextNode('El autocompletado inserta'));
+    const insertMode = document.createElement('select');
+    for (const [value, text] of [['number', 'El número'], ['link', 'Un enlace [[nota]]']] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      insertMode.append(option);
+    }
+    insertMode.value = options.get().autocompleteInsert;
+    insertMode.addEventListener('change', () => {
+      if (insertMode.value === 'number' || insertMode.value === 'link') options.save({ ...options.get(), autocompleteInsert: insertMode.value });
+    });
+    insertRow.append(insertMode);
+    container.append(insertRow);
 
     const auto = document.createElement('p');
     auto.className = 'hebra-jdex-settings-hint';

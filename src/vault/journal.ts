@@ -1,5 +1,6 @@
 import { type App, type TAbstractFile, TFile, TFolder } from "obsidian";
 import { type Effect, frontmatterConflicts, frontmatterUndoState, isKnownEffect, type Operation, removeInsertedLine } from "../jd/journal";
+import { readFrontmatter, removeFrontmatterProperty, setFrontmatterProperty } from "./frontmatter-lines";
 
 export interface UndoOptions {
   /** The user confirmed a preview that warned about entries written before 0.5. */
@@ -95,15 +96,22 @@ async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<st
       if (state === "legacy" && !options.confirmedLegacy) throw new Error(`the frontmatter step of ${e.path} comes from an older version; confirm its undo explicitly`);
       const file = app.vault.getAbstractFileByPath(e.path);
       if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
-      // Compare every key before modifying any: a partial restore would leave the step unretryable.
-      await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-        const changed = e.written ? frontmatterConflicts(e.written, fm) : [];
+      // Never `processFrontMatter`: it drops comments and turns `jd: 21.20` into `21.2`. Only the
+      // lines of the recorded keys change, inside `process`, and every key is compared before
+      // any is touched: a partial restore would leave the step unretryable.
+      await app.vault.process(file, (current) => {
+        const changed = e.written ? frontmatterConflicts(e.written, readFrontmatter(current) ?? {}) : [];
         if (changed.length > 0) throw new Error(`${changed.join(", ")} in ${e.path} changed after the operation; nothing was restored, review manually`);
+        let next: string | null = current;
         for (const [key, value] of Object.entries(e.previous)) {
-          if (value === undefined) delete fm[key];
-          else fm[key] = value;
+          if (next === null) break;
+          if (value === undefined) next = removeFrontmatterProperty(next, key);
+          else if (value === null || typeof value === "string" || (Array.isArray(value) && value.every((item) => typeof item === "string"))) next = setFrontmatterProperty(next, key, value);
+          else next = null;
         }
-        for (const key of e.missingKeys ?? []) delete fm[key];
+        for (const key of e.missingKeys ?? []) if (next !== null) next = removeFrontmatterProperty(next, key);
+        if (next === null) throw new Error(`the frontmatter of ${e.path} cannot be restored line by line (a repeated key, an unusual format or a value that is not text); nothing was restored, review manually`);
+        return next;
       });
       return state === "legacy"
         ? `Restored the frontmatter of ${e.path} from an older entry; check it for keys the old version did not record.`

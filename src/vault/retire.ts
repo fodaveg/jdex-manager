@@ -3,6 +3,7 @@ import type { IdEntry, JdIndex } from "../jd/index";
 import { insertAfterH1, retirePlan } from "../jd/retire";
 import { todayIso } from "../jd/template";
 import type { Effect } from "../jd/journal";
+import { patchFrontmatter, readFrontmatter } from "./frontmatter-lines";
 import { movedIdentity } from "./journal";
 
 /** Applies a retire plan: marks the live note, moves its folder, then writes the line. Records what it did in `effects`. */
@@ -12,16 +13,22 @@ export async function retireId(app: App, index: JdIndex, entry: IdEntry, success
   const notes: string[] = [];
   const note = app.vault.getAbstractFileByPath(plan.notePath);
   if (!(note instanceof TFile)) throw new Error(`${plan.notePath} is not a note.`);
-  const previous: Record<string, unknown> = {};
-  // Read and reject an already retired ID inside the same frontmatter mutation.
-  await app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
+  let rewrite: Effect | null = null;
+  // Read and reject an already retired ID inside the same write. Only the lines of the
+  // plan's keys change (never `processFrontMatter`, which drops comments and turns an
+  // unquoted `jd: 21.20` into `21.2`); a frontmatter that cannot be patched safely stops
+  // here, before the folder is touched.
+  await app.vault.process(note, (current) => {
+    const fm = readFrontmatter(current) ?? {};
     if (fm.tipo === "archivado") throw new Error(`Ya retirado el ${typeof fm.archivado === "string" ? fm.archivado : "fecha desconocida"}.`);
-    for (const [key, value] of Object.entries(plan.frontmatter)) {
-      previous[key] = fm[key];
-      fm[key] = value;
+    const patched = patchFrontmatter(current, plan.frontmatter);
+    if (patched.refused.length > 0) {
+      throw new Error(`${plan.notePath}: no se pudo escribir ${patched.refused.join(", ")} porque el frontmatter tiene una clave repetida o un formato que no se puede modificar sin riesgo. Corrígelo a mano y vuelve a intentarlo; la nota y la carpeta no se han tocado.`);
     }
+    if (patched.body !== current) rewrite = { kind: "note-rewrite", path: plan.notePath, before: current, after: patched.body };
+    return patched.body;
   });
-  effects.push({ kind: "frontmatter", path: plan.notePath, previous, written: { ...plan.frontmatter } });
+  if (rewrite) effects.push(rewrite);
   if (plan.move) {
     const folder = app.vault.getAbstractFileByPath(plan.move.from);
     if (!folder) throw new Error(`${plan.move.from} no longer exists.`);

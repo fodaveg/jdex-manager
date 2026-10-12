@@ -6,6 +6,16 @@ import { FOLDERS, JDEX, NOTES } from "./fixtures";
 const settings = { jdexFolder: JDEX, systemRoot: "" };
 const CAT = "20-29 Trabajo y productos/21 Productos de software propios";
 
+describe("pairAction for + children uses the same sanitised names", () => {
+  const parent = `${CAT}/21.22 JDex Manager`;
+  it("renaming a child note to a name a folder cannot take proposes a sanitised folder", () => {
+    const index = buildIndex({ systemRoot: "", folderPaths: [...FOLDERS, `${parent}/+ A`], jdexFolder: JDEX, notePaths: [...NOTES, `${JDEX}/21.22+ A.md`] });
+    expect(pairAction({ oldPath: `${JDEX}/21.22+ A.md`, newPath: `${JDEX}/21.22+ Z? #tag.md`, isFolder: false }, index, settings)).toMatchObject({
+      type: "rename-partner", partnerPath: `${parent}/+ A`, newPartnerPath: `${parent}/+ Z`,
+    });
+  });
+});
+
 describe("pairAction", () => {
   const parent = `${CAT}/21.22 JDex Manager`;
   const folders = [...FOLDERS, `${parent}/+ A`, `${parent}/+ B`];
@@ -118,6 +128,40 @@ describe("pairAction", () => {
       settings,
     );
     expect(action).toEqual({ type: "moved", id: "21.22", from: CAT, to: "20-29 Trabajo y productos/22 Sitios web y publicación" });
+  });
+
+  describe("a renamed parent is not a move of the ID", () => {
+    const AREA = "20-29 Trabajo y productos";
+    const folder = "21.22 JDex Manager";
+
+    it("renaming the category or the area gives none, moving to another category still gives moved (probe control)", () => {
+      expect(pairAction({ oldPath: `${CAT}/${folder}`, newPath: `${AREA}/21 Productos renombrados/${folder}`, isFolder: true }, index, settings)).toEqual({ type: "none" });
+      expect(pairAction({ oldPath: `${CAT}/${folder}`, newPath: `20-29 Trabajo/21 Productos de software propios/${folder}`, isFolder: true }, index, settings)).toEqual({ type: "none" });
+      expect(pairAction({ oldPath: `${CAT}/${folder}`, newPath: `${AREA}/22 Sitios web y publicación/${folder}`, isFolder: true }, index, settings)).toMatchObject({ type: "moved" });
+    });
+
+    it.each([["D01."], ["D02."]])("compares the system prefix: %s parents rename freely, a change of system is a move", (prefix) => {
+      const oldCat = `${prefix}10-19 Area/${prefix}21 Categoría`;
+      const id = `${prefix}21.22 JDex Manager`;
+      const old = `${oldCat}/${id}`;
+      expect(pairAction({ oldPath: old, newPath: `${prefix}10-19 Otra area/${prefix}21 Categoría nueva/${id}`, isFolder: true }, index, settings)).toEqual({ type: "none" });
+      const other = prefix === "D01." ? "D02." : "D01.";
+      expect(pairAction({ oldPath: old, newPath: `${other}10-19 Area/${other}21 Categoría/${id}`, isFolder: true }, index, settings)).toMatchObject({ type: "moved" });
+    });
+
+    it("an unprefixed system differs from D01", () => {
+      expect(pairAction({ oldPath: `10-19 Area/21 Categoría/${folder}`, newPath: `D01.10-19 Area/D01.21 Categoría/${folder}`, isFolder: true }, index, settings)).toMatchObject({ type: "moved" });
+    });
+
+    it("covers the parents of + children: a renamed ID folder or category is not a move, another category is", () => {
+      const parentId = `${CAT}/${folder}`;
+      const nested = (cat: string, idFolder: string) => `${AREA}/${cat}/${idFolder}/+ A`;
+      const nestedIndex = buildIndex({ systemRoot: "", folderPaths: [...FOLDERS, `${parentId}/+ A`], jdexFolder: JDEX, notePaths: [...NOTES, `${JDEX}/21.22+ A.md`] });
+      const old = `${parentId}/+ A`;
+      expect(pairAction({ oldPath: old, newPath: nested("21 Productos de software propios", "21.22 Gestor"), isFolder: true }, nestedIndex, settings)).toEqual({ type: "none" });
+      expect(pairAction({ oldPath: old, newPath: nested("21 Productos renombrados", folder), isFolder: true }, nestedIndex, settings)).toEqual({ type: "none" });
+      expect(pairAction({ oldPath: old, newPath: nested("22 Sitios web y publicación", folder), isFolder: true }, nestedIndex, settings)).toMatchObject({ type: "moved", id: "21.22+" });
+    });
   });
 
   it("does nothing for same title, non-JD names, notes outside the JDex or ids without a partner", () => {

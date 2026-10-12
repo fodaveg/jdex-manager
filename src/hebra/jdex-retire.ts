@@ -12,6 +12,7 @@ import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
 import { insertAfterH1, retirePlan, type IdEntry, type JdIndex, type RetirePlan } from './engine';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
 import { rewriteJdexNotes, type JdexRewriteLibrary } from './jdex-write';
+import { setJdexProperties } from './jdex-property';
 
 export type JdexRetireLibrary = JdexRewriteLibrary &
   Pick<PluginVault, 'folderRenameIfUnchanged' | 'folderMoveIfUnchanged'>;
@@ -58,10 +59,12 @@ export async function retireJdexId(
     [noteId],
     (current) => {
       if (markdown.frontmatter(current.body)?.tipo === 'archivado') return null;
-      let next = current.body;
-      for (const [key, value] of Object.entries(plan.frontmatter)) {
-        next = markdown.setProperty(next, key, value);
+      // Throwing here stops before any write: neither the note nor the folder change.
+      const set = setJdexProperties(markdown, (body) => markdown.frontmatter(body), current.body, plan.frontmatter);
+      if (set.unwritten.length > 0) {
+        throw new Error(`No se pudo marcar ${entry.label} como retirado: no se pudo escribir ${set.unwritten.join(', ')} en el frontmatter (clave repetida o formato que no se puede modificar sin riesgo). Corrígelo a mano y vuelve a intentarlo; la nota y la carpeta no se han tocado.`);
       }
+      let next = set.body;
       next = insertAfterH1(next, plan.line);
       return next === current.body ? null : next;
     },

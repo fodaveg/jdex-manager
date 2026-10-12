@@ -1,13 +1,17 @@
 /* In-memory Obsidian vault for journal and undo tests: paths, bodies, frontmatter, folders. */
 import { vi } from "vitest";
 import { type App, TFile, TFolder } from "obsidian";
+import { readFrontmatter, setFrontmatterProperty } from "../src/vault/frontmatter-lines";
 
 type Node = TFile | TFolder;
 
 export interface FakeVault {
   app: App;
   bodies: Map<string, string>;
-  frontmatter: Map<string, Record<string, unknown>>;
+  /** Frontmatter as Obsidian would parse it from the body (the body is the only source). */
+  frontmatter: { get(path: string): Record<string, unknown> | undefined };
+  /** Edits one frontmatter key by hand, line by line. */
+  setFm(path: string, key: string, value: string): void;
   file(path: string, body?: string, fm?: Record<string, unknown>, ctime?: number): TFile;
   folder(path: string): TFolder;
   exists(path: string): boolean;
@@ -20,7 +24,7 @@ export interface FakeVault {
 export function fakeVault(): FakeVault {
   const nodes = new Map<string, Node>();
   const bodies = new Map<string, string>();
-  const frontmatter = new Map<string, Record<string, unknown>>();
+  const frontmatter = { get: (path: string) => readFrontmatter(bodies.get(path) ?? "") ?? undefined };
   const trashed: string[] = [];
   const local = new Map<string, unknown>();
   let ctimes = 1000;
@@ -34,6 +38,11 @@ export function fakeVault(): FakeVault {
     trashed,
     local,
     beforeWrite: null,
+    setFm(path, key, value) {
+      const next = setFrontmatterProperty(bodies.get(path) ?? "", key, value);
+      if (next === null) throw new Error(`cannot set ${key}`);
+      bodies.set(path, next);
+    },
     file(path, body = "", fm, ctime) {
       const name = nameOf(path);
       const extension = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
@@ -43,8 +52,8 @@ export function fakeVault(): FakeVault {
       });
       Object.defineProperty(file, "parent", { get: () => nodes.get(parentOf(file.path)) ?? { path: parentOf(file.path) }, configurable: true });
       nodes.set(path, file);
-      bodies.set(path, body);
-      if (fm) frontmatter.set(path, fm);
+      const yaml = fm ? `---\n${Object.entries(fm).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\n---\n` : "";
+      bodies.set(path, yaml + body);
       return file;
     },
     folder(path) {
@@ -64,7 +73,6 @@ export function fakeVault(): FakeVault {
       Object.assign(other, { path: next, name: nameOf(next) });
       nodes.set(next, other);
       if (bodies.has(path)) { bodies.set(next, bodies.get(path)!); bodies.delete(path); }
-      if (frontmatter.has(path)) { frontmatter.set(next, frontmatter.get(path)!); frontmatter.delete(path); }
     }
   };
   fake.app = {
@@ -88,12 +96,8 @@ export function fakeVault(): FakeVault {
     metadataCache: { getFileCache: (file: TFile) => ({ frontmatter: frontmatter.get(file.path) }) },
     fileManager: {
       // Like Obsidian: a throwing callback aborts the write.
-      processFrontMatter: vi.fn(async (file: TFile, apply: (fm: Record<string, unknown>) => void) => {
-        fake.beforeWrite?.(file.path);
-        const copy = JSON.parse(JSON.stringify(frontmatter.get(file.path) ?? {})) as Record<string, unknown>;
-        apply(copy);
-        frontmatter.set(file.path, copy);
-      }),
+      // The plugin must not use it (it reformats the whole block); a call fails the test.
+      processFrontMatter: vi.fn(async () => { throw new Error("processFrontMatter must not be used"); }),
       renameFile: vi.fn(async (node: Node, to: string) => {
         if (nodes.has(to)) throw new Error(`${to} exists`);
         move(node, to);

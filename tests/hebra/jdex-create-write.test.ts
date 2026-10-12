@@ -1,6 +1,7 @@
 import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { describe, expect, it } from 'vitest';
-import { buildIndex, selectCreationSystem, DEFAULT_SETTINGS, type IndexInput, type JdexManagerSettings } from '../../src/hebra/engine';
+import { buildIndex, knownIds, selectCreationSystem, systemKey, DEFAULT_SETTINGS, type IndexInput, type JdexManagerSettings } from '../../src/hebra/engine';
+import { jdexCreationIndex, validateNewChildTitle } from '../../src/hebra/jdex-create';
 import {
   createJdexArea,
   createJdexCategory,
@@ -369,6 +370,22 @@ describe('createJdexChild', () => {
     expect(outcome.note.title).toBe('21.11+ Extensión');
     expect(outcome.note.body).toContain('[[21.11 Hebra]]');
   });
+
+  it('un padre 21.11+ no produce 21.11++: error claro y nada escrito (26dfbba6)', async () => {
+    const { walk, index } = buildWalkAndIndex([
+      { id: 'n-child', folderId: 'f-jdex', title: '21.11+ Extensión', path: `${JDEX_FOLDER_PATH}/21.11+ Extensión.md` }
+    ]);
+    const library = new FakeJdexVault();
+    library.seedFolder({ id: 'f-jdex', parentId: null, name: '00.00 JDex', createdAt: 0, updatedAt: 0 });
+    const parent = index.ids.find((e) => e.id === '21.11+')!;
+    expect(parent).toBeDefined();
+    expect(validateNewChildTitle(index, parent, 'Nieto')).toBe('Un hijo (+) no puede tener hijos: créalo desde su ID padre.');
+    await expect(
+      createJdexChild(library, markdown, walk, baseSettings(), index, { parent, title: 'Nieto', createFolder: true })
+    ).rejects.toThrow('Un hijo (+) no puede tener hijos');
+    expect(await library.noteRead('fake-note-1')).toBeNull();
+    expect(await library.foldersList()).toHaveLength(1);
+  });
 });
 
 
@@ -403,4 +420,82 @@ it('crea D01 en andamiaje físico default conservando las etiquetas del área y 
   expect(outcome.note.title).toBe('D01.21.11 Own ID');
   expect(outcome.note.body).toContain('area: "20-29 Productos"');
   expect(outcome.note.body).toContain('categoria: "21 Productos de software"');
+});
+
+describe('sistemas con prefijo (27d68243)', () => {
+  const prefixed = baseSettings({ systemId: 'D01', prefixNamesWithSystem: true });
+
+  it('con systemId D01 y la casilla activa, crear área da D01.30-39 y su gestión D01.30', async () => {
+    const { walk } = buildWalkAndIndex();
+    const library = new FakeJdexVault();
+    library.seedFolder({ id: 'f-jdex', parentId: null, name: '00.00 JDex', createdAt: 0, updatedAt: 0 });
+    const outcome = await createJdexArea(library, markdown, walk, prefixed, {
+      area: 30, title: 'Trabajo', createFolder: true, createManagementCategory: true
+    });
+    expect(outcome.note.title).toBe('D01.30-39 Trabajo');
+    expect(outcome.folderPath).toBe('D01.30-39 Trabajo');
+    expect((await library.noteRead('fake-note-2'))?.title).toBe('D01.30 Gestión del área 30-39');
+  });
+
+  it('con systemId D01 y la casilla activa, crear categoría da D01.22 con su inbox y archivo D01', async () => {
+    const { walk, index } = buildWalkAndIndex();
+    const library = new FakeJdexVault();
+    library.seedFolder({ id: 'f-jdex', parentId: null, name: '00.00 JDex', createdAt: 0, updatedAt: 0 });
+    library.seedFolder({ id: 'f-area20', parentId: null, name: '20-29 Productos', createdAt: 0, updatedAt: 0 });
+    const creation = selectCreationSystem(index, 'D01');
+    const area = creation.areas.find((a) => a.number === 20)!;
+    const outcome = await createJdexCategory(library, markdown, walk, prefixed, creation, {
+      area, category: '22', title: 'Otra', createFolder: true, createInbox: true, createArchive: true
+    });
+    expect(outcome.note.title).toBe('D01.22 Otra');
+    expect(outcome.folderPath).toBe('20-29 Productos/D01.22 Otra');
+    const titles = (await Promise.all([2, 3].map((n) => library.noteRead(`fake-note-${n}`)))).map((n) => n?.title);
+    expect(titles).toEqual(['D01.22.01 Inbox de la categoría 22', 'D01.22.09 Archivo de la categoría 22']);
+  });
+
+  it('una categoría de un área D02 es D02 aunque el sistema configurado sea D01', async () => {
+    const { walk } = buildWalkAndIndex();
+    const library = new FakeJdexVault();
+    library.seedFolder({ id: 'f-jdex', parentId: null, name: '00.00 JDex', createdAt: 0, updatedAt: 0 });
+    const index = buildIndex({ systemRoot: '', jdexFolder: JDEX_FOLDER_PATH, folderPaths: [JDEX_FOLDER_PATH, 'D02.40-49 Casa'], notePaths: [] });
+    const area = jdexCreationIndex(index, 'D01').areas.find((a) => a.system === 'D02')!;
+    const outcome = await createJdexCategory(library, markdown, walk, prefixed, index, {
+      area, category: '41', title: 'Hogar', createFolder: false, createInbox: false, createArchive: false
+    });
+    expect(outcome.note.title).toBe('D02.41 Hogar');
+  });
+});
+
+describe('jdexCreationIndex (27d68243)', () => {
+  const index = buildIndex({
+    systemRoot: '',
+    jdexFolder: JDEX_FOLDER_PATH,
+    folderPaths: [
+      JDEX_FOLDER_PATH,
+      'D01.20-29 Trabajo', 'D01.20-29 Trabajo/D01.21 Productos', 'D01.20-29 Trabajo/D01.21 Productos/D01.21.11 Hebra',
+      'D02.20-29 Casa', 'D02.20-29 Casa/D02.21 Hogar'
+    ],
+    notePaths: []
+  });
+
+  it('sin prefijo configurado y con solo categorías D01 y D02, ofrece las dos con su sistema', () => {
+    expect(selectCreationSystem(index, '').categories).toHaveLength(0); // the bug: nothing to offer
+    const creation = jdexCreationIndex(index, '');
+    expect(creation.system).toBeUndefined();
+    expect(creation.categories.map((c) => systemKey(c.number, c.system)).sort()).toEqual(['D01.21', 'D02.21']);
+    // Each system numbers on its own.
+    expect(knownIds(creation, 'D01')).toEqual(['21.11']);
+    expect(knownIds(creation, 'D02')).toEqual([]);
+  });
+
+  it('con D01 configurado, D02 conserva su identidad y no se presta como D01', () => {
+    const creation = jdexCreationIndex(index, 'D01');
+    expect(creation.categories.map((c) => systemKey(c.number, c.system)).sort()).toEqual(['D01.21', 'D02.21']);
+  });
+
+  it('con D01 configurado, el sistema sin prefijo solo aparece como andamiaje prestado a D01', () => {
+    const mixed = buildIndex({ systemRoot: '', jdexFolder: JDEX_FOLDER_PATH, folderPaths: [JDEX_FOLDER_PATH, '20-29 Productos', '20-29 Productos/21 Software'], notePaths: [] });
+    const creation = jdexCreationIndex(mixed, 'D01');
+    expect(creation.categories.map((c) => systemKey(c.number, c.system))).toEqual(['D01.21']);
+  });
 });
