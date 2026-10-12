@@ -92,7 +92,7 @@ export function pairAction(
   if (!entry.folderPath) return { type: "none" };
   const nestedChild = baseName(entry.folderPath).startsWith("+ ");
   const folderPrefix = extractJdPrefix(baseName(entry.folderPath));
-  const newName = nestedChild ? `+ ${titleForCompare(newParsed.title)}` : jdexNoteName(newParsed.number.id + (newParsed.number.extension ?? ""), titleForCompare(newParsed.title), folderPrefix?.number.system);
+  const newName = nestedChild ? jdexNoteName("+", titleForCompare(newParsed.title)) : jdexNoteName(newParsed.number.id + (newParsed.number.extension ?? ""), titleForCompare(newParsed.title), folderPrefix?.number.system);
   const newPartnerPath = `${parentOf(entry.folderPath)}/${newName}`;
   if (newPartnerPath === entry.folderPath) return { type: "none" };
   return { type: "rename-partner", id: newId, partnerPath: entry.folderPath, newPartnerPath };

@@ -186,7 +186,8 @@ export function auditSystem(input: AuditInput): Finding[] {
       const parent = entry.id.endsWith("+")
         ? index.ids.find((candidate) => candidate.id === entry.id.slice(0, -1) && sameSystem(candidate, entry))?.folderPath
         : categoryFolder(entry.category, entry.system);
-      const name = entry.id.endsWith("+") ? `+ ${entry.title}` : jdexNoteName(entry.id, titleForCompare(entry.title), entry.system ?? "");
+      // A + child folder is `+ Title`: same sanitising as any JDex name and never its tags.
+      const name = entry.id.endsWith("+") ? jdexNoteName("+", titleForCompare(entry.title)) : jdexNoteName(entry.id, titleForCompare(entry.title), entry.system ?? "");
       const path = parent ? `${parent}/${name}` : undefined;
       const pattern = path && !entry.id.endsWith("+") ? input.patternFor?.(entry.category) ?? [] : [];
       findings.push({
@@ -209,7 +210,7 @@ export function auditSystem(input: AuditInput): Finding[] {
     const folderTitle = titleForCompare(folderPrefix?.title ?? (childFolder ? folderName.slice(2) : ""));
     const noteTitle = titleForCompare(extractJdPrefix(noteName(entry.notePath))?.title ?? "");
     if (folderTitle === noteTitle) continue;
-    const targetName = childFolder ? `+ ${noteTitle}` : jdexNoteName(entry.id, noteTitle, folderPrefix?.number.system ?? "");
+    const targetName = childFolder ? jdexNoteName("+", noteTitle) : jdexNoteName(entry.id, noteTitle, folderPrefix?.number.system ?? "");
     const parent = parentOf(entry.folderPath);
     const to = parent === "" ? targetName : `${parent}/${targetName}`;
     findings.push({

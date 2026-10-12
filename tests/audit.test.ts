@@ -7,6 +7,29 @@ const index = buildIndex({ systemRoot: "", folderPaths: FOLDERS, jdexFolder: JDE
 const findings = auditSystem({ index, notes: NOTES, filePaths: FILES });
 const of = (kind: FindingKind): Finding[] => findings.filter((f) => f.kind === kind);
 
+describe("proposed folder names of + children", () => {
+  const CAT = "20-29 Trabajo/21 Software";
+  const PARENT = `${CAT}/21.22 Padre`;
+  const audit = (notePaths: string[], folderPaths: string[]) =>
+    auditSystem({ index: buildIndex({ systemRoot: "", folderPaths: ["JDex", "20-29 Trabajo", CAT, PARENT, ...folderPaths], jdexFolder: "JDex", notePaths: ["JDex/21.22 Padre.md", ...notePaths] }), notes: [], filePaths: [] });
+  const createFolderPath = (out: Finding[]) => {
+    const fix = out.find((f) => f.kind === "note-without-folder")?.fix;
+    return fix?.type === "create-folder" ? fix.path : undefined;
+  };
+
+  it("a child note with tags proposes the folder without them", () => {
+    expect(createFolderPath(audit(["JDex/21.22+ Hijo #claude.md"], []))).toBe(`${PARENT}/+ Hijo`);
+  });
+
+  it("control: a child note without tags proposes its plain name", () => {
+    expect(createFolderPath(audit(["JDex/21.22+ Otro.md"], []))).toBe(`${PARENT}/+ Otro`);
+  });
+
+  it("a child name that is not a valid file name is sanitised like any JDex name", () => {
+    expect(createFolderPath(audit(["JDex/21.22+ Plan? fase*1.md"], []))).toBe(`${PARENT}/+ Plan fase1`);
+  });
+});
+
 describe("auditSystem", () => {
   it.each([false, true])("headers never need a folder, even when strict=%s", (strict) => {
     const notePaths = ["JDex/11.10 Cabecera.md", "JDex/11.22 ■ Grupo.md", "JDex/11.23 Contenido.md"];
