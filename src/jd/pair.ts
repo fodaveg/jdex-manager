@@ -5,7 +5,7 @@
 
 import { relativeTo } from "./detect";
 import { sameSystem, systemKey, type JdIndex } from "./index";
-import { extractJdPrefix, jdexNoteName } from "./parse";
+import { extractJdPrefix, jdexNoteName, type JdNumber } from "./parse";
 import { titleForCompare } from "./title";
 
 export interface RenameEvent {
@@ -31,6 +31,22 @@ function baseName(path: string): string {
 function parentOf(path: string): string {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
+}
+
+/** Full identity of a path segment (area, category or ID, with its system); titles never count. */
+function segmentIdentity(segment: string): string {
+  const parsed = extractJdPrefix(segment);
+  if (!parsed) return `raw:${segment}`;
+  const n: JdNumber = parsed.number;
+  const value = n.kind === "area" ? String(n.area) : n.kind === "category" ? n.category : n.id + (n.extension ?? "");
+  return `${n.kind}:${systemKey(value, n.system)}`;
+}
+
+/** Same chain of areas, categories and IDs, whatever their titles: a renamed parent is not a move. */
+function sameParentIdentity(oldParent: string, newParent: string): boolean {
+  const left = oldParent.split("/");
+  const right = newParent.split("/");
+  return left.length === right.length && left.every((segment, i) => segmentIdentity(segment) === segmentIdentity(right[i]));
 }
 
 /** A `+ Title` folder takes its ID number from the parent folder. */
@@ -66,7 +82,7 @@ export function pairAction(
     if (oldRel === null || newRel === null) return { type: "none" };
     const depth = baseName(ev.oldPath).startsWith("+ ") ? 4 : 3;
     if (oldRel.split("/").length !== depth) return { type: "none" };
-    if (parentOf(oldRel) !== parentOf(newRel)) return { type: "moved", id: newId, from: parentOf(oldRel), to: parentOf(newRel) };
+    if (!sameParentIdentity(parentOf(oldRel), parentOf(newRel))) return { type: "moved", id: newId, from: parentOf(oldRel), to: parentOf(newRel) };
   } else {
     const oldRel = relativeTo(settings.jdexFolder, ev.oldPath);
     const newRel = relativeTo(settings.jdexFolder, ev.newPath);
