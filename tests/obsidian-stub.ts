@@ -138,8 +138,17 @@ export class SuggestModal<T> extends Modal {
   declare getSuggestions: (query: string) => T[] | Promise<T[]>;
   declare renderSuggestion: (value: T, el: HTMLElement) => void;
   declare onChooseSuggestion: (item: T, evt: MouseEvent | KeyboardEvent) => void;
+  /**
+   * What picking a suggestion does in Obsidian (1.14.4): the modal CLOSES first (so `onClose`
+   * runs) and only then calls `onChooseSuggestion`. A caller that resolves `null` in `onClose`
+   * loses the choice (code review of 12 Oct 2026, finding 9).
+   */
+  selectSuggestion(value: T, evt: MouseEvent | KeyboardEvent): void {
+    this.close();
+    this.onChooseSuggestion(value, evt);
+  }
 }
-unmodelled(SuggestModal, ["getSuggestions", "renderSuggestion", "onChooseSuggestion", "selectSuggestion", "onNoSuggestion"]);
+unmodelled(SuggestModal, ["getSuggestions", "renderSuggestion", "onChooseSuggestion", "onNoSuggestion"]);
 
 /** One control added to a `Setting`; tests read and drive it like the user would. Text and buttons are real DOM elements. */
 export class TextComponent {

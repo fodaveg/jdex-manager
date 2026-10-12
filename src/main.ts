@@ -38,6 +38,7 @@ import { MaintenanceGate, onceNotifier } from "./vault/maintenance-gate";
 import { createSystemReport } from "./vault/system-report";
 import { renamedFolderSettings } from "./vault/settings-paths";
 import { closeTrackedModals } from "./ui/modal-registry";
+import { pickFromModal } from "./ui/suggest-pick";
 import { folderSettingName, t } from "./ui/i18n";
 import { JdexManagerSettingTab } from "./ui/settings-tab";
 import { type FlowPorts, moveToId, sendToZero } from "./vault/flows";
@@ -127,11 +128,10 @@ export default class JdexManagerPlugin extends Plugin {
       index: () => this.cachedIndex(),
       enabled: () => this.settings.readingLinks && this.settings.jdexFolder !== "",
       choose: (entries) =>
-        new Promise<IdEntry | null>((resolve) => {
-          const modal = new IdSuggestModal(this.app, { ...this.cachedIndex(), ids: entries }, (e) => resolve(e), t().whichOne);
+        pickFromModal<IdEntry>((choose) => {
+          const modal = new IdSuggestModal(this.app, { ...this.cachedIndex(), ids: entries }, (e) => choose(e), t().whichOne);
           modal.setInstructions([{ command: "↵", purpose: t().hintOpenNote }]);
-          modal.onClose = () => resolve(null);
-          modal.open();
+          return modal;
         }),
     });
 
@@ -816,17 +816,12 @@ export default class JdexManagerPlugin extends Plugin {
     return {
       app: this.app,
       settings: this.settings,
-      pickEntry: (index, placeholder, purpose) => new Promise<IdEntry | null>((resolve) => {
-        const modal = new IdSuggestModal(this.app, index, (e) => resolve(e), placeholder);
+      pickEntry: (index, placeholder, purpose) => pickFromModal<IdEntry>((choose) => {
+        const modal = new IdSuggestModal(this.app, index, (e) => choose(e), placeholder);
         modal.setInstructions([{ command: "↵", purpose }]);
-        modal.onClose = () => resolve(null);
-        modal.open();
+        return modal;
       }),
-      pickCategory: (index) => new Promise<string | null>((resolve) => {
-        const modal = new CategorySuggestModal(this.app, index, (c) => resolve(systemKey(c.number, c.system)));
-        modal.onClose = () => resolve(null);
-        modal.open();
-      }),
+      pickCategory: (index) => pickFromModal<string>((choose) => new CategorySuggestModal(this.app, index, (c) => choose(systemKey(c.number, c.system)))),
       confirm: (title, lines, action) => confirm(this.app, title, lines, action),
       notice: (message, timeout) => void new Notice(message, timeout),
       journal: (kind, label) => this.journalOperation(kind, label),
