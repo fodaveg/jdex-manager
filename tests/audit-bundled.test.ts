@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import * as script from '../scripts/audit-bundled.mjs';
 
 const { packageOf, shippedHits } = script as {
-  packageOf(input: string): string | null;
-  shippedHits(audit: unknown, shipped: Set<string>): string[];
+  packageOf: (input: string) => string | null;
+  shippedHits: (audit: unknown, shipped: Set<string>) => string[];
 };
 
 describe('audit-bundled', () => {
