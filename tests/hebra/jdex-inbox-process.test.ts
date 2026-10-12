@@ -6,10 +6,12 @@ import {
   jdexInboxArchiveTarget,
   jdexInboxQueue,
   jdexZeroTarget,
-  moveJdexInboxNote
+  moveJdexInboxNote,
+  moveJdexInboxNoteCreatingFolder,
+  trashJdexInboxNote
 } from '../../src/hebra/jdex-inbox-process';
 import type { JdexInboxSummary, JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
-import { FakeJdexVault, fakeNote } from './support/fakes';
+import { FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 
 const markdown = createFakePluginApi().api.markdown;
 
@@ -62,6 +64,49 @@ describe('moveJdexInboxNote', () => {
       )
     ).rejects.toThrow('No se encontró la carpeta de destino.');
     expect(noteMove).not.toHaveBeenCalled();
+  });
+});
+
+describe('trashJdexInboxNote', () => {
+  it('sends the note to the trash when it is unchanged', async () => {
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
+    await trashJdexInboxNote(library, note('n1', 'inbox', 'Suelta'));
+    expect((await library.noteRead('n1'))?.trashedAt).not.toBeNull();
+  });
+
+  it('does not trash a note that moved or changed since the dialog opened', async () => {
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n1', 'elsewhere', '# Suelta\n'));
+    await expect(trashJdexInboxNote(library, note('n1', 'inbox', 'Suelta'))).rejects.toThrow('cambió');
+    expect((await library.noteRead('n1'))?.trashedAt).toBeNull();
+  });
+});
+
+describe('moveJdexInboxNoteCreatingFolder', () => {
+  const folders = ['20-29 Productos', '20-29 Productos/21 Software'];
+  const jdex = '00-09 Sistema/00 Sistema/00.00 JDex';
+  const index = buildIndex({ systemRoot: '', jdexFolder: jdex, folderPaths: [...folders, jdex], notePaths: [`${jdex}/21.11 Hebra.md`] });
+  const entry = index.ids.find((e) => e.id === '21.11')!;
+
+  it('creates the ID folder under its category and moves the note there', async () => {
+    const library = new FakeJdexVault();
+    library.seedFolder(fakeFolder('cat', 'root', '21 Software'));
+    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
+    const walk = { rootFolderId: 'root', folderPaths: new Map([['cat', '20-29 Productos/21 Software']]) };
+    expect(entry.folderPath).toBeUndefined();
+    await moveJdexInboxNoteCreatingFolder(library, note('n1', 'inbox', 'Suelta'), walk, index, entry);
+    const created = (await library.foldersList()).find((f) => f.name === '21.11 Hebra');
+    expect(created?.parentId).toBe('cat');
+    expect((await library.noteRead('n1'))?.folderId).toBe(created?.id);
+  });
+
+  it('refuses an ID whose category has no folder, creating nothing', async () => {
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
+    const create = vi.spyOn(library, 'folderCreate');
+    await expect(moveJdexInboxNoteCreatingFolder(library, note('n1', 'inbox', 'Suelta'), { rootFolderId: 'root', folderPaths: new Map() }, index, entry)).rejects.toThrow('no tiene carpeta');
+    expect(create).not.toHaveBeenCalled();
   });
 });
 

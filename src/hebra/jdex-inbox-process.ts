@@ -9,7 +9,8 @@
  * sola.
  */
 import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
-import { datedName, idFolderOfPath, zeroOf, type DateFormat, type JdIndex } from './engine';
+import { datedName, idFolderOfPath, sameSystem, zeroOf, type DateFormat, type IdEntry, type JdIndex } from './engine';
+import { ensureJdexFolder } from './jdex-create-write';
 import {
   jdexResolveFolderId,
   type JdexInboxSummary,
@@ -120,4 +121,35 @@ export async function archiveJdexInboxNote(
     revision = committed.revision;
   }
   if (!await library.noteMoveIfUnchanged(note.id, target.folderId, { revision, folderId: current.folderId })) throw new Error('La nota cambió antes de moverla al archivo; se conserva en el inbox.');
+}
+
+/** Send an inbox note to the library trash, only if it is still where the dialog saw it. */
+export async function trashJdexInboxNote(
+  library: Pick<PluginVault, 'noteRead' | 'noteTrashIfUnchanged'>,
+  note: JdexNoteRef
+): Promise<void> {
+  const current = await library.noteRead(note.id);
+  if (!current || current.trashedAt !== null || current.folderId !== note.folderId) {
+    throw new Error('La nota cambió desde que se abrió el inbox; vuelve a abrirlo.');
+  }
+  const trashed = await library.noteTrashIfUnchanged(note.id, { revision: current.revision, folderId: current.folderId });
+  if (!trashed) throw new Error('La nota cambió antes de mandarla a la papelera; se conserva en el inbox.');
+}
+
+/** Optional and explicit: create the folder of an ID that has none (inside the folder of
+ *  its category, through the library API) and move the note there. The caller asks the
+ *  user first; this never runs on its own. */
+export async function moveJdexInboxNoteCreatingFolder(
+  library: Pick<PluginVault, 'noteMove' | 'foldersList' | 'folderCreate'>,
+  note: JdexNoteRef,
+  walk: Pick<JdexLibraryWalk, 'folderPaths' | 'rootFolderId'>,
+  index: JdIndex,
+  entry: IdEntry
+): Promise<void> {
+  if (entry.folderPath) throw new Error(`${entry.label} ya tiene carpeta.`);
+  const category = index.categories.find((c) => c.number === entry.category && sameSystem(c, entry));
+  const parentId = category?.path ? jdexResolveFolderId(walk, category.path) : null;
+  if (!parentId) throw new Error(`La categoría de ${entry.label} no tiene carpeta donde crear la del ID.`);
+  const folderId = await ensureJdexFolder(library, parentId, entry.label);
+  await library.noteMove(note.id, folderId);
 }
