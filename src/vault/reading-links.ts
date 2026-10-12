@@ -1,28 +1,41 @@
-import type { Plugin } from "obsidian";
-import { systemKey, type JdIndex } from "../jd/index";
-import { findJdNumbers } from "../jd/reading-links";
+import { Notice, TFile, type Plugin } from "obsidian";
+import { systemKey, type IdEntry, type JdIndex } from "../jd/index";
+import { entriesByNumber, findJdNumbers } from "../jd/reading-links";
 
 /** Ancestors whose text is never touched: real links, code, embeds, math and the properties block. */
 const SKIP = "a, code, pre, .internal-embed, .frontmatter, .metadata-container, .math";
+
+/** Characters a link path cannot carry in Obsidian: it reads them as heading, block, alias or nesting. */
+const UNSAFE_IN_LINK = /[#^|[\]]/;
 
 function noteName(notePath: string): string {
   const base = notePath.slice(notePath.lastIndexOf("/") + 1);
   return base.endsWith(".md") ? base.slice(0, -3) : base;
 }
 
+export interface ReadingLinksContext {
+  index: () => JdIndex;
+  enabled: () => boolean;
+  /** Asks which of several entries sharing one number (`21.22+` children) to open; `null` = cancelled. */
+  choose?: (entries: IdEntry[]) => Promise<IdEntry | null>;
+}
+
 /**
  * Turns a bare `21.22` in reading view into a link to its JDex note, without touching the file.
  * Reading view only: Live Preview would need a CodeMirror extension and is out of scope.
- * Obsidian handles click and hover through `internal-link` + `data-href`.
+ *
+ * The link carries the NUMBER in `data-jd`, not its destination: the destination is looked up in
+ * the current index when the link is pressed, so a rename after rendering still lands on the note
+ * (and never on a stale name that Obsidian would offer to create). `data-href` stays only for the
+ * hover preview. Several `AC.ID+` children share one number: pressing it asks which one.
  */
-export function registerReadingLinks(plugin: Plugin, ctx: { index: () => JdIndex; enabled: () => boolean }): void {
+export function registerReadingLinks(plugin: Plugin, ctx: ReadingLinksContext): void {
   plugin.registerMarkdownPostProcessor((el) => {
     if (!ctx.enabled()) return;
     const index = ctx.index();
     if (index.ids.length === 0) return;
-    const notes = new Map<string, string>();
-    for (const entry of index.ids) if (entry.notePath) notes.set(systemKey(entry.id, entry.system), noteName(entry.notePath));
-    const exists = (id: string, system?: string): boolean => notes.has(systemKey(id, system));
+    const groups = entriesByNumber(index.ids.filter((entry) => entry.notePath));
+    const exists = (id: string, system?: string): boolean => groups.has(systemKey(id, system));
 
     const doc = el.ownerDocument;
     const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -34,25 +47,68 @@ export function registerReadingLinks(plugin: Plugin, ctx: { index: () => JdIndex
       nodes.push(text);
     }
 
+    let made = 0;
     for (const text of nodes) {
       const matches = findJdNumbers(text.data, exists);
       if (matches.length === 0) continue;
       const frag = doc.createDocumentFragment();
       let cursor = 0;
       for (const m of matches) {
+        const group = groups.get(systemKey(m.id, m.system));
+        if (group === undefined || group.length === 0) continue;
         if (m.start > cursor) frag.append(text.data.slice(cursor, m.start));
-        const name = notes.get(systemKey(m.id, m.system));
-        if (name === undefined) continue;
         const a = doc.createElement("a");
-        a.className = "internal-link jdex-number-link";
-        a.dataset.href = name;
-        a.href = name;
+        a.dataset.jd = systemKey(m.id, m.system);
         a.textContent = text.data.slice(m.start, m.end);
+        const hover = group.length === 1 && group[0].notePath ? noteName(group[0].notePath) : undefined;
+        if (hover !== undefined && !UNSAFE_IN_LINK.test(hover)) {
+          // Hover preview only; the click never trusts this value (see the listener below).
+          a.className = "internal-link jdex-number-link";
+          a.dataset.href = hover;
+          a.href = hover;
+        } else {
+          a.className = "jdex-number-link";
+          a.tabIndex = 0;
+        }
         frag.append(a);
         cursor = m.end;
+        made += 1;
       }
       if (cursor < text.data.length) frag.append(text.data.slice(cursor));
       text.replaceWith(frag);
     }
+    if (made === 0) return;
+
+    // Capture phase on the rendered block: it runs before any handler Obsidian attaches higher up,
+    // so a number is never opened through the destination fixed at render time.
+    el.addEventListener(
+      "click",
+      (event: MouseEvent) => {
+        const target = event.target instanceof Element ? event.target.closest<HTMLElement>("a.jdex-number-link") : null;
+        const key = target?.dataset.jd;
+        if (!target || key === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void openNumber(plugin, ctx, key, event.ctrlKey || event.metaKey);
+      },
+      true,
+    );
   });
+}
+
+async function openNumber(plugin: Plugin, ctx: ReadingLinksContext, key: string, newTab: boolean): Promise<void> {
+  const entries = entriesByNumber(ctx.index().ids.filter((entry) => entry.notePath)).get(key) ?? [];
+  if (entries.length === 0) {
+    new Notice(`${key} is no longer in the index.`);
+    return;
+  }
+  let entry: IdEntry | null = entries[0];
+  if (entries.length > 1) entry = ctx.choose ? await ctx.choose(entries) : null;
+  if (!entry?.notePath) return;
+  const file = plugin.app.vault.getAbstractFileByPath(entry.notePath);
+  if (!(file instanceof TFile)) {
+    new Notice(`${entry.label}: the note is no longer there.`);
+    return;
+  }
+  await plugin.app.workspace.getLeaf(newTab ? "tab" : false).openFile(file);
 }

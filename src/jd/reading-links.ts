@@ -45,3 +45,28 @@ export function findJdNumbers(text: string, exists: (id: string, system?: string
   }
   return out;
 }
+
+/** Anything with the fields `entriesByNumber` needs; `IdEntry` fits. */
+export interface NumberTarget {
+  system?: string;
+  id: string;
+  label: string;
+}
+
+/**
+ * Groups entries by what a bare number in text can say: system plus `AC.ID` or `AC.ID+`.
+ * Several `AC.ID+` children share that key (they differ only by title), so each group keeps ALL
+ * of them, sorted by label so the order never depends on the order the index was built in.
+ * The host decides what to do with a group of more than one (ask, never pick the last).
+ */
+export function entriesByNumber<T extends NumberTarget>(entries: readonly T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const entry of entries) {
+    const key = entry.system ? `${entry.system}.${entry.id}` : entry.id;
+    const group = groups.get(key);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
+  }
+  for (const group of groups.values()) group.sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+  return groups;
+}

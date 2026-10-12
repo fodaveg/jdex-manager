@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findJdNumbers } from "../src/jd/reading-links";
+import { entriesByNumber, findJdNumbers } from "../src/jd/reading-links";
 
 const KNOWN = new Set(["21.22", "21.22+", "11.11"]);
 const exists = (id: string): boolean => KNOWN.has(id);
@@ -37,5 +37,25 @@ describe("findJdNumbers", () => {
   it("returns nothing when there is nothing", () => {
     expect(findJdNumbers("", exists)).toEqual([]);
     expect(findJdNumbers("sin números", exists)).toEqual([]);
+  });
+});
+
+describe("entriesByNumber", () => {
+  const e = (id: string, label: string, system?: string) => ({ id, label, ...(system ? { system } : {}) });
+
+  it("keeps every + child under their shared number, sorted by label", () => {
+    const groups = entriesByNumber([e("21.22+", "21.22+ Zeta"), e("21.22", "21.22 Base"), e("21.22+", "21.22+ Alfa")]);
+    expect(groups.get("21.22+")!.map((x) => x.label)).toEqual(["21.22+ Alfa", "21.22+ Zeta"]);
+    expect(groups.get("21.22")).toHaveLength(1);
+  });
+
+  it("does not depend on the order of the input", () => {
+    const a = [e("21.22+", "21.22+ A"), e("21.22+", "21.22+ B")];
+    expect(entriesByNumber(a).get("21.22+")).toEqual(entriesByNumber([...a].reverse()).get("21.22+"));
+  });
+
+  it("separates systems", () => {
+    const groups = entriesByNumber([e("21.22", "x"), e("21.22", "y", "D01")]);
+    expect([...groups.keys()].sort()).toEqual(["21.22", "D01.21.22"]);
   });
 });

@@ -104,7 +104,7 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       row.append(input);
       container.append(row);
     }
-    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings']] as const) {
+    for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings'], ['Autocompletar IDs al teclear NN.', 'autocomplete']] as const) {
       const row = document.createElement('label');
       row.className = 'hebra-jdex-settings-row';
       const input = document.createElement('input');
@@ -145,6 +145,22 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     });
     staleRow.append(staleDays);
     container.append(staleRow);
+    const insertRow = document.createElement('label');
+    insertRow.className = 'hebra-jdex-settings-row';
+    insertRow.append(document.createTextNode('El autocompletado inserta'));
+    const insertMode = document.createElement('select');
+    for (const [value, text] of [['number', 'El número'], ['link', 'Un enlace [[nota]]']] as const) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      insertMode.append(option);
+    }
+    insertMode.value = options.get().autocompleteInsert;
+    insertMode.addEventListener('change', () => {
+      if (insertMode.value === 'number' || insertMode.value === 'link') options.save({ ...options.get(), autocompleteInsert: insertMode.value });
+    });
+    insertRow.append(insertMode);
+    container.append(insertRow);
 
     const auto = document.createElement('p');
     auto.className = 'hebra-jdex-settings-hint';
