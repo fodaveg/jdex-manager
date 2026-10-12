@@ -7,10 +7,10 @@
 import { ButtonComponent, DropdownComponent, Notice, Setting, TextComponent, ToggleComponent, type Modal } from "obsidian";
 
 export interface DrivenToggle { value: boolean; toggle(): unknown }
-export interface DrivenButton { text: string; cta: boolean; disabled: boolean; click(): unknown }
-export interface DrivenText { value: string; placeholder: string; type(value: string): unknown }
+export interface DrivenButton { text: string; cta: boolean; disabled: boolean; buttonEl: HTMLButtonElement; click(): void }
+export interface DrivenText { value: string; placeholder: string; inputEl: HTMLInputElement; type(value: string): void }
 export interface DrivenDropdown { value: string; options: Record<string, string>; choose(value: string): unknown }
-interface StubSetting { name: string; desc: string; heading: boolean; controls: unknown[] }
+interface StubSetting { name: string; desc: string; heading: boolean; controls: unknown[]; settingEl: HTMLElement }
 
 const stubNotice = Notice as unknown as { messages: string[] };
 const stubSetting = Setting as unknown as { created: StubSetting[] };
@@ -37,3 +37,6 @@ export const dropdowns = (): DrivenDropdown[] => controlsOf<DrivenDropdown>(Drop
 
 /** Whether a modal is open (between `open()` and `close()`). */
 export const isOpen = (modal: Modal): boolean => (modal as unknown as { isOpen: boolean }).isOpen;
+
+/** Events a view or plugin handed to `registerEvent`. */
+export const registeredEvents = (component: object): unknown[] => (component as unknown as { registeredEvents?: unknown[] }).registeredEvents ?? [];

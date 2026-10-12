@@ -32,19 +32,19 @@ function unmodelled(cls: { prototype: object; name: string }, names: readonly st
 }
 
 /** An `HTMLElement` when the test runs in a DOM environment (`// @vitest-environment happy-dom`), else it throws on use. */
-function domElement(owner: string, member: string): HTMLElement {
+function domElement(owner: string, member: string, tag = "div"): HTMLElement {
   if (typeof document === "undefined") {
     throw new Error(`obsidian-stub: ${owner}.${member} needs a DOM; add "// @vitest-environment happy-dom" to the test`);
   }
-  return document.createElement("div");
+  return document.createElement(tag);
 }
 
 /** A property that creates its element on first read and can be replaced by a test. */
-function lazyElement(cls: { prototype: object; name: string }, member: string): void {
+function lazyElement(cls: { prototype: object; name: string }, member: string, tag = "div"): void {
   const key = Symbol(member);
   Object.defineProperty(cls.prototype, member, {
     get(this: Record<symbol, HTMLElement | undefined>) {
-      return (this[key] ??= domElement(cls.name, member));
+      return (this[key] ??= domElement(cls.name, member, tag));
     },
     set(this: Record<symbol, HTMLElement | undefined>, value: HTMLElement) {
       this[key] = value;
@@ -89,7 +89,8 @@ unmodelled(Plugin, [
 
 export class Modal {
   isOpen = false;
-  title = "";
+  /** What `setTitle` last showed. Named so it can never collide with a `title` field of a subclass. */
+  shownTitle = "";
   declare contentEl: HTMLElement;
   declare titleEl: HTMLElement;
   declare modalEl: HTMLElement;
@@ -109,7 +110,7 @@ export class Modal {
   onOpen(): void {}
   onClose(): void {}
   setTitle(title: string): this {
-    this.title = title;
+    this.shownTitle = title;
     this.titleEl.textContent = title;
     return this;
   }
@@ -135,18 +136,19 @@ export class SuggestModal<T> extends Modal {
 }
 unmodelled(SuggestModal, ["getSuggestions", "renderSuggestion", "onChooseSuggestion", "selectSuggestion", "onNoSuggestion"]);
 
-/** One control added to a `Setting`; tests read and drive it like the user would. */
+/** One control added to a `Setting`; tests read and drive it like the user would. Text and buttons are real DOM elements. */
 export class TextComponent {
-  value = "";
+  declare inputEl: HTMLInputElement;
   placeholder = "";
-  private listener: ((value: string) => unknown) | null = null;
-  getValue(): string { return this.value; }
-  setValue(value: string): this { this.value = value; return this; }
-  setPlaceholder(text: string): this { this.placeholder = text; return this; }
-  onChange(callback: (value: string) => unknown): this { this.listener = callback; return this; }
-  /** What typing does: updates the value and fires `onChange`. */
-  type(value: string): unknown { this.value = value; return this.listener?.(value); }
+  getValue(): string { return this.inputEl.value; }
+  get value(): string { return this.inputEl.value; }
+  setValue(value: string): this { this.inputEl.value = value; return this; }
+  setPlaceholder(text: string): this { this.placeholder = text; this.inputEl.placeholder = text; return this; }
+  onChange(callback: (value: string) => unknown): this { this.inputEl.addEventListener("input", () => void callback(this.inputEl.value)); return this; }
+  /** What typing does: sets the value and fires the `input` event the app listens to. */
+  type(value: string): void { this.inputEl.value = value; this.inputEl.dispatchEvent(new Event("input", { bubbles: true })); }
 }
+lazyElement(TextComponent, "inputEl", "input");
 unmodelled(TextComponent, ["setDisabled"]);
 export class ToggleComponent {
   value = false;
@@ -171,19 +173,20 @@ export class DropdownComponent {
 }
 unmodelled(DropdownComponent, ["setDisabled"]);
 export class ButtonComponent {
-  text = "";
+  declare buttonEl: HTMLButtonElement;
   cta = false;
   warning = false;
-  disabled = false;
-  private listener: (() => unknown) | null = null;
-  setButtonText(text: string): this { this.text = text; return this; }
+  get text(): string { return this.buttonEl.textContent ?? ""; }
+  get disabled(): boolean { return this.buttonEl.disabled; }
+  setButtonText(text: string): this { this.buttonEl.textContent = text; return this; }
   setCta(): this { this.cta = true; return this; }
   setWarning(): this { this.warning = true; return this; }
-  setDisabled(disabled: boolean): this { this.disabled = disabled; return this; }
-  onClick(callback: () => unknown): this { this.listener = callback; return this; }
+  setDisabled(disabled: boolean): this { this.buttonEl.disabled = disabled; return this; }
+  onClick(callback: () => unknown): this { this.buttonEl.addEventListener("click", () => void callback()); return this; }
   /** What a click does; a disabled button does nothing, as in the app. */
-  click(): unknown { return this.disabled ? undefined : this.listener?.(); }
+  click(): void { this.buttonEl.click(); }
 }
+lazyElement(ButtonComponent, "buttonEl", "button");
 unmodelled(ButtonComponent, ["setIcon", "setTooltip", "setClass", "removeCta"]);
 
 export class Setting {
@@ -193,8 +196,10 @@ export class Setting {
   readonly controls: Array<TextComponent | ToggleComponent | DropdownComponent | ButtonComponent> = [];
   /** Every `Setting` built since the test emptied this list, so a test can find the controls a modal created. */
   static created: Setting[] = [];
+  declare settingEl: HTMLElement;
   constructor(readonly containerEl: unknown) {
     Setting.created.push(this);
+    if (typeof Element !== "undefined" && containerEl instanceof Element) containerEl.appendChild(this.settingEl);
   }
   setName(name: string): this { this.name = name; return this; }
   setDesc(desc: string): this { this.desc = desc; return this; }
@@ -209,6 +214,7 @@ export class Setting {
   addDropdown(callback: (component: DropdownComponent) => unknown): this { return this.add(new DropdownComponent(), callback); }
   addButton(callback: (component: ButtonComponent) => unknown): this { return this.add(new ButtonComponent(), callback); }
 }
+lazyElement(Setting, "settingEl");
 unmodelled(Setting, ["addTextArea", "addSlider", "addColorPicker", "addExtraButton", "addSearch", "addProgressBar", "addMomentFormat", "setClass", "setDisabled", "setTooltip"]);
 
 export class TAbstractFile {}
