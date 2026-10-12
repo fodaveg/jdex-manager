@@ -715,7 +715,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           candidates,
           onApply: async (chosenIds) => {
             await journal.run('fix', 'Envolver cabeceras', async (vault) => {
-              await applyJdexWrap(vault, candidates, [...chosenIds]);
+              const wrapped = await applyJdexWrap(vault, candidates, [...chosenIds]);
+              for (const warning of wrapped.warnings) host.notice(warning);
               await afterJdexWrite(true, vault);
             });
             handle?.close();

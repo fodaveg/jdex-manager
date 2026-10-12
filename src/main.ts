@@ -24,7 +24,7 @@ import { categoryOfPath, idFolderOfPath, isDatable, locate, zeroOf } from "./jd/
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
-import { headersToMigrate, updateHeaders } from "./vault/headers";
+import { applyHeaderWraps, headersToMigrate, updateHeaders } from "./vault/headers";
 import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex } from "./vault/structure";
 import { retireId } from "./vault/retire";
 import { formatCategoryPatterns, parseCategoryPatterns } from "./jd/patterns";
@@ -580,8 +580,11 @@ export default class JdexManagerPlugin extends Plugin {
       "Wrap",
     );
     if (!ok) return;
-    for (const t of todo) await this.app.vault.modify(t.file, t.next);
-    new Notice(`Markers added to ${todo.length} note(s).`);
+    const wrapped = await applyHeaderWraps(this.app, todo);
+    await this.record("fix", "Wrap header lists in markers", wrapped.effects);
+    new Notice(wrapped.skipped.length === 0
+      ? `Markers added to ${wrapped.written.length} note(s).`
+      : `Markers added to ${wrapped.written.length} note(s). Skipped ${wrapped.skipped.length} edited after the preview: ${wrapped.skipped.join(", ")}`, 10000);
     await this.refreshHeaders(undefined, true);
   }
 

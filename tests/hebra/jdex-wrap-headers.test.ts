@@ -68,4 +68,35 @@ describe('applyJdexWrap', () => {
     expect(applied.written).toEqual(['n-2110']);
     expect((await library.noteRead('n-2110'))?.body).toContain('<!-- jdex:hijos -->');
   });
+
+  it('skips a note edited after the preview, keeps the added line and warns', async () => {
+    const { index, walk } = headerFixture('n-2110', '');
+    const body = '# 21.10 ■ Cabecera\n\n- [[21.11 Hebra]]\n';
+    const candidates = findJdexWrapCandidates(walk, index, () => body);
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n-2110', 'f-jdex', body));
+    const edited = `${body}- [[21.12 Añadida entretanto]]\n`;
+    library.saveElsewhere('n-2110', edited);
+
+    const applied = await applyJdexWrap(library, candidates, ['n-2110']);
+    expect(applied.written).toEqual([]);
+    expect(applied.skipped).toEqual(['n-2110']);
+    expect(applied.warnings.join(' ')).toContain('21.10 ■ Cabecera');
+    expect(library.rewriteCalls).toHaveLength(0);
+    expect((await library.noteRead('n-2110'))?.body).toBe(edited);
+  });
+
+  it('control: without an edit it writes with a cause, so Hebra keeps a previous version', async () => {
+    const { index, walk } = headerFixture('n-2110', '');
+    const body = '# 21.10 ■ Cabecera\n\n- [[21.11 Hebra]]\n';
+    const candidates = findJdexWrapCandidates(walk, index, () => body);
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n-2110', 'f-jdex', body));
+
+    const applied = await applyJdexWrap(library, candidates, ['n-2110']);
+    expect(applied.written).toEqual(['n-2110']);
+    expect(applied.warnings).toEqual([]);
+    expect(library.rewriteCalls[0].options).toEqual({ cause: 'Antes de envolver las cabeceras JDex' });
+    expect((await library.noteRead('n-2110'))?.body).toBe(candidates[0].after);
+  });
 });
