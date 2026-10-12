@@ -8,6 +8,12 @@
 // RECEIVER expression. A symbol with several declarations (overloads) passes if at least one
 // of them is old enough.
 //
+// A use that reaches the host through a local structural type (`host: { loadLocalStorage(k) }`)
+// never lands on an Obsidian declaration, so it is judged where the type is declared: a member
+// of a local interface or type literal named like a member of App, Vault, Workspace, FileManager
+// or MetadataCache that is too new must be declared optional, which forces a guard on each call
+// (code review of 12 Oct 2026, finding 2). Not applied to `src/hebra`, which runs in Hebra.
+//
 // Limits, stated so nobody over-reads a green: this looks at the declared contract only. It
 // does not prove behaviour in an old Obsidian (nothing was run on 1.7.2), and an API without a
 // `@since` tag is assumed to be old.
@@ -65,6 +71,29 @@ function newestRequired(symbol, minAppVersion) {
   return worst;
 }
 
+/** Host classes whose members the plugin reaches through `app`; a local type may mirror them. */
+const HOST_CLASSES = new Set(['App', 'Vault', 'Workspace', 'FileManager', 'MetadataCache']);
+
+/** Member name -> `{since, owner}` for the members of HOST_CLASSES declared newer than `minAppVersion`. */
+function newerHostMembers(program, minAppVersion) {
+  const out = new Map();
+  for (const sf of program.getSourceFiles()) {
+    if (!sf.isDeclarationFile || !sf.fileName.split('/').join(sep).includes(OBSIDIAN_DTS)) continue;
+    const visit = (node) => {
+      if (ts.isClassDeclaration(node) && node.name && HOST_CLASSES.has(node.name.text)) {
+        for (const member of node.members) {
+          if (!member.name || !ts.isIdentifier(member.name)) continue;
+          const since = sinceOf(member);
+          if (since && isNewer(since, minAppVersion) && !out.has(member.name.text)) out.set(member.name.text, { since, owner: node.name.text });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return out;
+}
+
 /**
  * Programs in `files` (or the whole tsconfig) -> list of `{file, line, text, since, via}`.
  * `overrides` maps an absolute path to source text, so a test can inject a file that does not
@@ -93,9 +122,22 @@ export function findTooNewApis(minAppVersion, { overrides = {}, tsconfig = join(
     found.push({ file: sf.fileName.replace(`${ROOT}${sep}`, ''), line: line + 1, text: node.getText().slice(0, 60), since, via });
   };
 
+  const mirrored = newerHostMembers(program, minAppVersion);
+  // `src/hebra` runs in Hebra, whose own host types share names with Obsidian's (`Vault.copy`).
+  const HEBRA = join(ROOT, 'src', 'hebra') + sep;
+
   for (const sf of program.getSourceFiles()) {
     if (sf.isDeclarationFile || !roots.includes(sf.fileName)) continue;
+    const obsidianHost = !sf.fileName.split('/').join(sep).startsWith(HEBRA);
     const visit = (node) => {
+      // A local structural type (interface or type literal) that declares a member of App, Vault,
+      // Workspace, FileManager or MetadataCache newer than minAppVersion: a call through it would
+      // escape the checks above, which only see Obsidian's own declarations. Declared optional
+      // (`name?`) it is accepted: strict null checks then force a guard before every call.
+      if (obsidianHost && (ts.isPropertySignature(node) || ts.isMethodSignature(node)) && !node.questionToken && node.name && ts.isIdentifier(node.name)) {
+        const hit = mirrored.get(node.name.text);
+        if (hit) report(node.name, hit.since, `local type mirrors ${hit.owner}.${node.name.text}; declare it optional and guard the call`);
+      }
       if (ts.isIdentifier(node) && !ts.isImportSpecifier(node.parent)) {
         const symbol = checker.getSymbolAtLocation(node);
         const resolved = symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;

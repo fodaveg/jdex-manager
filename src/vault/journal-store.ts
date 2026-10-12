@@ -75,20 +75,70 @@ export function effectPaths(op: Operation): string[] {
 
 export const DEVICE_KEY = "jdex-manager-device";
 
-/** A stable id for this device and vault, kept in Obsidian's local storage (never synced). */
-export function deviceIdentity(host: { loadLocalStorage?(key: string): unknown; saveLocalStorage?(key: string, value: unknown): void }, make: () => string = newJournalId): string {
+/** What `deviceIdentity` reads from the app. */
+export interface DeviceHost {
+  /** Obsidian 1.8.7 and later only (minAppVersion is 1.7.2): optional, checked before each use. */
+  loadLocalStorage?(key: string): unknown;
+  /** Obsidian 1.8.7 and later only, like `loadLocalStorage`. */
+  saveLocalStorage?(key: string, value: unknown): void;
+  vault?: { getName(): string };
+}
+
+type KeyValueStorage = Pick<Storage, "getItem" | "setItem">;
+
+function browserStorage(): KeyValueStorage | null {
   try {
-    const existing = host.loadLocalStorage?.(DEVICE_KEY);
-    if (typeof existing === "string" && existing !== "") return existing;
-    const id = make();
-    if (host.saveLocalStorage) {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A stable id for this device and vault, never synced. Obsidian's local storage when the app has
+ * it (1.8.7+); before that, the window's local storage under a key per vault name, so an older
+ * Obsidian keeps one identity across restarts instead of a new one per session. An identity kept
+ * by that fallback is carried into Obsidian's storage after an update, so the device stays the same.
+ */
+export function deviceIdentity(host: DeviceHost, make: () => string = newJournalId, storage: KeyValueStorage | null = browserStorage()): string {
+  let vaultName = "";
+  try {
+    vaultName = host.vault?.getName() ?? "";
+  } catch {
+    // No vault name: one fallback key for every vault.
+  }
+  const fallbackKey = `${DEVICE_KEY}:${vaultName}`;
+  const readFallback = (): string | null => {
+    try {
+      const kept = storage?.getItem(fallbackKey);
+      return typeof kept === "string" && kept !== "" ? kept : null;
+    } catch {
+      return null;
+    }
+  };
+  try {
+    if (typeof host.loadLocalStorage === "function" && typeof host.saveLocalStorage === "function") {
+      const existing = host.loadLocalStorage(DEVICE_KEY);
+      if (typeof existing === "string" && existing !== "") return existing;
+      const id = readFallback() ?? make();
       host.saveLocalStorage(DEVICE_KEY, id);
+      return id;
+    }
+  } catch {
+    // Obsidian's local storage failed: try the fallback.
+  }
+  const kept = readFallback();
+  if (kept) return kept;
+  const id = make();
+  try {
+    if (storage) {
+      storage.setItem(fallbackKey, id);
       return id;
     }
   } catch {
     // Local storage unavailable: fall through to a per-session identity.
   }
-  return `session-${make()}`;
+  return `session-${id}`;
 }
 
 export class JournalStore {
