@@ -80,6 +80,12 @@ Coverage (`npm run test:coverage`, part of `check`) enforces the floor in `vites
 
 The Hebra plugin lives in `src/hebra/` (entry `main.ts`, written against `hebra-plugin-api`, never against Obsidian or Hebra internals) and shares only the pure engine in `src/jd/` with the Obsidian plugin. `scripts/build-hebra.mjs` bundles it into one ES module, generates `hebra.json` (never by hand) and fails if the bundle imports anything it should not or inlines CodeMirror; `esbuild.config.mjs` fails if `main.js` bundles anything from `src/hebra/`.
 
+## Release
+
+A release is a tag equal to the version in `manifest.json`, `package.json` and `hebra.json`, on a commit that is already in `main`, with the notes written in `release-notes/<tag>.md` in that same commit (the workflow fails without them). The workflow hashes the six assets from the build, attests their provenance, creates a draft, downloads it back and compares it with those hashes and with GitHub's own digests, and only then publishes. It also requires the repository to have immutable releases enabled (Settings, Releases): that setting is not something the workflow can turn on. `minAppVersion`, `versions.json` and the version fields are changed by hand, on purpose; `npm run check:min-app` fails if the code starts to need newer Obsidian API than `minAppVersion`.
+
+Dependencies are reviewed through Dependabot (`.github/dependabot.yml`, npm and GitHub Actions). `obsidian` is held to `~1.14.4`, a minor, so a new minor arrives as a pull request that CI judges with `check:min-app`.
+
 ## Credit and licence
 
 Johnny.Decimal is Johnny Noble's system: https://johnnydecimal.com. This plugin is an independent tool and is not affiliated with it.

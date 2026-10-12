@@ -13,10 +13,17 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
+      # Exactly the lockfile, never `npm install`. The Hebra bundle is generated and
+      # git-ignored: `npm run check` builds it before the tests, and tests/hebra/bundle.test.ts
+      # fails (it does not skip) if it is missing.
       - run: npm ci
+      # Lint, minAppVersion guard, both builds, tests with the coverage floor.
       - run: npm run check
+      # What ships (yaml is bundled into hebra-main.mjs although it is a devDependency).
+      # Needs the network, so it is not part of `npm run check`.
+      - run: npm run audit:bundled
