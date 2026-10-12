@@ -584,7 +584,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         mountCreateCategoryDialog(el, {
           index: currentIndex,
           refreshIndex: async () => {
-            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
+            return jdexCreationIndex(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
           },
           areas: currentIndex.areas,
           createFolderDefault: settings.createFolderByDefault,
@@ -592,7 +592,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             try {
               const outcome = await journal.run('create-structure', 'Crear categoría', async (vault) => {
                 // Re-read at the write: the number may have been taken while the dialog was open.
-                const liveIndex = selectCreationSystem(await readJdexCreationIndex(vault, settings), namePrefix(settings));
+                // Every system: the writer narrows it to the area's own (D02 under a D01 setting).
+                const liveIndex = await readJdexCreationIndex(vault, settings);
                 const created = await createJdexCategory(
                   vault,
                   api.markdown,

@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
-import { JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
+import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { guardJdexJournal } from '../../src/hebra/jdex-lifecycle';
 import type { JdexJournal } from '../../src/hebra/jdex-journal';
 import { activateJdex } from './support/activate';
@@ -112,6 +112,54 @@ describe('FH 2: undo acts on the operation the dialog showed (runtime)', () => {
     await vi.waitFor(() => expect(fake.recorded.notices.join(' ')).toContain('cambió desde que se abrió'));
     expect((await vault.noteRead(first))?.trashedAt).toBeNull();
     expect((await vault.noteRead(second))?.trashedAt).toBeNull();
+    await cleanup();
+  });
+});
+
+describe('FH 3: creating a category in another system checks that system only (runtime)', () => {
+  async function prefixed(settings: Record<string, unknown>, notes: [string, string][]) {
+    const vault = new FakeJdexVault();
+    for (const folder of [
+      fakeFolder('sys', null, '00-09 Sistema'), fakeFolder('sys-cat', 'sys', '00 Sistema'), fakeFolder('jdex', 'sys-cat', '00.00 JDex'),
+      fakeFolder('area', null, '20-29 Productos'), fakeFolder('cat', 'area', '21 Software'),
+      fakeFolder('d02', null, 'D02.20-29 Casa')
+    ]) vault.seedFolder(folder);
+    for (const [id, body] of notes) vault.seedNote(fakeNote(id, 'jdex', body));
+    const harness = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX, ...settings } });
+    const cleanup = await activateJdex(harness.api);
+    void command(harness.fake, JDEX_COMMAND_CREATE_CATEGORY).run();
+    const dialog = document.body.querySelector('dialog.hebra-module-modal') as HTMLDialogElement;
+    const select = dialog.querySelector('select') as HTMLSelectElement;
+    select.value = 'D02.20-29';
+    select.dispatchEvent(new Event('change'));
+    const [number, title] = [...dialog.querySelectorAll('input[type="text"]')] as HTMLInputElement[];
+    title.value = 'Hogar';
+    title.dispatchEvent(new Event('input'));
+    return { ...harness, vault, cleanup, dialog, number };
+  }
+  async function jdexTitles(vault: FakeJdexVault): Promise<string[]> {
+    const page = await vault.notesPage(null, 100, { kind: 'folder', folderId: 'jdex' });
+    return page.items.map((item) => item.title);
+  }
+
+  it('without a prefix, a D02.21 made elsewhere while the dialog was open is not created twice', async () => {
+    const { vault, workspace, cleanup, dialog, number } = await prefixed({}, [['n-id', '# 21.11 Algo\n']]);
+    expect(number.value).toBe('21');
+    vault.seedNote(fakeNote('n-other', 'jdex', '# D02.21 Hogar de otro dispositivo\n'));
+    (dialog.querySelector('.hebra-jdex-dialog-primary') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(dialog.querySelector('.hebra-jdex-dialog-error')?.textContent).toContain('Siguiente libre: 22'));
+    expect(workspace.openNote).not.toHaveBeenCalled();
+    expect((await jdexTitles(vault)).filter((title) => title.startsWith('D02.21'))).toHaveLength(1);
+    await cleanup();
+  });
+
+  it('with D01 configured, D01.21 does not block creating D02.21', async () => {
+    const { vault, fake, workspace, cleanup, dialog, number } = await prefixed({ systemId: 'D01', prefixNamesWithSystem: true }, [['n-d01', '# D01.21 Productos\n']]);
+    expect(number.value).toBe('21');
+    (dialog.querySelector('.hebra-jdex-dialog-primary') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(workspace.openNote, `${dialog.querySelector('.hebra-jdex-dialog-error')?.textContent} | ${fake.recorded.notices.join(' | ')}`).toHaveBeenCalled());
+    expect(fake.recorded.notices.join(' ')).not.toContain('ya existe');
+    expect(await jdexTitles(vault)).toContain('D02.21 Hogar');
     await cleanup();
   });
 });
