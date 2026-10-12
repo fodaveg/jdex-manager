@@ -190,6 +190,16 @@ export class JournalStore {
     return next;
   }
 
+  /**
+   * Runs `task` in the save queue, after every save already queued and before any queued later,
+   * so it never interleaves with a save's read and write. Its failure is not a failed save.
+   */
+  serialized(task: () => Promise<void>): Promise<void> {
+    const next = this.saves.catch(() => undefined).then(task);
+    this.saves = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
   /** Queues a save; the returned promise rejects if this save fails. */
   save(): Promise<void> {
     const next = this.saves.catch(() => undefined).then(() => this.persist());
@@ -271,12 +281,18 @@ export class PluginDataFile {
     return this.journal.load(stored);
   }
 
-  /** `data.json` changed outside this window (sync, another device): adopt it without losing local entries. */
-  async reload(): Promise<void> {
-    const stored = asRecord(await this.io.load());
-    Object.assign(this.settings, mergeChangedSettings(this.settings, this.baseline, stored));
-    this.baseline = JSON.parse(JSON.stringify(this.settings)) as JdexManagerSettings;
-    this.journal.absorb(stored);
+  /**
+   * `data.json` changed outside this window (sync, another device): adopt it without losing local
+   * entries. Queued with the saves. The baseline becomes what is on disk, not the live settings: a
+   * setting changed while `data.json` was being read stays "changed here" and the next save writes it.
+   */
+  reload(): Promise<void> {
+    return this.journal.serialized(async () => {
+      const stored = asRecord(await this.io.load());
+      Object.assign(this.settings, mergeChangedSettings(this.settings, this.baseline, stored));
+      this.baseline = mergeSettings(settingsOf(stored));
+      this.journal.absorb(stored);
+    });
   }
 
   /** Saves settings and journal through the journal's save queue, so every write is ordered. */
@@ -288,8 +304,11 @@ export class PluginDataFile {
     const stored = asRecord(await this.io.load());
     Object.assign(this.settings, mergeChangedSettings(this.settings, this.baseline, stored));
     this.journal.absorb(stored);
-    await this.io.save({ ...stored, ...this.settings, ...this.journal.serialize() });
-    this.baseline = JSON.parse(JSON.stringify(this.settings)) as JdexManagerSettings;
+    // The baseline is the copy that is written, taken before the await: a setting changed while
+    // the write is in flight is not in it, so the next save still sees it as changed here.
+    const written = JSON.parse(JSON.stringify(this.settings)) as JdexManagerSettings;
+    await this.io.save({ ...stored, ...written, ...this.journal.serialize() });
+    this.baseline = written;
   }
 }
 
