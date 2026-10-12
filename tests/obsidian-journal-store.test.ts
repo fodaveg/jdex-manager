@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { type Effect, JOURNAL_VERSION, mergeJournals, type Operation } from "../src/jd/journal";
 import { mergeSettings } from "../src/jd/settings";
 import { deviceIdentity, discardLastOperation, PluginDataFile, UndoShield, undoLastOperation, type UndoContext } from "../src/vault/journal-store";
-import { fakeVault } from "./obsidian-journal-fake";
+import { fakeVault } from "./support/fake-obsidian-vault";
 
 function dataFile(initial: unknown = null, device = "dev-A") {
   let stored: unknown = initial === null ? null : JSON.parse(JSON.stringify(initial));

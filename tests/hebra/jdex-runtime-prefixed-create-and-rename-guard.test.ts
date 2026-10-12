@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
-// Lot L5 of the 12 Oct 2026 audit, through `activateJdex` and the fake host: creating in
-// prefixed systems (D01, D02) from the Create ID dialog.
+// Through `activateJdex` and the fake host: creating in prefixed systems (D01, D02) from the
+// Create ID dialog, the folder rename guard, rename in pairs, the retire verb and the JD path.
 import type { PluginFolder } from 'hebra-plugin-api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JDEX_COMMAND_CREATE_CHILD, JDEX_COMMAND_CREATE_ID, JDEX_COMMAND_GOTO_ID } from '../../src/hebra/jdex-runtime';

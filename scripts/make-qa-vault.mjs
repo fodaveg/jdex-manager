@@ -15,7 +15,7 @@
  */
 import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -169,11 +169,32 @@ function refuse(message) {
   process.exit(2);
 }
 
-function checkTarget(target) {
-  const real = join(homedir(), "Documents", "fodaveg");
+/** Roots of the real vault: the historical default plus every system root in the JD config, if any. */
+function realVaultRoots() {
+  const roots = [join(homedir(), "Documents", "fodaveg")];
+  for (const config of [join(homedir(), ".config", "johnnydecimal", "config.json"), join(homedir(), ".jd", "config.json")]) {
+    try {
+      const systems = JSON.parse(readFileSync(config, "utf8")).systems;
+      if (Array.isArray(systems)) for (const system of systems) if (typeof system?.root === "string" && system.root !== "") roots.push(system.root);
+    } catch { /* no config, or not readable: the default root still applies */ }
+  }
+  return roots.map((root) => { try { return realpathSync(root); } catch { return resolve(root); } });
+}
+
+/** Resolves symlinks of the parent (which must exist), so a link into a vault cannot dodge the checks. */
+function realTarget(parent) {
+  let realParent;
+  try { realParent = realpathSync(resolve(parent)); } catch { refuse(`${parent} does not exist or cannot be resolved; create the parent folder first.`); }
+  const target = join(realParent, "jd-qa");
+  try { return realpathSync(target); } catch { return target; }
+}
+
+export function checkTarget(target) {
   const lower = (p) => p.toLowerCase();
-  if (lower(target) === lower(real) || lower(target).startsWith(lower(real) + sep)) refuse(`${target} is inside the real vault.`);
-  for (let dir = dirname(target); ; dir = dirname(dir)) {
+  for (const real of realVaultRoots()) {
+    if (lower(target) === lower(real) || lower(target).startsWith(lower(real) + sep)) refuse(`${target} is inside the real vault (${real}).`);
+  }
+  for (let dir = target; ; dir = dirname(dir)) {
     if (existsSync(join(dir, ".obsidian"))) refuse(`${dir} is an Obsidian vault; choose a folder outside any vault.`);
     if (dirname(dir) === dir) break;
   }
@@ -190,7 +211,7 @@ function hasCommit(target) {
 function main() {
   const parent = process.argv[2];
   if (!parent) refuse("usage: node scripts/make-qa-vault.mjs <parent-folder>   (creates <parent-folder>/jd-qa)");
-  const target = resolve(parent, "jd-qa");
+  const target = realTarget(parent);
   checkTarget(target);
 
   const files = [

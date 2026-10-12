@@ -63,6 +63,7 @@ import {
   missingConfiguredFolders,
   todayIso,
   pairAction,
+  pairBlockedByRepeat,
   extractJdPrefix,
   patternFor,
   staleInboxFindings,
@@ -805,9 +806,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const beforeIndex = { ...index, ids: index.ids.map((entry) => entry.notePath === newPath
       ? { ...entry, notePath: oldPath, title: extractJdPrefix(event.oldTitle)?.title ?? entry.title } : entry) };
     const action = pairAction({ oldPath, newPath, isFolder: false }, beforeIndex, settings);
-    if (action.type !== 'rename-partner') return;
+    const blockedByRepeat = action.type === 'none' && pairBlockedByRepeat({ oldPath, newPath, isFolder: false }, beforeIndex, settings);
+    if (action.type !== 'rename-partner' && !blockedByRepeat) return;
     const renamed = extractJdPrefix(event.newTitle);
     if (renamed?.number.kind === 'id' && refuseRepeated({ id: renamed.number.extension ? `${renamed.number.id}+` : renamed.number.id, system: renamed.number.system, title: renamed.title })) return;
+    if (action.type !== 'rename-partner') return;
     const folderId = jdexResolveFolderId(walk, action.partnerPath);
     if (!folderId) return;
     const parentSeparator = action.partnerPath.lastIndexOf('/');

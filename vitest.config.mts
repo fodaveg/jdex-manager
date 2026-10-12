@@ -13,9 +13,10 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**/*.ts"],
       reporter: ["text-summary", "json-summary"],
-      // Initial floor, measured on 12 Oct 2026 (67 files, 527 tests): statements 71.00,
-      // branches 67.09, functions 64.58, lines 74.51. A floor against regressions, not a goal:
-      // raise it when coverage rises, never lower it to make a red go away.
+      // Floor against regressions, not a goal: raise it when coverage rises, never lower it to
+      // make a red go away. Last measured on 12 Oct 2026 (100 files, 899 tests, with the Hebra
+      // bundle built): statements 79.82, branches 73.80, functions 73.09, lines 83.68. The floor
+      // below is the first measurement (527 tests) and has not been raised yet.
       thresholds: { statements: 70, branches: 66, functions: 64, lines: 74 },
     },
   },

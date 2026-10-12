@@ -5,9 +5,18 @@ import { createJdexJournal } from '../../src/hebra/jdex-journal';
 import { JdexPartialRewriteError, rewriteJdexNotes, type JdexRewriteLibrary } from '../../src/hebra/jdex-write';
 import { FakeJdexVault, HOST_REWRITE_BATCH_MAX, fakeNote, withHostRewriteBatchLimit } from './support/fakes';
 
-/** El `vault` del host falso del paquete, con notas en la raíz. */
-function fakeVault(notes: NonNullable<FakePluginApiOptions['notes']>) {
+/** El `vault` del host falso del paquete, con notas en la raíz (solo para comparar su límite de lote). */
+function packageVault(notes: NonNullable<FakePluginApiOptions['notes']>) {
   return withHostRewriteBatchLimit(createFakePluginApi({ capabilities: ['vault.read', 'vault.write'], notes }).api.vault);
+}
+
+/** El doble oficial con las notas dadas (`id -> cuerpo` o `{ body, title }`) en la carpeta `f1`. */
+function fakeVault(notes: Record<string, string | { body: string; title: string }>): FakeJdexVault {
+  const vault = new FakeJdexVault();
+  for (const [id, value] of Object.entries(notes)) {
+    vault.seedNote(typeof value === 'string' ? fakeNote(id, 'f1', value) : fakeNote(id, 'f1', value.body, { title: value.title }));
+  }
+  return vault;
 }
 
 /** A FakeJdexVault with `count` notes `n000…`, each with body `# Nota <i>\n`. */
@@ -28,8 +37,8 @@ describe('host batch limit in the doubles', () => {
     const entries = await Promise.all(ids.map(async (id) => ({ id, body: '# X\n', expected: (await vault.noteRead(id))!.revision })));
     await expect(vault.notesRewriteBatch(entries)).rejects.toSatisfy((error) => isPluginApiError(error, 'invalid-argument'));
     await expect(vault.notesRewriteBatch(entries.slice(0, HOST_REWRITE_BATCH_MAX))).resolves.toMatchObject({ stale: [] });
-    const packageVault = fakeVault({ n1: '# A\n' });
-    await expect(packageVault.notesRewriteBatch(entries)).rejects.toThrow(/Como mucho 200/);
+    const hostFake = packageVault({ n1: '# A\n' });
+    await expect(hostFake.notesRewriteBatch(entries)).rejects.toThrow(/Como mucho 200/);
   });
 });
 
@@ -156,16 +165,20 @@ describe('rewriteJdexNotes', () => {
   it('si el reintento también queda `stale`, la nota sale en `skipped` sin pisarla', async () => {
     const vault = new FakeJdexVault();
     vault.seedNote(fakeNote('n1', 'f1', '# Antes\n'));
+    let edits = 0;
     const library: JdexRewriteLibrary = {
       noteRead: (id) => vault.noteRead(id),
       notesRewriteBatch: async (entries, options) => {
-        vault.saveElsewhere('n1', '# Otro cambio\n');
+        // A different body each time: with real hashes, the same body twice would keep the
+        // hash and the (non-strict) batch would accept it, exactly as the host does.
+        edits += 1;
+        vault.saveElsewhere('n1', `# Otro cambio ${edits}\n`);
         return vault.notesRewriteBatch(entries, options);
       }
     };
     const result = await rewriteJdexNotes(library, ['n1'], () => '# Mío\n');
     expect(result).toEqual({ written: [], skipped: ['n1'] });
-    expect((await vault.noteRead('n1'))?.body).toBe('# Otro cambio\n');
+    expect((await vault.noteRead('n1'))?.body).toBe('# Otro cambio 2\n');
   });
 
   it('una nota protegida (`locked`, sin cuerpo) no se toca nunca', async () => {
