@@ -8,6 +8,7 @@ import { fileDate } from "../vault/file-date";
 import { moveInto } from "../vault/files";
 import type { Effect } from "../jd/journal";
 import { movedIdentity } from "../vault/journal";
+import { t } from "./i18n";
 
 export interface InboxContext {
   index: JdIndex;
@@ -43,14 +44,15 @@ export class ProcessInboxModal extends Modal {
   private async render(): Promise<void> {
     const { contentEl } = this;
     contentEl.empty();
+    const s = t();
     const file = this.queue[0];
     if (!file) {
-      this.setTitle("Inbox");
-      contentEl.createEl("p", { text: `Nothing left. ${this.moved} file(s) moved or archived in this pass.` });
-      new Setting(contentEl).addButton((b) => b.setButtonText("Close").setCta().onClick(() => this.close()));
+      this.setTitle(s.inboxTitle);
+      contentEl.createEl("p", { text: s.inboxDone(this.moved) });
+      new Setting(contentEl).addButton((b) => b.setButtonText(s.close).setCta().onClick(() => this.close()));
       return;
     }
-    this.setTitle(`Inbox · ${this.queue.length} left`);
+    this.setTitle(s.inboxLeft(this.queue.length));
     contentEl.createEl("h3", { text: file.name });
     contentEl.createDiv({ text: `${file.parent?.path ?? ""} · ${formatSize(file.stat.size)}`, cls: "jdex-suggestion-note" });
     if (file.extension === "md") {
@@ -63,7 +65,7 @@ export class ProcessInboxModal extends Modal {
     new Setting(contentEl)
       .addButton((b) =>
         b
-          .setButtonText("Move to ID")
+          .setButtonText(s.inboxMove)
           .setCta()
           .onClick(() => {
             new IdSuggestModal(
@@ -71,44 +73,44 @@ export class ProcessInboxModal extends Modal {
               this.ctx.index,
               (entry) => {
                 if (!entry.folderPath) {
-                  new Notice(`${entry.label} has no folder. Create it first.`);
+                  new Notice(s.inboxNoFolder(entry.label));
                   return;
                 }
-                void this.act(() => this.recordMove(file, `Move ${file.name} to ${entry.id}`, () => moveInto(this.app, file, entry.folderPath!)));
+                void this.act(() => this.recordMove(file, s.labelMoveTo(file.name, entry.id), () => moveInto(this.app, file, entry.folderPath!)));
               },
-              "Move to which ID?",
+              s.inboxMovePlaceholder,
             ).open();
           }),
       )
       .addButton((b) =>
         b
-          .setButtonText(archive?.folderPath ? `Archive to ${archive.id}` : "Archive")
+          .setButtonText(archive?.folderPath ? s.inboxArchiveTo(archive.id) : s.inboxArchive)
           .setDisabled(!archive?.folderPath)
-          .onClick(() => void this.act(() => this.recordMove(file, `Archive ${file.name}`, () => moveInto(this.app, file, archive!.folderPath!, { when: fileDate(this.app, file), format: this.ctx.dateFormat })))),
+          .onClick(() => void this.act(() => this.recordMove(file, s.labelArchive(file.name), () => moveInto(this.app, file, archive!.folderPath!, { when: fileDate(this.app, file), format: this.ctx.dateFormat })))),
       )
       .addButton((b) =>
-        b.setButtonText("Skip").onClick(() => {
+        b.setButtonText(s.inboxSkip).onClick(() => {
           this.queue.shift();
           void this.render();
         }),
       )
       .addButton((b) =>
-        b.setButtonText("Delete").onClick(async () => {
-          const ok = await confirm(this.app, "Delete this file?", [file.path, "It goes to the trash, following your Obsidian deletion setting."], "Delete");
+        b.setButtonText(s.inboxDelete).onClick(async () => {
+          const ok = await confirm(this.app, s.inboxDeleteTitle, [file.path, s.inboxDeleteBody], s.inboxDelete);
           if (!ok) return;
           await this.act(async () => {
             // Markdown is journaled with its content; other files are recovered from the trash.
             const content = file.extension === "md" ? await this.app.vault.read(file) : null;
             const path = file.path;
             await this.app.fileManager.trashFile(file);
-            if (content !== null) this.ctx.journal?.("move", `Delete ${file.name} from the inbox`).push({ kind: "trashed-note", path, content });
+            if (content !== null) this.ctx.journal?.("move", s.labelDeleteFromInbox(file.name)).push({ kind: "trashed-note", path, content });
             return "";
           }, false);
         }),
       );
     if (file.extension === "md") {
       new Setting(contentEl).addButton((b) =>
-        b.setButtonText("Open").onClick(() => {
+        b.setButtonText(s.inboxOpen).onClick(() => {
           void this.app.workspace.getLeaf(false).openFile(file);
           this.close();
         }),

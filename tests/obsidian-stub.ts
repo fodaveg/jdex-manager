@@ -286,3 +286,5 @@ export class AbstractInputSuggest<T> {
   declare selectSuggestion: (value: T, evt: MouseEvent | KeyboardEvent) => void;
 }
 unmodelled(AbstractInputSuggest, ["getSuggestions", "renderSuggestion", "selectSuggestion", "setValue", "getValue", "onSelect", "open"]);
+/** Obsidian sets moment's locale to its interface language; tests run as an English Obsidian. */
+export const moment = { locale: (): string => "en" };

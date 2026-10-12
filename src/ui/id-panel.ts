@@ -4,6 +4,7 @@ import { childrenOf } from "../jd/headers";
 import { childrenPlus, sameSystem, type IdEntry, type JdIndex } from "../jd/index";
 import { openEntry } from "./go-to-id";
 import { makeKeyboardLink } from "./keyboard-link";
+import { t } from "./i18n";
 
 export const ID_PANEL_VIEW = "jdex-id-panel";
 
@@ -29,7 +30,7 @@ export class IdPanelView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "ID panel";
+    return t().panelTitle;
   }
 
   getIcon(): string {
@@ -62,20 +63,21 @@ export class IdPanelView extends ItemView {
     root.empty();
     this.shownNotePath = null;
     root.addClass("jdex-panel");
+    const s = t();
     const file = this.app.workspace.getActiveFile();
     const settings = this.source.settings();
     if (settings.jdexFolder === "") {
-      root.createEl("p", { text: "No folder is set for the index. Choose it in the plugin settings to use this panel.", cls: "jdex-panel-muted" });
+      root.createEl("p", { text: s.panelNoFolder, cls: "jdex-panel-muted" });
       return;
     }
     if (!file) {
-      root.createEl("p", { text: "Open a file inside an ID.", cls: "jdex-panel-muted" });
+      root.createEl("p", { text: s.panelOpenFile, cls: "jdex-panel-muted" });
       return;
     }
     const index = this.source.index();
     const loc = locate(index, settings, file.path);
     if (!loc) {
-      root.createEl("p", { text: "The active file is not inside an ID.", cls: "jdex-panel-muted" });
+      root.createEl("p", { text: s.notInsideId, cls: "jdex-panel-muted" });
       return;
     }
     const entry = loc.entry;
@@ -85,15 +87,15 @@ export class IdPanelView extends ItemView {
     if (description) root.createEl("p", { text: description });
 
     const links = root.createDiv({ cls: "jdex-panel-links" });
-    this.link(links, entry.notePath ? "JDex note" : "No JDex note", entry.notePath ? () => void openEntry(this.app, entry, false) : null);
-    this.link(links, entry.folderPath ? "Folder" : "No folder", entry.folderPath ? () => void openEntry(this.app, entry, true) : null);
+    this.link(links, entry.notePath ? s.panelNote : s.panelNoNote, entry.notePath ? () => void openEntry(this.app, entry, false) : null);
+    this.link(links, entry.folderPath ? s.panelFolder : s.panelNoFolderLink, entry.folderPath ? () => void openEntry(this.app, entry, true) : null);
 
     if (entry.folderPath) {
       const folder = this.app.vault.getAbstractFileByPath(entry.folderPath);
-      if (folder instanceof TFolder) this.section(root, "Files", this.fileRows(folder));
+      if (folder instanceof TFolder) this.section(root, s.panelFiles, this.fileRows(folder));
     }
     const plus = childrenPlus(index, entry.id, entry.system);
-    if (plus.length > 0) this.section(root, "Children (+)", plus.map((c) => this.entryRow(c)));
+    if (plus.length > 0) this.section(root, s.panelChildren, plus.map((c) => this.entryRow(c)));
     const siblings = this.siblings(index, entry);
     if (siblings.entries.length > 0) this.section(root, siblings.title, siblings.entries.map((s) => this.entryRow(s, s.id === entry.id)));
   }
@@ -149,6 +151,6 @@ export class IdPanelView extends ItemView {
     const header = index.ids.find((e) => e.id === headerId && sameSystem(e, entry));
     const entries = childrenOf(index, headerId, entry.system);
     if (entries.length <= 1 && !header) return { title: "", entries: [] };
-    return { title: header ? `Under ${header.label}` : `${headerId.slice(0, -1)}1 to ${headerId.slice(0, -1)}9`, entries };
+    return { title: header ? t().panelUnder(header.label) : t().panelRange(headerId.slice(0, -1)), entries };
   }
 }

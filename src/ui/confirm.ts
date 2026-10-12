@@ -1,8 +1,9 @@
 import { type App, Modal, Setting } from "obsidian";
 import { trackModal } from "./modal-registry";
+import { t } from "./i18n";
 
 /** Yes/no dialog with a title, a body and two buttons. Resolves true when confirmed. */
-export function confirm(app: App, title: string, lines: string[], okText = "Confirm"): Promise<boolean> {
+export function confirm(app: App, title: string, lines: string[], okText = t().confirm): Promise<boolean> {
   return new Promise((resolve) => {
     const modal = new (class extends Modal {
       private answered = false;
@@ -12,7 +13,7 @@ export function confirm(app: App, title: string, lines: string[], okText = "Conf
         for (const line of lines) this.contentEl.createEl("p", { text: line });
         new Setting(this.contentEl)
           .addButton((b) =>
-            b.setButtonText("Cancel").onClick(() => {
+            b.setButtonText(t().cancel).onClick(() => {
               this.answered = true;
               resolve(false);
               this.close();
