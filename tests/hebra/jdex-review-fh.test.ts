@@ -4,11 +4,11 @@
  * journal wrapper, the creation dialogs, the settings echo and the folder rename guard.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
+import { DEFAULT_SETTINGS, JOURNAL_VERSION, type Operation } from '../../src/hebra/engine';
 import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { guardJdexJournal } from '../../src/hebra/jdex-lifecycle';
 import { createJdexFolderRenameGuard } from '../../src/hebra/jdex-folder-rename';
-import type { JdexJournal } from '../../src/hebra/jdex-journal';
+import { createJdexJournal, type JdexJournal, type JdexJournalEffect } from '../../src/hebra/jdex-journal';
 import { activateJdex } from './support/activate';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 
@@ -170,6 +170,52 @@ describe('FH 5: without an index the rename guard does not let a renumbering thr
     expect(await guard.confirm({ kind: 'folder-rename', folderId: 'f-id', newName: '21.12 Otro número' } as never)).toBe(false);
     expect(notices.join(' ')).toContain('aún está cargando el índice');
     expect(write).not.toHaveBeenCalled();
+  });
+});
+
+describe('FH 6: recovery at load touches only this device\'s operations', () => {
+  function journalVault(): FakeJdexVault {
+    const vault = new FakeJdexVault();
+    vault.seedFolder(fakeFolder('f1', null, '21 Cat'));
+    vault.seedNote(fakeNote('n1', 'f1', '# Uno\n'));
+    vault.seedNote(fakeNote('n2', 'f1', '# Dos\n'));
+    vault.seedNote(fakeNote('n3', 'f1', '# Tres editado\n'));
+    return vault;
+  }
+  // n1: an intent that never ran; n2: an inverse already applied (the body is `before`).
+  const interrupted = (): JdexJournalEffect[] => [
+    { kind: 'note-rewrite', id: 'n1', before: '# Uno\n', after: '# Uno editado\n', pending: true },
+    { kind: 'note-rewrite', id: 'n2', before: '# Dos\n', after: '# Dos editado\n', undoing: true, revision: { localSeq: 2, bodySha256: 'x' } }
+  ];
+  async function storageWith(entries: Operation<JdexJournalEffect>[]) {
+    const harness = await createJdexTestApi();
+    await harness.api.storage.settings.save({ jdexJournal: entries, jdexJournalVersion: JOURNAL_VERSION });
+    return harness.api.storage.settings;
+  }
+
+  it('leaves the interrupted steps of another device as they are, and does not save', async () => {
+    const storage = await storageWith([{ id: 'op-b', device: 'B', kind: 'fix', label: 'De B', at: '2026-10-12T10:00:00.000Z', effects: interrupted(), rev: 3 }]);
+    const save = vi.spyOn(storage, 'save');
+    const journal = await createJdexJournal(journalVault(), storage, { device: 'A' });
+    expect(journal.entries()).toHaveLength(1);
+    expect(journal.entries()[0].effects).toEqual(interrupted());
+    expect(journal.entries()[0].rev).toBe(3);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('recovers its own steps, raises rev, and an operation left empty stays removed after a reload', async () => {
+    const written: JdexJournalEffect = { kind: 'note-rewrite', id: 'n3', before: '# Tres\n', after: '# Tres editado\n', revision: { localSeq: 2, bodySha256: 'y' } };
+    const storage = await storageWith([
+      { id: 'op-empty', device: 'A', kind: 'fix', label: 'Vacía', at: '2026-10-12T10:00:00.000Z', effects: interrupted(), rev: 3 },
+      { id: 'op-own', device: 'A', kind: 'fix', label: 'Propia', at: '2026-10-12T10:01:00.000Z', effects: [interrupted()[0], written], rev: 3 },
+      { id: 'op-old', kind: 'fix', label: 'Sin dispositivo', at: '2026-10-12T10:02:00.000Z', effects: [interrupted()[0]], rev: 1 }
+    ]);
+    const journal = await createJdexJournal(journalVault(), storage, { device: 'A' });
+    expect(journal.entries().map((op) => op.id)).toEqual(['op-own']);
+    expect(journal.entries()[0].effects).toEqual([written]);
+    expect(journal.entries()[0].rev).toBeGreaterThan(3);
+    const reloaded = await createJdexJournal(journalVault(), storage, { device: 'A' });
+    expect(reloaded.entries().map((op) => op.id)).toEqual(['op-own']);
   });
 });
 

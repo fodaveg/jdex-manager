@@ -141,14 +141,23 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
 
   // Effects interrupted by a close: a rewrite intent that never ran is dropped, an inverse
   // already applied is retired, and the rest keeps its flag so undo can explain it.
+  // Only this device's operations (or ones without a device): another device may be in
+  // the middle of writing or undoing them. A changed operation gets a higher `rev` so a
+  // merge keeps it, and one left empty is remembered as removed.
   let recovered = false;
   for (const operation of entries) {
+    if (operation.device && options.device && operation.device !== options.device) continue;
+    let changed = false;
     for (let i = operation.effects.length - 1; i >= 0; i -= 1) {
       const effect = operation.effects[i];
-      if (effect.undoing && await inverseApplied(vault, effect)) { operation.effects.splice(i, 1); recovered = true; continue; }
-      if (effect.undoing) { delete effect.undoing; recovered = true; }
-      if (effect.pending && effect.kind === 'note-rewrite' && (await vault.noteRead(effect.id))?.body === effect.before) { operation.effects.splice(i, 1); recovered = true; }
+      if (effect.undoing && await inverseApplied(vault, effect)) { operation.effects.splice(i, 1); changed = true; continue; }
+      if (effect.undoing) { delete effect.undoing; changed = true; }
+      if (effect.pending && effect.kind === 'note-rewrite' && (await vault.noteRead(effect.id))?.body === effect.before) { operation.effects.splice(i, 1); changed = true; }
     }
+    if (!changed) continue;
+    recovered = true;
+    operation.rev = (operation.rev ?? 0) + 1;
+    if (operation.effects.length === 0) removed = [...removed, journalOperationId(operation)].slice(-JOURNAL_REMOVED_MAX);
   }
   if (recovered) entries = entries.filter((entry) => entry.effects.length > 0);
 
