@@ -13,6 +13,7 @@ import {
   FakeJdexVault,
   FakeWorkspace,
   fakeFolder,
+  fakeFrontmatter,
   fakeNote,
   HOST_REWRITE_BATCH_MAX,
   titleOf,
@@ -241,5 +242,17 @@ describe('domUi against the host modal and notice', () => {
     expect(notices.at(-1)!.querySelector('button')).toBeNull();
     expect(notices.at(-1)!.textContent).toBe('Solo texto');
     for (const n of notices) n.remove();
+  });
+});
+
+describe('fakeFrontmatter against the host projection (approximation)', () => {
+  it('reads numbers as numbers, lists as lists, and a repeated key does not throw', () => {
+    expect(fakeFrontmatter('---\njd: 21.11\ntags: [a, b]\nvacia:\n---\n# X\n')).toEqual({ jd: 21.11, tags: ['a', 'b'], vacia: null });
+    expect(fakeFrontmatter('---\na: 1\na: 2\n---\n')).toEqual({ a: 2 });
+  });
+
+  it('is null without a frontmatter and for a block with no body at all', () => {
+    expect(fakeFrontmatter('# Sin frontmatter\n')).toBeNull();
+    expect(fakeFrontmatter('---\n---\n')).toBeNull();
   });
 });

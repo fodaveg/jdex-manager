@@ -18,6 +18,7 @@
  *   pruebas del adaptador vean el cuerpo que llegaría a Hebra.
  */
 import { createHash } from 'node:crypto';
+import { parse as parseYaml } from 'yaml';
 import { vi } from 'vitest';
 import type {
   HebraPluginApi,
@@ -591,6 +592,25 @@ export function fakeSetProperty(
   return setFrontmatterProperty(body, key, value) ?? body;
 }
 
+/**
+ * Double of `api.markdown.frontmatter` (host: `moduleCodeBlockFrontmatter`, which projects the
+ * frontmatter: a number stays a number, a list a list, an empty property `null`, a repeated
+ * key does not throw). The package fake returns `null` for everything, which made every
+ * read-back check (`setJdexProperties`) fail. This one reads the block with `yaml`; the
+ * exact typing of dates and odd scalars is an approximation of the host, not a measurement.
+ */
+export function fakeFrontmatter(body: string): Record<string, unknown> | null {
+  const block = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/u.exec(body)?.[1];
+  if (block === undefined) return null;
+  try {
+    const value: unknown = parseYaml(block, { uniqueKeys: false });
+    if (value === null || value === undefined) return {};
+    return typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---- workspace ----
 
 /** Hebra's per-guard deadline in `confirmFolderRename` (`src/lib/plugins/api/
@@ -773,7 +793,7 @@ export async function createJdexTestApi(options: JdexTestApiOptions = {}): Promi
   });
   const workspace = new FakeWorkspace();
   const vault = options.vault ?? new FakeJdexVault();
-  const markdown: PluginMarkdown = { ...fake.api.markdown, setProperty: fakeSetProperty };
+  const markdown: PluginMarkdown = { ...fake.api.markdown, setProperty: fakeSetProperty, frontmatter: fakeFrontmatter };
   const api: HebraPluginApi = {
     ...fake.api,
     ui: domUi(fake.api.ui),
