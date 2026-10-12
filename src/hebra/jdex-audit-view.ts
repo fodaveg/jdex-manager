@@ -7,7 +7,7 @@
  * ya traían un `Fix{type:'frontmatter'}` desde el lote 1 y ahora tienen «Aplicar», para
  * no duplicar el cálculo de `expectedFrontmatter` en un diálogo aparte.
  */
-import { FINDING_KINDS, KIND_TITLES, type Finding } from './engine';
+import { FINDING_KINDS, KIND_TITLES, describeFix, describeFixSide, type Finding } from './engine';
 
 export interface JdexAuditViewOptions {
   /** Se llama en cada apertura de pestaña/diálogo: los hallazgos pueden haber cambiado
@@ -46,6 +46,7 @@ function findingRow(
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'hebra-jdex-repair-select';
+    checkbox.setAttribute('aria-label', `Reparar: ${finding.message}`);
     checkbox.checked = finding.kind === 'frontmatter-mismatch' && finding.fix.type === 'frontmatter' &&
       Object.keys(finding.fix.set).every((key) => ['jd', 'tipo', 'area', 'categoria'].includes(key));
     checkbox.addEventListener('change', () => onSelect(checkbox.checked));
@@ -55,6 +56,19 @@ function findingRow(
   const message = document.createElement('p');
   message.textContent = finding.message;
   row.append(message);
+  if (finding.fix) {
+    const effect = document.createElement('p');
+    effect.className = 'hebra-jdex-audit-effect';
+    effect.textContent = finding.fix.type === 'frontmatter' ? finding.fix.path : describeFix(finding.fix);
+    row.append(effect);
+    const side = describeFixSide(finding.fix);
+    if (side) {
+      const note = document.createElement('p');
+      note.className = 'hebra-jdex-audit-effect-side';
+      note.textContent = side;
+      row.append(note);
+    }
+  }
   if (finding.paths.length > 0) {
     const links = document.createElement('div');
     links.className = 'hebra-jdex-audit-links';

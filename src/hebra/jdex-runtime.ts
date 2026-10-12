@@ -122,8 +122,23 @@ import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import { mountJdexGotoView } from './jdex-goto-view';
 import { mountJdexIdPicker } from './jdex-id-picker';
 import { retireJdexId } from './jdex-retire';
-import { archiveJdexInboxNote, jdexInboxArchiveTarget, jdexInboxQueue, moveJdexInboxNote } from './jdex-inbox-process';
+import {
+  archiveJdexInboxNote,
+  jdexInboxArchiveTarget,
+  jdexInboxQueue,
+  moveJdexInboxNote,
+  moveJdexInboxNoteCreatingFolder,
+  trashJdexInboxNote
+} from './jdex-inbox-process';
 import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
+import { registerJdexActiveNoteCommands } from './jdex-active-note-commands';
+export {
+  JDEX_COMMAND_ARCHIVE_NOTE,
+  JDEX_COMMAND_COPY_JD_PATH,
+  JDEX_COMMAND_COPY_NOTE_ID,
+  JDEX_COMMAND_SEARCH_CATEGORY,
+  JDEX_COMMAND_SEND_TO_INBOX
+} from './jdex-active-note-commands';
 import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
 import { jdexEditorExtension } from './jdex-editor-extension';
@@ -1015,7 +1030,16 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             await journal.run('move', 'Archivar nota de inbox', (vault) => archiveJdexInboxNote(vault, api.markdown, note, currentWalk, currentIndex, settings.dateFormat));
             await rebuild();
           },
-          onOpen: (note) => api.workspace.openNote(note.id)
+          onOpen: (note) => api.workspace.openNote(note.id),
+          readPreview: async (note) => (await api.vault.noteRead(note.id))?.body ?? null,
+          onTrash: async (note) => {
+            await journal.run('fix', `Papelera desde el inbox: ${note.title}`, (vault) => trashJdexInboxNote(vault, note));
+            await rebuild();
+          },
+          onMoveCreatingFolder: async (note, entry) => {
+            await journal.run('move', `Crear carpeta de ${entry.label} y mover desde el inbox`, (vault) => moveJdexInboxNoteCreatingFolder(vault, note, currentWalk, currentIndex, entry));
+            await rebuild();
+          }
         }),
       { title: 'JDex: procesar inbox' }
     );
@@ -1293,6 +1317,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     id: JDEX_COMMAND_PROCESS_INBOX,
     name: 'JDex: procesar inbox',
     run: () => openProcessInboxDialog()
+  });
+  const offActiveNoteCommands = registerJdexActiveNoteCommands({
+    api,
+    state: () => (walk && index ? { walk, index, jdexFolder: settings.jdexFolder, dateFormat: settings.dateFormat } : null),
+    journal,
+    rebuild,
+    copy: copyToClipboard
   });
   const offCommandUndo = host.registerCommand({
     id: JDEX_COMMAND_UNDO,
@@ -1579,6 +1610,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandWrapHeaders();
     offCommandGotoId();
     offCommandProcessInbox();
+    offActiveNoteCommands();
     offCommandUndo();
     offCommandHealth();
     offCommandSystemReport();
