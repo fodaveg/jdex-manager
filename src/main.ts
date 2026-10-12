@@ -21,6 +21,7 @@ import { IdEditorSuggest } from "./ui/autocomplete";
 import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
 import { categoryOfPath, idFolderOfPath, isDatable, locate, zeroOf } from "./jd/files";
+import { fileDate } from "./vault/file-date";
 import { dateFile, inboxFiles, moveInto } from "./vault/files";
 import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
@@ -33,6 +34,7 @@ import { registerReadingLinks } from "./vault/reading-links";
 import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
 import { maintainSystem } from "./vault/maintenance";
+import { MaintenanceGate, onceNotifier } from "./vault/maintenance-gate";
 import { createSystemReport } from "./vault/system-report";
 
 export default class JdexManagerPlugin extends Plugin {
@@ -46,6 +48,8 @@ export default class JdexManagerPlugin extends Plugin {
   private journal: Operation[] = [];
   private maintenanceTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
   private maintenanceRunning = false;
+  private maintenanceGate = new MaintenanceGate();
+  private maintenanceWarn = onceNotifier((message) => void new Notice(message));
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -334,12 +338,8 @@ export default class JdexManagerPlugin extends Plugin {
       this.refreshInboxCount();
       this.queueMaintenance(file);
     }));
-    this.registerEvent(this.app.vault.on("modify", (file) => {
-      this.queueMaintenance(file);
-      if (!(file instanceof TFile) || file.extension !== "md" || this.settings.jdexFolder === "") return;
-      const rel = relativeTo(this.settings.jdexFolder, file.path);
-      if (rel !== null && rel !== "" && !rel.includes("/")) this.invalidateIndex();
-    }));
+    // The index is built from paths only, so a modify never invalidates it.
+    this.registerEvent(this.app.vault.on("modify", (file) => this.queueMaintenance(file)));
     this.registerEvent(this.app.vault.on("create", (file) => {
       this.invalidateIndex();
       void this.onCreate(file);
@@ -373,11 +373,19 @@ export default class JdexManagerPlugin extends Plugin {
     if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
   }
 
-  /** Coalesces vault changes; events produced by maintenance never enqueue another pass. */
+  /** Coalesces vault changes; the pass's own writes never enqueue another pass, foreign ones during it enqueue one. */
   private queueMaintenance(file: TAbstractFile, oldPath?: string): void {
-    if (!this.settings.automaticMaintenance || this.maintenanceRunning || !this.app.workspace.layoutReady) return;
+    if (!this.settings.automaticMaintenance || !this.app.workspace.layoutReady) return;
     const relevant = (path: string) => relativeTo(this.settings.systemRoot, path) !== null || relativeTo(this.settings.jdexFolder, path) !== null;
     if (!relevant(file.path) && !(oldPath && relevant(oldPath))) return;
+    if (this.maintenanceRunning) {
+      this.maintenanceGate.observe(file.path, oldPath);
+      return;
+    }
+    this.scheduleMaintenance();
+  }
+
+  private scheduleMaintenance(): void {
     if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
     this.maintenanceTimer = activeWindow.setTimeout(() => {
       this.maintenanceTimer = null;
@@ -389,15 +397,25 @@ export default class JdexManagerPlugin extends Plugin {
   async maintainAutomatically(): Promise<void> {
     if (!this.settings.automaticMaintenance || this.maintenanceRunning) return;
     this.maintenanceRunning = true;
+    this.maintenanceGate.begin();
     const effects: Effect[] = [];
+    let again = false;
     try {
-      await maintainSystem(this.app, this.settings, effects);
+      await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn);
     } catch (error) {
       new Notice(`Automatic maintenance stopped: ${String(error)}`);
     } finally {
       try { await this.record("fix", "Automatic JDex maintenance", effects); }
-      finally { this.maintenanceRunning = false; }
+      finally {
+        try {
+          again = await this.maintenanceGate.finish(effects, async (path) => {
+            const f = this.app.vault.getAbstractFileByPath(path);
+            return f instanceof TFile ? await this.app.vault.read(f) : null;
+          });
+        } finally { this.maintenanceRunning = false; }
+      }
     }
+    if (again) this.scheduleMaintenance();
   }
 
   /** Runs only on command; each report contains audit, health and changes since the previous. */
@@ -586,9 +604,27 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   private renaming = false;
+  /** Renames the plugin itself performs for a pair (old path to new path); only these are ignored. */
+  private ownRenames?: Map<string, string>;
+  private renameQueue?: Promise<void>;
+
+  private isOwnRename(oldPath: string, newPath: string): boolean {
+    for (const [from, to] of this.ownRenames ?? []) {
+      if (oldPath === from ? newPath === to : oldPath.startsWith(`${from}/`) && newPath === `${to}${oldPath.slice(from.length)}`) return true;
+    }
+    return false;
+  }
+
+  /** Renames are handled one at a time, so a foreign one during a pair's prompt is not lost or mixed up. */
+  async onRename(file: TAbstractFile, oldPath: string): Promise<void> {
+    if (this.renaming || this.isOwnRename(oldPath, file.path)) return;
+    const run = (this.renameQueue ?? Promise.resolve()).then(() => this.handleRename(file, oldPath));
+    this.renameQueue = run.catch(() => undefined);
+    return run;
+  }
 
   /** Rename in pairs, the "never renumber" warning and the moved-category warning. */
-  async onRename(file: TAbstractFile, oldPath: string): Promise<void> {
+  private async handleRename(file: TAbstractFile, oldPath: string): Promise<void> {
     if (this.renaming || this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
     const action = pairAction({ oldPath, newPath: file.path, isFolder: file instanceof TFolder }, index, this.settings);
@@ -615,13 +651,13 @@ export default class JdexManagerPlugin extends Plugin {
           "Rename",
         ));
       if (ok) {
-        this.renaming = true;
+        (this.ownRenames ??= new Map()).set(action.partnerPath, action.newPartnerPath);
         try {
           await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath });
         } catch (error) {
           new Notice(error instanceof Error ? error.message : String(error));
         } finally {
-          this.renaming = false;
+          this.ownRenames?.delete(action.partnerPath);
         }
       }
     }
@@ -664,7 +700,7 @@ export default class JdexManagerPlugin extends Plugin {
         this.app,
         file,
         target.folderPath,
-        zero === "09" ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined,
+        zero === "09" ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined,
       );
       if (to !== from) await this.record("move", `${zero === "09" ? "Archive" : "Send to inbox"} ${file.name}`, [{ kind: "moved", from, to }]);
       new Notice(`Moved to ${to}.`);
@@ -704,7 +740,7 @@ export default class JdexManagerPlugin extends Plugin {
       folder = wanted;
     }
     try {
-      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: new Date(file.stat.ctime), format: this.settings.dateFormat } : undefined;
+      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined;
       const from = file.path;
       const to = await moveInto(this.app, file, folder, date);
       if (to !== from) await this.record("move", `Move ${file.name} to ${entry.id}`, [{ kind: "moved", from, to }]);

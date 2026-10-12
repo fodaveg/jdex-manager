@@ -4,6 +4,7 @@ import { type App, TFile, TFolder } from 'obsidian';
 import { mergeSettings } from '../src/jd/settings';
 import type { Effect } from '../src/jd/journal';
 import { maintainSystem } from '../src/vault/maintenance';
+import { onceNotifier } from '../src/vault/maintenance-gate';
 import { collectAudit } from '../src/vault/audit';
 import { createSystemReport } from '../src/vault/system-report';
 
@@ -55,6 +56,18 @@ describe('Obsidian optional maintenance', () => {
     expect(next).toEqual([]);
   });
 
+  it('reports an index note without markers on every pass, so the caller can show it once per session', async () => {
+    const { app, settings, bodies } = fixture();
+    settings.automaticMaintenance = true;
+    bodies.set('J/00.00 Index.md', '# 00.00 Index\n\nNo markers here.\n');
+    const warn = vi.fn();
+    const shown = vi.fn();
+    const once = onceNotifier(shown);
+    for (let pass = 0; pass < 3; pass++) await maintainSystem(app, settings, [], (message) => { warn(message); once(message); });
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn.mock.calls[0][0]).toContain('has no <!-- jdex:indice --> markers');
+    expect(shown).toHaveBeenCalledTimes(1);
+  });
   it('audits inbox attachments by creation time and keeps previous reports when generating another', async () => {
     const { app, settings, bodies } = fixture();
     expect((await collectAudit(app, settings)).findings.filter((finding) => finding.kind === 'inbox-stale')).toHaveLength(1);
