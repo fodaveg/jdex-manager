@@ -33,6 +33,7 @@ export {
   datedName,
   staleInboxFindings,
   zeroOf,
+  planMoveToId,
   locate,
   // audit.ts — la auditoría del «bibliotecario».
   auditSystem,
@@ -140,5 +141,6 @@ export type {
   RetirePlan,
   NumberMatch,
   Operation,
+  MoveToIdHost,
   OperationKind
 } from '../jd/public';

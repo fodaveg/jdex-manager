@@ -5,7 +5,7 @@
  * passes the real ports; `tests/hebra/jdex-actions.test.ts` passes fakes.
  */
 import type { PluginVault } from 'hebra-plugin-api';
-import { isRepeatedId, repeatedIdMessage, type IdEntry, type JdIndex } from './engine';
+import { isRepeatedId, planMoveToId, repeatedIdMessage, type IdEntry, type JdIndex, type MoveToIdHost } from './engine';
 import type { JdexJournal } from './jdex-journal';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
 
@@ -21,7 +21,10 @@ export interface JdexActionPorts {
   confirm(message: string, confirmLabel: string): Promise<boolean>;
 }
 
-const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+/** What Hebra allows when moving a note into an ID: no folder creation, no dated name. */
+const HEBRA_MOVE_HOST: MoveToIdHost = { createMissingFolder: false, dateOnMove: false };
+
+const errorMessage =(error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** «Copiar ID / ruta / ruta JD». */
 export async function copyJdexText(
@@ -42,12 +45,17 @@ export async function copyJdexText(
  *  not list notes again; ⌘K alone already searches them). */
 export async function moveJdexNoteToEntry(
   ports: Pick<JdexActionPorts, 'notice' | 'journal' | 'rebuild'>,
-  note: { readonly id: string } | null,
+  note: { readonly id: string; readonly title?: string } | null,
   entry: IdEntry,
-  walk: JdexLibraryWalk
+  walk: JdexLibraryWalk,
+  context: { readonly index: JdIndex; readonly settings: { readonly jdexFolder: string; readonly templatesFolder: string; readonly reportsFolder: string } }
 ): Promise<void> {
-  if (!note || !entry.folderPath) return;
-  const folderId = jdexResolveFolderId(walk, entry.folderPath);
+  if (!note) return;
+  // The same decision Obsidian takes (`planMoveToId`), with Hebra's host: it never creates a
+  // missing ID folder and never dates the name, since the name is the note's title.
+  const plan = planMoveToId(context.index, context.settings, entry, note.title ?? '', HEBRA_MOVE_HOST);
+  if (plan.type !== 'move') return;
+  const folderId = jdexResolveFolderId(walk, plan.folder);
   if (!folderId) {
     ports.notice(`No se encontró la carpeta de ${entry.label}.`);
     return;
