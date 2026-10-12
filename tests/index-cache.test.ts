@@ -73,16 +73,14 @@ describe("Obsidian in-memory index", () => {
     expect(plugin.cachedIndex()).not.toBe(before);
   });
 
-  it("modify only invalidates direct JDex Markdown notes", async () => {
+  it("modify never invalidates the index: it is built from paths, not from contents", async () => {
     const { plugin, file, folder, events } = await host();
     const before = plugin.cachedIndex();
-    for (const changed of [folder, { path: "JDex/a.pdf", extension: "pdf" }, { path: "Other/note.md", extension: "md" }, { path: "JDex/sub/note.md", extension: "md" }]) {
-      const item = changed === folder ? folder : Object.assign(new TFile(), changed);
+    for (const changed of [folder, { path: "JDex/a.pdf", extension: "pdf" }, { path: "Other/note.md", extension: "md" }, { path: "JDex/sub/note.md", extension: "md" }, file]) {
+      const item = changed === folder || changed === file ? changed : Object.assign(new TFile(), changed);
       events.get("modify")?.(item);
       expect(plugin.cachedIndex()).toBe(before);
     }
-    events.get("modify")?.(file);
-    expect(plugin.cachedIndex()).not.toBe(before);
   });
 
   it("root settings changes select a fresh index", async () => {

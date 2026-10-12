@@ -130,9 +130,25 @@ import {
 } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import { mountJdexGotoView } from './jdex-goto-view';
+import { mountJdexIdPicker } from './jdex-id-picker';
 import { retireJdexId } from './jdex-retire';
-import { archiveJdexInboxNote, jdexInboxArchiveTarget, jdexInboxQueue, moveJdexInboxNote } from './jdex-inbox-process';
+import {
+  archiveJdexInboxNote,
+  jdexInboxArchiveTarget,
+  jdexInboxQueue,
+  moveJdexInboxNote,
+  moveJdexInboxNoteCreatingFolder,
+  trashJdexInboxNote
+} from './jdex-inbox-process';
 import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
+import { registerJdexActiveNoteCommands } from './jdex-active-note-commands';
+export {
+  JDEX_COMMAND_ARCHIVE_NOTE,
+  JDEX_COMMAND_COPY_JD_PATH,
+  JDEX_COMMAND_COPY_NOTE_ID,
+  JDEX_COMMAND_SEARCH_CATEGORY,
+  JDEX_COMMAND_SEND_TO_INBOX
+} from './jdex-active-note-commands';
 import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
 import { jdexEditorExtension } from './jdex-editor-extension';
@@ -884,9 +900,9 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   /** «Ir a este ID»: la carpeta si la tiene (como `toggleNoteAndFolder`), si no la
    *  nota JDex. */
-  function gotoJdexEntry(entry: IdEntry, currentWalk: JdexLibraryWalk): void {
+  function gotoJdexEntry(entry: IdEntry, currentWalk: JdexLibraryWalk, preferNote = false): void {
     if (refuseRepeated(entry)) return;
-    if (entry.folderPath) {
+    if (!preferNote && entry.folderPath) {
       const folderId = jdexResolveFolderId(currentWalk, entry.folderPath);
       if (folderId) {
         api.workspace.selectFolder(folderId);
@@ -897,6 +913,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       const ref = currentWalk.systemNotes.find((note) => note.path === entry.notePath);
       if (ref) {
         api.workspace.openNote(ref.id);
+        return;
+      }
+    }
+    if (preferNote && entry.folderPath) {
+      const folderId = jdexResolveFolderId(currentWalk, entry.folderPath);
+      if (folderId) {
+        api.workspace.selectFolder(folderId);
         return;
       }
     }
@@ -1076,7 +1099,16 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             await journal.run('move', 'Archivar nota de inbox', (vault) => archiveJdexInboxNote(vault, api.markdown, note, currentWalk, currentIndex, settings.dateFormat));
             await rebuild();
           },
-          onOpen: (note) => api.workspace.openNote(note.id)
+          onOpen: (note) => api.workspace.openNote(note.id),
+          readPreview: async (note) => (await api.vault.noteRead(note.id))?.body ?? null,
+          onTrash: async (note) => {
+            await journal.run('fix', `Papelera desde el inbox: ${note.title}`, (vault) => trashJdexInboxNote(vault, note));
+            await rebuild();
+          },
+          onMoveCreatingFolder: async (note, entry) => {
+            await journal.run('move', `Crear carpeta de ${entry.label} y mover desde el inbox`, (vault) => moveJdexInboxNoteCreatingFolder(vault, note, currentWalk, currentIndex, entry));
+            await rebuild();
+          }
         }),
       { title: 'JDex: procesar inbox' }
     );
@@ -1413,6 +1445,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     name: 'JDex: procesar inbox',
     run: () => openProcessInboxDialog()
   });
+  const offActiveNoteCommands = registerJdexActiveNoteCommands({
+    api,
+    state: () => (walk && index ? { walk, index, jdexFolder: settings.jdexFolder, dateFormat: settings.dateFormat } : null),
+    journal,
+    rebuild,
+    copy: copyToClipboard
+  });
   const offCommandUndo = host.registerCommand({
     id: JDEX_COMMAND_UNDO,
     name: 'JDex: deshacer la última operación',
@@ -1613,9 +1652,32 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offEditorExtension = api.editor.registerExtension(
       jdexEditorExtension({
         ids: () => index?.ids ?? [],
-        onNavigate: (entry) => {
-          if (walk) gotoJdexEntry(entry, walk);
-        }
+        // Un número del texto lleva a su NOTA; la carpeta es la alternativa (⌘/Ctrl+Alt+clic).
+        onNavigate: (entry, options) => {
+          if (walk) gotoJdexEntry(entry, walk, !options?.folder);
+        },
+        // Varios hijos `+` con el mismo número: se pregunta cuál, con el mismo buscador.
+        onAmbiguous: (entries, options) => {
+          if (!walk) return;
+          const currentWalk = walk;
+          let handle: PluginModalHandle | undefined;
+          handle = host.openModal(
+            (el) => {
+              const picker = mountJdexIdPicker(el, {
+                entries,
+                placeholder: 'Varios IDs comparten este número: elige uno…',
+                onSelect: (entry) => {
+                  handle?.close();
+                  gotoJdexEntry(entry, currentWalk, !options.folder);
+                }
+              });
+              picker.focus();
+            },
+            { title: 'JDex: ¿cuál?' }
+          );
+        },
+        autocomplete: () => settings.autocomplete,
+        autocompleteInsert: () => settings.autocompleteInsert
       })
     );
   } catch (error) {
@@ -1677,6 +1739,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandWrapHeaders();
     offCommandGotoId();
     offCommandProcessInbox();
+    offActiveNoteCommands();
     offCommandUndo();
     offCommandHealth();
     offCommandSystemReport();

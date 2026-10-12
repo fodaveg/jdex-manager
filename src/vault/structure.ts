@@ -53,10 +53,10 @@ export function systemIndexFile(app: App, settings: JdexManagerSettings, index: 
 }
 
 /** Regenerates the block between the index markers; adds the markers at the end when missing. */
-export async function updateSystemIndex(app: App, settings: JdexManagerSettings, index: JdIndex, addMarkers: boolean, effects?: Effect[]): Promise<boolean> {
+export async function updateSystemIndex(app: App, settings: JdexManagerSettings, index: JdIndex, addMarkers: boolean, effects?: Effect[], warn: (message: string) => void = (message) => void new Notice(message)): Promise<boolean> {
   const file = systemIndexFile(app, settings, index);
   if (!file) {
-    new Notice("No note for the system index: set one in the settings or create the 00.00 note.");
+    warn("No note for the system index: set one in the settings or create the 00.00 note.");
     return false;
   }
   const descriptions = new Map<string, string>();
@@ -72,7 +72,7 @@ export async function updateSystemIndex(app: App, settings: JdexManagerSettings,
   const content = await app.vault.read(file);
   const next = transform(content);
   if (next === null) {
-    new Notice(`${file.basename} has no <!-- jdex:indice --> markers.`);
+    warn(`${file.basename} has no <!-- jdex:indice --> markers.`);
     return false;
   }
   if (next === content) return false;

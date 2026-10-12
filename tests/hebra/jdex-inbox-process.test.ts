@@ -5,10 +5,13 @@ import {
   archiveJdexInboxNote,
   jdexInboxArchiveTarget,
   jdexInboxQueue,
-  moveJdexInboxNote
+  jdexZeroTarget,
+  moveJdexInboxNote,
+  moveJdexInboxNoteCreatingFolder,
+  trashJdexInboxNote
 } from '../../src/hebra/jdex-inbox-process';
 import type { JdexInboxSummary, JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
-import { FakeJdexVault, fakeNote } from './support/fakes';
+import { FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 
 const markdown = createFakePluginApi().api.markdown;
 
@@ -64,6 +67,49 @@ describe('moveJdexInboxNote', () => {
   });
 });
 
+describe('trashJdexInboxNote', () => {
+  it('sends the note to the trash when it is unchanged', async () => {
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
+    await trashJdexInboxNote(library, note('n1', 'inbox', 'Suelta'));
+    expect((await library.noteRead('n1'))?.trashedAt).not.toBeNull();
+  });
+
+  it('does not trash a note that moved or changed since the dialog opened', async () => {
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n1', 'elsewhere', '# Suelta\n'));
+    await expect(trashJdexInboxNote(library, note('n1', 'inbox', 'Suelta'))).rejects.toThrow('cambió');
+    expect((await library.noteRead('n1'))?.trashedAt).toBeNull();
+  });
+});
+
+describe('moveJdexInboxNoteCreatingFolder', () => {
+  const folders = ['20-29 Productos', '20-29 Productos/21 Software'];
+  const jdex = '00-09 Sistema/00 Sistema/00.00 JDex';
+  const index = buildIndex({ systemRoot: '', jdexFolder: jdex, folderPaths: [...folders, jdex], notePaths: [`${jdex}/21.11 Hebra.md`] });
+  const entry = index.ids.find((e) => e.id === '21.11')!;
+
+  it('creates the ID folder under its category and moves the note there', async () => {
+    const library = new FakeJdexVault();
+    library.seedFolder(fakeFolder('cat', 'root', '21 Software'));
+    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
+    const walk = { rootFolderId: 'root', folderPaths: new Map([['cat', '20-29 Productos/21 Software']]) };
+    expect(entry.folderPath).toBeUndefined();
+    await moveJdexInboxNoteCreatingFolder(library, note('n1', 'inbox', 'Suelta'), walk, index, entry);
+    const created = (await library.foldersList()).find((f) => f.name === '21.11 Hebra');
+    expect(created?.parentId).toBe('cat');
+    expect((await library.noteRead('n1'))?.folderId).toBe(created?.id);
+  });
+
+  it('refuses an ID whose category has no folder, creating nothing', async () => {
+    const library = new FakeJdexVault();
+    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
+    const create = vi.spyOn(library, 'folderCreate');
+    await expect(moveJdexInboxNoteCreatingFolder(library, note('n1', 'inbox', 'Suelta'), { rootFolderId: 'root', folderPaths: new Map() }, index, entry)).rejects.toThrow('no tiene carpeta');
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
 describe('archiveJdexInboxNote', () => {
   function fixture(withArchive = true) {
     const inboxPath = '20-29 Productos/21 Software/21.01 Inbox';
@@ -111,6 +157,21 @@ describe('archiveJdexInboxNote', () => {
     });
     await expect(archiveJdexInboxNote(library, markdown, note('n1', 'inbox', 'Suelta'), walk, index, 'YYYY-MM-DD')).rejects.toThrow('cambió antes de moverla');
     expect((await library.noteRead('n1'))).toMatchObject({ folderId: 'inbox', body: '# Edición concurrente\n' });
+  });
+
+  it('archives from an origin that is not the .01 (a content ID of the category)', async () => {
+    const { library, walk: base } = fixture();
+    const contentPath = '20-29 Productos/21 Software/21.11 Hebra';
+    const withContent = buildIndex({ systemRoot: '', jdexFolder: '', notePaths: [], folderPaths: [
+      '20-29 Productos', '20-29 Productos/21 Software', '20-29 Productos/21 Software/21.01 Inbox', '20-29 Productos/21 Software/21.09 Archivo', contentPath
+    ] });
+    const walk: JdexLibraryWalk = { ...base, folderPaths: new Map([...base.folderPaths, ['content', contentPath]]) };
+    library.seedNote(fakeNote('n2', 'content', '# Idea\n', { createdAt: new Date(2026, 8, 28).getTime() }));
+    const ref = note('n2', 'content', 'Idea');
+    expect(jdexInboxArchiveTarget(ref, walk, withContent)).toBeNull();
+    expect(jdexZeroTarget(ref, walk, withContent, '09')?.folderId).toBe('archive');
+    await archiveJdexInboxNote(library, markdown, ref, walk, withContent, 'YYYY-MM');
+    expect(await library.noteRead('n2')).toMatchObject({ folderId: 'archive', title: '2026-09 Idea' });
   });
 
 });

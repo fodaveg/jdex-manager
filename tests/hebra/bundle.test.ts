@@ -21,7 +21,14 @@ const ROOT = cwd();
 const BUNDLE = join(ROOT, 'hebra-main.mjs');
 const MANIFEST = join(ROOT, 'hebra.json');
 
-describe.runIf(existsSync(BUNDLE))('hebra-main.mjs (hay que construirlo: npm run build:hebra)', () => {
+// No `runIf`: a missing bundle must turn this file red, not skip it silently. `npm run check`
+// builds it first; running vitest on its own needs `npm run build:hebra` beforehand.
+describe('hebra-main.mjs (hay que construirlo: npm run build:hebra)', () => {
+  it('existe (si falta: npm run build:hebra)', () => {
+    expect(existsSync(BUNDLE), `${BUNDLE} no existe: ejecuta npm run build:hebra`).toBe(true);
+    expect(existsSync(MANIFEST), `${MANIFEST} no existe: ejecuta npm run build:hebra`).toBe(true);
+  });
+
   it('se carga con el registro de módulos compartidos y se activa contra la API', async () => {
     (globalThis as Record<symbol, unknown>)[Symbol.for(PLUGIN_SHARED_GLOBAL_KEY)] = {
       modules: {

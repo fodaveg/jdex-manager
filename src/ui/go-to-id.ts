@@ -1,5 +1,6 @@
 import { type App, TFile, TFolder, SuggestModal } from "obsidian";
 import type { IdEntry, JdIndex } from "../jd/index";
+import { currentPlatform, gotoIdInstructions } from "./platform-hints";
 
 /** Picks an ID. Each row shows whether it has a note and a folder. `onPick` gets the entry and the modifier state. */
 export class IdSuggestModal extends SuggestModal<IdEntry> {
@@ -11,10 +12,7 @@ export class IdSuggestModal extends SuggestModal<IdEntry> {
     this.ids = index.ids;
     this.onPick = onPick;
     this.setPlaceholder(placeholder);
-    this.setInstructions([
-      { command: "↵", purpose: "open the note" },
-      { command: "⌘ ↵", purpose: "open the folder" },
-    ]);
+    this.setInstructions(gotoIdInstructions(currentPlatform()));
   }
 
   getSuggestions(query: string): IdEntry[] {
