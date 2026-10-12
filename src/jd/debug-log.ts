@@ -27,8 +27,13 @@ const HEADER = [
   MARKER,
 ].join("\n");
 
-/** Cuts every file location of a frame down to its file name (keeps `:line:col`). */
-const LOCATION = /(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|[A-Za-z]:[\\/]|\/)(?:[^\s()@\\/]+[\\/])+([^\s()@\\/:]+)/gu;
+/**
+ * Cuts every file location of a frame down to its file name (keeps `:line:col`). A location starts
+ * at a token boundary with a scheme (`file://`, `app://`, `@capacitor://`), a drive (`C:\`) or a
+ * root slash, and its directories may hold spaces (`/Users/Ana Lopez/My Vault/`): they run up to the
+ * last separator before the file name, never across `(`, `)` or `@`, which delimit locations.
+ */
+const LOCATION = /(^|[\s(@])(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|[A-Za-z]:[\\/]|\/)[^()@]*[\\/]([^\s()@\\/:]+)/gu;
 
 /** The frames of a V8 (`at …`) or JavaScriptCore (`fn@url:1:2`) stack, without the message line. */
 export function sanitizeStack(stack: string | undefined | null): string {
@@ -37,7 +42,7 @@ export function sanitizeStack(stack: string | undefined | null): string {
   for (const raw of stack.split(/\r?\n/u)) {
     const line = raw.trim();
     if (!/^at\s/u.test(line) && !line.includes("@")) continue;
-    const frame = line.replace(LOCATION, "$1").replace(/\s+/gu, " ").replace(/\|/gu, "/");
+    const frame = line.replace(LOCATION, "$1$2").replace(/\s+/gu, " ").replace(/\|/gu, "/");
     frames.push(frame.length > MAX_FRAME_LENGTH ? `${frame.slice(0, MAX_FRAME_LENGTH - 1)}…` : frame);
     if (frames.length === MAX_FRAMES) break;
   }
