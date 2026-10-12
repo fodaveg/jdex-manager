@@ -103,7 +103,7 @@ describe("Obsidian: actions on a repeated number are refused (37c115ca)", () => 
   it("retiring 21.23 is refused with a notice, without asking", async () => {
     confirms.count = 0;
     await plugin(["21.23 Alfa", "21.23 Beta"]).retireFlow({ id: "21.23" });
-    expect(notices.at(-1)).toContain("21.23 está repetido");
+    expect(notices.at(-1)).toContain("21.23 is repeated");
     expect(confirms.count).toBe(0);
   });
 
@@ -116,6 +116,6 @@ describe("Obsidian: actions on a repeated number are refused (37c115ca)", () => 
   it("toggling note and folder is refused", async () => {
     notices.length = 0;
     await plugin(["21.23 Alfa", "21.23 Beta"]).toggleNoteAndFolder();
-    expect(notices.at(-1)).toContain("21.23 está repetido");
+    expect(notices.at(-1)).toContain("21.23 is repeated");
   });
 });

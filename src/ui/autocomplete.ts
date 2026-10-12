@@ -9,6 +9,7 @@ import {
 } from "obsidian";
 import { systemKey, type IdEntry, type JdIndex } from "../jd/index";
 import { autocompleteInstructions, currentPlatform } from "./platform-hints";
+import { t } from "./i18n";
 
 export type InsertMode = "link" | "number";
 
@@ -44,7 +45,7 @@ export class IdEditorSuggest extends EditorSuggest<IdEntry> {
 
   renderSuggestion(entry: IdEntry, el: HTMLElement): void {
     el.createDiv({ text: entry.label });
-    el.createDiv({ text: entry.notePath ? "note" : "folder only", cls: "jdex-suggestion-note" });
+    el.createDiv({ text: entry.notePath ? t().hasNote : t().folderOnly, cls: "jdex-suggestion-note" });
   }
 
   selectSuggestion(entry: IdEntry, evt: MouseEvent | KeyboardEvent): void {

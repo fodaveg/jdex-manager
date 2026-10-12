@@ -121,6 +121,6 @@ describe("paired renames", () => {
     await renameFile(noteA, "JDex/21.22+ Z #ayuda.md");
     await v.settle();
     expect(vi.mocked(renameFile).mock.calls.filter(([node]) => node === childA)).toHaveLength(1);
-    expect(notices.some((n) => n.includes("«21.11» ha perdido su número"))).toBe(true);
+    expect(notices.some((n) => n.includes("21.11 lost its number"))).toBe(true);
   });
 });

@@ -80,7 +80,8 @@ describe("Obsidian live number validation", () => {
     await plugin.loadSettings();
     const renamed = note(f, "Parent");
     await plugin.onRename(renamed, "JDex/21.11 Parent.md");
-    expect(notices().at(-1)).toBe("«21.11» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.");
+    // English Obsidian (the stub's locale); no clickable «Deshacer», the notice names the undo command.
+    expect(notices().at(-1)).toBe("21.11 lost its number: an ID is never renumbered (johnnydecimal.com). Run «Undo last JDex operation» to put it back.");
     expect(saveData).toHaveBeenCalledWith(expect.objectContaining({ journal: [expect.objectContaining({ effects: [expect.objectContaining({ kind: "moved", from: "JDex/21.11 Parent.md", to: "JDex/Parent.md", type: "file" })] })] }));
   });
 });

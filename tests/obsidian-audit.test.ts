@@ -169,13 +169,13 @@ describe("Obsidian audit fixes", () => {
     modal.open();
     // The preview groups by finding kind, so name-mismatch precedes frontmatter.
     expect(toggles().map((toggle) => toggle.value)).toEqual([false, true, false, false, false]);
-    expect(buttons()[0]).toMatchObject({ text: 'Aplicar (1)', disabled: false });
+    expect(buttons()[0]).toMatchObject({ text: 'Apply (1)', disabled: false });
     void toggles()[1].toggle();
-    expect(buttons()[0]).toMatchObject({ text: 'Aplicar (0)', disabled: true });
+    expect(buttons()[0]).toMatchObject({ text: 'Apply (0)', disabled: true });
     void buttons()[0].click(); // a disabled button does nothing
     await Promise.resolve();
     expect(done).not.toHaveBeenCalled();
-    expect(notices().join(' ')).not.toContain('Arreglos procesados');
+    expect(notices().join(' ')).not.toContain('Fixes processed');
     expect(modal.effects).toEqual([]);
   });
 
@@ -189,15 +189,15 @@ describe("Obsidian audit fixes", () => {
     const done = vi.fn(async () => {});
     const modal = new FixFindingsModal(v.app, [finding], done);
     modal.open();
-    expect(buttons()[0]).toMatchObject({ text: 'Aplicar (0)', disabled: true });
+    expect(buttons()[0]).toMatchObject({ text: 'Apply (0)', disabled: true });
     void toggles()[0].toggle();
-    expect(buttons()[0]).toMatchObject({ text: 'Aplicar (1)', disabled: false });
+    expect(buttons()[0]).toMatchObject({ text: 'Apply (1)', disabled: false });
     void buttons()[0].click();
     await vi.waitFor(() => expect(done).toHaveBeenCalledTimes(1));
     expect(write).toHaveBeenCalledTimes(1);
     expect(v.bodies.get(path)).toContain('descripcion: "Seleccionada."');
     expect(modal.effects).toHaveLength(1);
-    expect(notices()).toContain('Arreglos procesados: 1; omitidos o fallidos: 0.');
+    expect(notices()).toContain('Fixes processed: 1; skipped or failed: 0.');
     expect(isOpen(modal)).toBe(false);
   });
 

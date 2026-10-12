@@ -9,6 +9,7 @@ import { patternFor } from "../jd/patterns";
 import { assertJdexFolderExists, ensureFolder } from "../vault/create";
 import { scanVault } from "../vault/scan";
 import type { Effect } from "../jd/journal";
+import { t } from "./i18n";
 
 /** Picks a category from the index, ordered by number. */
 export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
@@ -16,7 +17,7 @@ export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
   private readonly categories: CategoryEntry[];
   private readonly onPick: (category: CategoryEntry) => void;
 
-  constructor(app: App, index: JdIndex, onPick: (category: CategoryEntry) => void, placeholder = "Category for the new ID") {
+  constructor(app: App, index: JdIndex, onPick: (category: CategoryEntry) => void, placeholder = t().categoryPlaceholder) {
     super(app);
     this.index = index;
     this.categories = index.categories;
@@ -33,8 +34,9 @@ export class CategorySuggestModal extends SuggestModal<CategoryEntry> {
   renderSuggestion(category: CategoryEntry, el: HTMLElement): void {
     el.createDiv({ text: category.label });
     const usage = categoryUsage(this.index, category.number, category.system);
-    const next = usage.next ? ` · next ${usage.next}` : " · full";
-    el.createDiv({ text: `${areaCode(category.areaNumber)} · ${usage.used} of ${usage.total} used${next}`, cls: "jdex-suggestion-note" });
+    const s = t();
+    const next = usage.next ? s.categoryNext(usage.next) : s.categoryFull;
+    el.createDiv({ text: s.categoryUsage(areaCode(category.areaNumber), usage.used, usage.total, next), cls: "jdex-suggestion-note" });
   }
 
   onChooseSuggestion(category: CategoryEntry): void {
@@ -51,15 +53,16 @@ export interface CreateIdRequest {
 
 /** Why an ID typed by the user cannot be used, or null when it can. */
 export function validateNewId(index: JdIndex, category: string, raw: string, system = index.system ?? ""): string | null {
+  const s = t();
   const n = parseJdNumber(raw);
-  if (!n || n.kind !== "id") return "Type an ID like 21.23.";
-  if (n.system && n.system !== system) return "The prefix must match the category system.";
-  if (n.extension) return "Extensions (+) are created from their parent ID.";
-  if (n.category !== category) return `The ID must belong to category ${category}.`;
-  if (isReserved(n)) return ".00 to .09 are reserved for managing the category.";
-  if (Number(n.id.split(".")[1]) % 10 === 0) return "IDs ending in 0 are headers.";
+  if (!n || n.kind !== "id") return s.typeId;
+  if (n.system && n.system !== system) return s.prefixMismatch;
+  if (n.extension) return s.extensionFromParent;
+  if (n.category !== category) return s.idCategory(category);
+  if (isReserved(n)) return s.reservedNumbers;
+  if (Number(n.id.split(".")[1]) % 10 === 0) return s.headersEndInZero;
   const used = findId(index, n.id, system);
-  if (used) return `Already used by ${used.label}.`;
+  if (used) return s.alreadyUsedBy(used.label);
   return null;
 }
 
@@ -98,11 +101,12 @@ export class CreateIdModal extends Modal {
     trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
-    this.setTitle(`New ID in ${this.category.label}`);
+    const s = t();
+    this.setTitle(s.newIdIn(this.category.label));
 
     new Setting(contentEl)
-      .setName("Number")
-      .setDesc(this.id === "" ? "No free number left in this category." : "Next free number; edit if you need another.")
+      .setName(s.number)
+      .setDesc(this.id === "" ? s.noFreeNumber : s.nextFreeNumber)
       .addText((text) => {
         text.setValue(this.id).onChange((value) => {
           this.id = value.trim();
@@ -111,8 +115,8 @@ export class CreateIdModal extends Modal {
         text.inputEl.addClass("jdex-id-input");
       });
 
-    new Setting(contentEl).setName("Title").addText((text) => {
-      text.setPlaceholder("What this ID is about").onChange((value) => {
+    new Setting(contentEl).setName(s.title).addText((text) => {
+      text.setPlaceholder(s.titlePlaceholder).onChange((value) => {
         this.title = value;
         this.refreshValidation();
       });
@@ -121,14 +125,14 @@ export class CreateIdModal extends Modal {
     });
 
     new Setting(contentEl)
-      .setName("Also create the folder")
-      .setDesc("Creates the ID folder inside its category in the system root.")
+      .setName(s.alsoCreateFolder)
+      .setDesc(s.idFolderDesc)
       .addToggle((toggle) => toggle.setValue(this.createFolder).onChange((value) => (this.createFolder = value)));
 
     const pattern = patternFor(this.settings, this.category.number);
     if (pattern.length > 0) {
       new Setting(contentEl)
-        .setName("Also create the subfolder pattern")
+        .setName(s.alsoCreatePattern)
         .setDesc(pattern.join(", "))
         .addToggle((toggle) => toggle.setValue(this.createPattern).onChange((value) => (this.createPattern = value)));
     }
@@ -138,7 +142,7 @@ export class CreateIdModal extends Modal {
     new Setting(contentEl).addButton((button) => {
       this.submitButton = button.buttonEl;
       button
-        .setButtonText("Create")
+        .setButtonText(s.create)
         .setCta()
         .onClick(() => void this.submit());
     });
@@ -156,7 +160,7 @@ export class CreateIdModal extends Modal {
   private currentError(): string | null {
     const idError = validateNewId(this.index, this.category.number, this.id, this.category.system);
     if (idError) return idError;
-    if (jdexNoteName(this.id, this.title) === this.id) return "Give the ID a title.";
+    if (jdexNoteName(this.id, this.title) === this.id) return t().giveIdTitle;
     return null;
   }
 
@@ -175,7 +179,7 @@ export class CreateIdModal extends Modal {
       const input = this.contentEl.querySelector<HTMLInputElement>(".jdex-id-input");
       if (input) input.value = this.id;
       this.refreshValidation();
-      this.errorEl?.setText(`${conflict} Next free: ${this.id || "none"}.`);
+      this.errorEl?.setText(t().nextFree(conflict, this.id || t().none));
       return;
     }
     const parsed = parseJdNumber(this.id);
@@ -206,8 +210,8 @@ export async function createId(
   const name = jdexNoteName(request.id, request.title, system);
   const notePath = normalizePath(`${settings.jdexFolder}/${name}.md`);
   const existing = findId(index, request.id, system);
-  if (existing) throw new Error(`${request.id} is already used by ${existing.label}.`);
-  if (app.vault.getAbstractFileByPath(notePath)) throw new Error(`${notePath} already exists.`);
+  if (existing) throw new Error(t().idUsedBy(request.id, existing.label));
+  if (app.vault.getAbstractFileByPath(notePath)) throw new Error(t().pathExists(notePath));
   assertJdexFolderExists(app, settings);
 
   const area = index.areas.find((a) => a.number === areaOfCategory(category.number));
@@ -223,18 +227,18 @@ export async function createId(
   });
 
   const taken = findId(scanVault(app, settings), request.id, system);
-  if (taken) throw new Error(`${request.id} is already used by ${taken.label}.`);
+  if (taken) throw new Error(t().idUsedBy(request.id, taken.label));
   const note = await app.vault.create(notePath, content);
   effects.push({ kind: "created-note", path: notePath, content });
 
   if (request.createFolder) {
     if (!category.path) {
-      new Notice(`Note created. No folder for category ${category.number} in the system root, so the ID folder was not created.`);
+      new Notice(t().noCategoryFolder(category.number));
     } else {
       const folderPath = normalizePath(`${category.path}/${name}`);
       const present = app.vault.getAbstractFileByPath(folderPath);
-      if (present instanceof TFolder) new Notice(`Folder ${folderPath} already existed.`);
-      else if (present) new Notice(`${folderPath} exists and is not a folder; left untouched.`);
+      if (present instanceof TFolder) new Notice(t().folderExisted(folderPath));
+      else if (present) new Notice(t().notAFolder(folderPath));
       else {
         await app.vault.createFolder(folderPath);
         effects.push({ kind: "created-folder", path: folderPath });
