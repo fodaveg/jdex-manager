@@ -1,4 +1,5 @@
 import { Platform } from "obsidian";
+import { t } from "./i18n";
 
 export interface PlatformFlags {
   isMobile: boolean;
@@ -17,14 +18,14 @@ export function currentPlatform(): PlatformFlags {
 
 /** Hints of "Go to ID": the folder shortcut is a modifier, which a touch keyboard does not have. */
 export function gotoIdInstructions(platform: PlatformFlags): Instruction[] {
-  const open = { command: "↵", purpose: "open the note" };
+  const open = { command: "↵", purpose: t().hintOpenNote };
   if (platform.isMobile) return [open];
-  return [open, { command: platform.isMacOS ? "⌘ ↵" : "Ctrl ↵", purpose: "open the folder" }];
+  return [open, { command: platform.isMacOS ? "⌘ ↵" : "Ctrl ↵", purpose: t().hintOpenFolder }];
 }
 
 /** Hints of the editor autocomplete: ⇧ ↵ (number only) does not exist on a touch keyboard. */
 export function autocompleteInstructions(platform: PlatformFlags): Instruction[] {
-  const insert = { command: "↵", purpose: "insert" };
+  const insert = { command: "↵", purpose: t().hintInsert };
   if (platform.isMobile) return [insert];
-  return [insert, { command: "⇧ ↵", purpose: "insert the number only" }];
+  return [insert, { command: "⇧ ↵", purpose: t().hintInsertNumber }];
 }

@@ -1,13 +1,14 @@
 import { type App, TFile, TFolder, SuggestModal } from "obsidian";
 import type { IdEntry, JdIndex } from "../jd/index";
 import { currentPlatform, gotoIdInstructions } from "./platform-hints";
+import { t } from "./i18n";
 
 /** Picks an ID. Each row shows whether it has a note and a folder. `onPick` gets the entry and the modifier state. */
 export class IdSuggestModal extends SuggestModal<IdEntry> {
   private readonly ids: IdEntry[];
   private readonly onPick: (entry: IdEntry, openFolder: boolean) => void;
 
-  constructor(app: App, index: JdIndex, onPick: (entry: IdEntry, openFolder: boolean) => void, placeholder = "Type an ID or a title") {
+  constructor(app: App, index: JdIndex, onPick: (entry: IdEntry, openFolder: boolean) => void, placeholder = t().idPlaceholder) {
     super(app);
     this.ids = index.ids;
     this.onPick = onPick;
@@ -23,7 +24,8 @@ export class IdSuggestModal extends SuggestModal<IdEntry> {
 
   renderSuggestion(entry: IdEntry, el: HTMLElement): void {
     el.createDiv({ text: entry.label });
-    const marks = [entry.notePath ? "note" : "no note", entry.folderPath ? "folder" : "no folder"];
+    const s = t();
+    const marks = [entry.notePath ? s.hasNote : s.noNote, entry.folderPath ? s.hasFolder : s.noFolder];
     el.createDiv({ text: `${entry.category} › ${entry.id} · ${marks.join(" · ")}`, cls: "jdex-suggestion-note" });
   }
 
@@ -49,8 +51,8 @@ export async function openEntry(app: App, entry: IdEntry, openFolder: boolean): 
         await app.workspace.getLeaf(false).openFile(first);
         return null;
       }
-      return `${entry.label}: the folder has no note to open.`;
+      return t().folderHasNoNote(entry.label);
     }
   }
-  return `${entry.label} has ${openFolder ? "no folder" : "no note"}.`;
+  return openFolder ? t().entryHasNoFolder(entry.label) : t().entryHasNoNote(entry.label);
 }

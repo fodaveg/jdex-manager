@@ -1,37 +1,33 @@
-import { type App, Notice, normalizePath, Plugin, PluginSettingTab, Setting, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { Notice, normalizePath, Plugin, type TAbstractFile, TFile, TFolder } from "obsidian";
 import { healthFileName, renderHealthReport } from "./jd/health";
 import { todayIso } from "./jd/template";
-import { ensureFolder } from "./vault/create";
 import { writeDailyReport } from "./vault/report-write";
 import { openGlobalSearch, pathQuery } from "./vault/search";
 import type { Effect, OperationKind } from "./jd/journal";
 import { deviceIdentity, discardLastOperation, PluginDataFile, type RecordingEffects, UndoShield, undoLastOperation } from "./vault/journal-store";
 import { movedIdentity } from "./vault/journal";
-import { type JdexManagerSettings, type JdexNoteType, mergeSettings, namePrefix } from "./settings";
+import { type JdexManagerSettings, mergeSettings, namePrefix } from "./settings";
 import { auditSystem, countProblems, type Finding } from "./jd/audit";
 import { relativeTo } from "./jd/detect";
 import type { IdEntry } from "./jd/index";
-import { isRepeatedId, repeatedIdMessage, selectCreationSystem, sameSystem, systemKey } from "./jd/index";
+import { isRepeatedId, selectCreationSystem, sameSystem, systemKey } from "./jd/index";
 import { pairAction, pairBlockedByRepeat } from "./jd/pair";
-import { extractJdPrefix, normalizeSystemId } from "./jd/parse";
+import { extractJdPrefix } from "./jd/parse";
 import { FixFindingsModal } from "./ui/audit";
 import { CategorySuggestModal, CreateIdModal, createId } from "./ui/create-id";
 import { AreaSuggestModal, CreateAreaModal, CreateCategoryModal, CreateChildModal, CreateHeaderModal } from "./ui/create-structure";
 import { IdSuggestModal, openEntry } from "./ui/go-to-id";
 import { ProcessInboxModal } from "./ui/inbox";
-import { FolderSuggest } from "./ui/folder-suggest";
 import { IdEditorSuggest } from "./ui/autocomplete";
 import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
-import { categoryOfPath, idFolderOfPath, isDatable, locate, zeroOf } from "./jd/files";
-import { fileDate } from "./vault/file-date";
-import { dateFile, inboxFiles, moveInto } from "./vault/files";
+import { categoryOfPath, isDatable, locate } from "./jd/files";
+import { dateFile, inboxFiles } from "./vault/files";
 import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
 import { applyHeaderWraps, headersToMigrate, updateHeaders } from "./vault/headers";
 import { createMissingStructureNotes, missingStructureNotes, updateSystemIndex } from "./vault/structure";
 import { retireId } from "./vault/retire";
-import { formatCategoryPatterns, parseCategoryPatterns } from "./jd/patterns";
 import { applyDetection } from "./vault/detect";
 import { registerReadingLinks } from "./vault/reading-links";
 import { scanVault } from "./vault/scan";
@@ -42,6 +38,9 @@ import { MaintenanceGate, onceNotifier } from "./vault/maintenance-gate";
 import { createSystemReport } from "./vault/system-report";
 import { renamedFolderSettings } from "./vault/settings-paths";
 import { closeTrackedModals } from "./ui/modal-registry";
+import { folderSettingName, t } from "./ui/i18n";
+import { JdexManagerSettingTab } from "./ui/settings-tab";
+import { type FlowPorts, moveToId, sendToZero } from "./vault/flows";
 
 export default class JdexManagerPlugin extends Plugin {
   settings: JdexManagerSettings = mergeSettings(null);
@@ -96,8 +95,7 @@ export default class JdexManagerPlugin extends Plugin {
     // The status bar does not exist on mobile; addStatusBarItem is a no-op there.
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass("mod-clickable");
-    // eslint-disable-next-line obsidianmd/ui/sentence-case
-    this.statusBar.setText("JD: not audited");
+    this.statusBar.setText(t().statusNotAudited);
     this.registerDomEvent(this.statusBar, "click", () => void this.audit());
     this.inboxBar = this.addStatusBarItem();
     this.inboxBar.addClass("mod-clickable");
@@ -114,8 +112,8 @@ export default class JdexManagerPlugin extends Plugin {
     });
 
     this.registerView(ID_PANEL_VIEW, (leaf) => new IdPanelView(leaf, { index: () => this.cachedIndex(), settings: () => this.settings, onIndexChanged: (listener) => this.onIndexChanged(listener) }));
-    this.addRibbonIcon("hash", "Open ID panel", () => void this.openPanel());
-    this.addCommand({ id: "open-id-panel", name: "Open ID panel", callback: () => void this.openPanel() });
+    this.addRibbonIcon("hash", t().cmdOpenIdPanel, () => void this.openPanel());
+    this.addCommand({ id: "open-id-panel", name: t().cmdOpenIdPanel, callback: () => void this.openPanel() });
 
     this.registerEditorSuggest(
       new IdEditorSuggest(
@@ -130,8 +128,8 @@ export default class JdexManagerPlugin extends Plugin {
       enabled: () => this.settings.readingLinks && this.settings.jdexFolder !== "",
       choose: (entries) =>
         new Promise<IdEntry | null>((resolve) => {
-          const modal = new IdSuggestModal(this.app, { ...this.cachedIndex(), ids: entries }, (e) => resolve(e), "Which one?");
-          modal.setInstructions([{ command: "↵", purpose: "open the note" }]);
+          const modal = new IdSuggestModal(this.app, { ...this.cachedIndex(), ids: entries }, (e) => resolve(e), t().whichOne);
+          modal.setInstructions([{ command: "↵", purpose: t().hintOpenNote }]);
           modal.onClose = () => resolve(null);
           modal.open();
         }),
@@ -149,24 +147,20 @@ export default class JdexManagerPlugin extends Plugin {
 
     this.addCommand({
       id: "audit",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Audit JD system",
+      name: t().cmdAudit,
       callback: () => void this.audit(),
     });
 
     this.addCommand({
       id: "apply-fixes",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Reparar JDex",
+      name: t().cmdRepair,
       callback: () => void this.applyFixes(),
     });
-    // eslint-disable-next-line obsidianmd/ui/sentence-case
-    this.addRibbonIcon("wrench", "Reparar JDex", () => void this.applyFixes());
+    this.addRibbonIcon("wrench", t().cmdRepair, () => void this.applyFixes());
 
     this.addCommand({
       id: "normalize-frontmatter-active",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Normalize JDex frontmatter of the active note",
+      name: t().cmdNormalizeActive,
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || this.settings.jdexFolder === "") return false;
@@ -179,39 +173,38 @@ export default class JdexManagerPlugin extends Plugin {
 
     this.addCommand({
       id: "normalize-frontmatter-all",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Normalize JDex frontmatter of every note",
+      name: t().cmdNormalizeAll,
       callback: () => void this.normalizeFrontmatter(null),
     });
 
     this.addCommand({
       id: "update-headers",
-      name: "Update header lists",
+      name: t().cmdUpdateHeaders,
       callback: () => void this.refreshHeaders(undefined, true),
     });
 
     this.addCommand({
       id: "wrap-header-lists",
-      name: "Wrap existing header lists in markers",
+      name: t().cmdWrapHeaders,
       callback: () => void this.migrateHeaders(),
     });
 
     this.addCommand({
       id: "create-structure-notes",
-      name: "Create missing category and area notes",
+      name: t().cmdCreateStructureNotes,
       callback: () => void this.createStructureNotes(),
     });
     this.addCommand({
       id: "update-system-index",
-      name: "Update system index note",
+      name: t().cmdUpdateSystemIndex,
       callback: () => void this.refreshSystemIndex(true),
     });
-    this.addCommand({ id: "create-category", name: "Create category", callback: () => void this.createCategoryFlow() });
-    this.addCommand({ id: "create-area", name: "Create area", callback: () => void this.createAreaFlow() });
-    this.addCommand({ id: "create-header", name: "Create header", callback: () => void this.createHeaderFlow() });
+    this.addCommand({ id: "create-category", name: t().cmdCreateCategory, callback: () => void this.createCategoryFlow() });
+    this.addCommand({ id: "create-area", name: t().cmdCreateArea, callback: () => void this.createAreaFlow() });
+    this.addCommand({ id: "create-header", name: t().cmdCreateHeader, callback: () => void this.createHeaderFlow() });
     this.addCommand({
       id: "create-child",
-      name: "Create child ID (+) of the active note",
+      name: t().cmdCreateChild,
       checkCallback: (checking) => {
         const entry = this.activeIdEntry();
         if (!entry) return false;
@@ -228,7 +221,7 @@ export default class JdexManagerPlugin extends Plugin {
         if (file instanceof TFile && !loc?.atNote) {
           menu.addItem((item) =>
             item
-              .setTitle("Move to an ID…")
+              .setTitle(t().menuMoveToId)
               .setIcon("folder-input")
               .onClick(() => void this.moveToIdFlow(file)),
           );
@@ -237,7 +230,7 @@ export default class JdexManagerPlugin extends Plugin {
         if (loc.atNote && loc.entry.folderPath) {
           menu.addItem((item) =>
             item
-              .setTitle(`Open folder of ${loc.entry.id}`)
+              .setTitle(t().menuOpenFolder(loc.entry.id))
               .setIcon("folder-open")
               .onClick(() => { if (!this.refuseRepeated(index, loc.entry)) void openEntry(this.app, loc.entry, true).then((msg) => msg && new Notice(msg)); }),
           );
@@ -245,7 +238,7 @@ export default class JdexManagerPlugin extends Plugin {
         if (!loc.atNote && loc.entry.notePath) {
           menu.addItem((item) =>
             item
-              .setTitle(`Open JDex note of ${loc.entry.id}`)
+              .setTitle(t().menuOpenNote(loc.entry.id))
               .setIcon("book-open")
               .onClick(() => { if (!this.refuseRepeated(index, loc.entry)) void openEntry(this.app, loc.entry, false).then((msg) => msg && new Notice(msg)); }),
           );
@@ -254,7 +247,7 @@ export default class JdexManagerPlugin extends Plugin {
         if (!entry) return;
         menu.addItem((item) =>
           item
-            .setTitle(`Create child ID (${entry.id}+)`)
+            .setTitle(t().menuCreateChild(entry.id))
             .setIcon("git-branch-plus")
             .onClick(() => void this.createChildFlow(entry)),
         );
@@ -263,7 +256,7 @@ export default class JdexManagerPlugin extends Plugin {
 
     this.addCommand({
       id: "retire-id",
-      name: "Retire the active ID (archive its folder, keep the note)",
+      name: t().cmdRetire,
       checkCallback: (checking) => {
         const entry = this.activeIdEntry();
         if (!entry) return false;
@@ -275,67 +268,65 @@ export default class JdexManagerPlugin extends Plugin {
     });
     this.addCommand({
       id: "send-to-inbox",
-      name: "Send active file to its inbox (.01)",
+      name: t().cmdSendToInbox,
       checkCallback: (checking) => this.fileCommand(checking, (file) => this.sendToZero(file, "01")),
     });
     this.addCommand({
       id: "archive",
-      name: "Archive active file (.09, dated)",
+      name: t().cmdArchive,
       checkCallback: (checking) => this.fileCommand(checking, (file) => this.sendToZero(file, "09")),
     });
     this.addCommand({
       id: "date-file",
-      name: "Date file name with its creation date",
+      name: t().cmdDateFile,
       checkCallback: (checking) => this.fileCommand(checking, (file) => this.dateActive(file)),
     });
-    this.addCommand({ id: "process-inbox", name: "Process inboxes", callback: () => void this.processInbox() });
+    this.addCommand({ id: "process-inbox", name: t().cmdProcessInbox, callback: () => void this.processInbox() });
     this.addCommand({
       id: "where-am-i",
-      name: "Show where the active file lives",
+      name: t().cmdWhereAmI,
       checkCallback: (checking) =>
         this.fileCommand(checking, async (file) => {
           const loc = locate(this.cachedIndex(), this.settings, file.path);
-          new Notice(loc ? loc.text : "The active file is not inside an ID.");
+          new Notice(loc ? loc.text : t().notInsideId);
         }),
     });
     this.addCommand({
       id: "copy-id",
-      name: "Copy ID of the active file",
+      name: t().cmdCopyId,
       checkCallback: (checking) =>
         this.fileCommand(checking, async (file) => {
           const loc = locate(this.cachedIndex(), this.settings, file.path);
           if (!loc) {
-            new Notice("The active file is not inside an ID.");
+            new Notice(t().notInsideId);
             return;
           }
           await navigator.clipboard.writeText(loc.entry.id);
-          new Notice(`Copied ${loc.entry.id}.`);
+          new Notice(t().copied(loc.entry.id));
         }),
     });
     this.addCommand({
       id: "copy-jd-path",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Copy JD path of the active file",
+      name: t().cmdCopyJdPath,
       checkCallback: (checking) =>
         this.fileCommand(checking, async (file) => {
           const loc = locate(this.cachedIndex(), this.settings, file.path);
           if (!loc) {
-            new Notice("The active file is not inside an ID.");
+            new Notice(t().notInsideId);
             return;
           }
           await navigator.clipboard.writeText(loc.text);
-          new Notice(`Copied ${loc.text}.`);
+          new Notice(t().copied(loc.text));
         }),
     });
     this.addCommand({
       id: "toggle-note-folder",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Toggle between JDex note and folder",
+      name: t().cmdToggleNoteFolder,
       checkCallback: (checking) => this.fileCommand(checking, () => this.toggleNoteAndFolder()),
     });
     this.addCommand({
       id: "go-to-id",
-      name: "Go to ID",
+      name: t().cmdGoToId,
       callback: () => {
         if (!this.ready()) return;
         const index = this.cachedIndex();
@@ -348,12 +339,12 @@ export default class JdexManagerPlugin extends Plugin {
 
     this.addCommand({
       id: "move-to-id",
-      name: "Move active file to an ID",
+      name: t().cmdMoveToId,
       checkCallback: (checking) => this.fileCommand(checking, (file) => this.moveToIdFlow(file)),
     });
     this.addCommand({
       id: "search-in-id",
-      name: "Search inside the active ID",
+      name: t().cmdSearchInId,
       checkCallback: (checking) => {
         const entry = this.activeIdEntry();
         if (!entry?.folderPath) return false;
@@ -363,7 +354,7 @@ export default class JdexManagerPlugin extends Plugin {
     });
     this.addCommand({
       id: "search-in-category",
-      name: "Search inside the active category",
+      name: t().cmdSearchInCategory,
       checkCallback: (checking) => {
         const folder = this.activeCategoryFolder();
         if (!folder) return false;
@@ -371,18 +362,16 @@ export default class JdexManagerPlugin extends Plugin {
         return true;
       },
     });
-    this.addCommand({ id: "health-report", name: "System health report", callback: () => void this.healthReport() });
-    this.addCommand({ id: "system-report", name: "Informe del sistema", callback: () => void this.systemReport() });
+    this.addCommand({ id: "health-report", name: t().cmdHealthReport, callback: () => void this.healthReport() });
+    this.addCommand({ id: "system-report", name: t().cmdSystemReport, callback: () => void this.systemReport() });
     this.addCommand({
       id: "undo-last",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Undo last JDex operation",
+      name: t().cmdUndoLast,
       callback: () => void this.undoLast(),
     });
     this.addCommand({
       id: "discard-last",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Discard last JDex journal entry (no file changes)",
+      name: t().cmdDiscardLast,
       callback: () => void discardLastOperation({ data: this.data, confirm: (title, lines, action) => confirm(this.app, title, lines, action), notice: (message) => new Notice(message, 10000) }),
     });
 
@@ -411,25 +400,23 @@ export default class JdexManagerPlugin extends Plugin {
       this.queueMaintenance(file);
     }));
 
-    this.addRibbonIcon("file-plus-2", "Create ID", () => void this.createIdFlow());
+    this.addRibbonIcon("file-plus-2", t().cmdCreateId, () => void this.createIdFlow());
 
     this.addCommand({
       id: "create-id",
-      name: "Create ID",
+      name: t().cmdCreateId,
       callback: () => void this.createIdFlow(),
     });
 
     this.addCommand({
       id: "detect-folders",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Detect JDex folders",
+      name: t().cmdDetectFolders,
       callback: () => void this.detectFolders(true),
     });
 
     this.addCommand({
       id: "create-templates",
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      name: "Create JDex templates in the templates folder",
+      name: t().cmdCreateTemplates,
       callback: () => void this.createTemplates(),
     });
   }
@@ -490,13 +477,13 @@ export default class JdexManagerPlugin extends Plugin {
     try {
       // Waits for an undo in progress; leaves alone what that undo restored.
       await this.data.journal.exclusive(async () => {
-        const effects = this.journalOperation("fix", "Automatic JDex maintenance");
+        const effects = this.journalOperation("fix", t().labelMaintenance);
         try {
           // An unload during the pass stops it before its next write.
           await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn, (path) => this.undoShield.protects(path), () => this.unloaded);
         } catch (error) {
           this.logError("maintainAutomatically", error);
-          new Notice(`Automatic maintenance stopped: ${String(error)}`);
+          new Notice(t().maintenanceStopped(String(error)));
         }
         await effects.flush().catch(() => undefined);
         again = await this.maintenanceGate.finish(effects, async (path) => {
@@ -513,7 +500,7 @@ export default class JdexManagerPlugin extends Plugin {
   /** Runs only on command; each report contains audit, health and changes since the previous. */
   async systemReport(): Promise<void> {
     if (!this.ready()) return;
-    const effects = this.journalOperation("fix", "Create system report");
+    const effects = this.journalOperation("fix", t().labelSystemReport);
     try {
       const note = await createSystemReport(this.app, this.settings, effects);
       await this.app.workspace.getLeaf(false).openFile(note);
@@ -572,25 +559,24 @@ export default class JdexManagerPlugin extends Plugin {
     if (changed) await this.saveSettings();
     if (!announce) return;
     const found = [detected.jdex, detected.reports, detected.templates].filter(Boolean).length;
-    if (found === 0) new Notice("No 00.00, 00.02 or 00.03 folders found under 00-09/00. Check the system root.");
-    else if (changed) new Notice(`Detected ${found} folder(s); empty settings filled.`);
-    else new Notice(`Detected ${found} folder(s); settings already set, nothing changed.`);
+    if (found === 0) new Notice(t().noFoldersFound);
+    else if (changed) new Notice(t().foldersFilled(found));
+    else new Notice(t().foldersUnchanged(found));
   }
 
   /** Runs the audit, writes the report, updates the status bar and opens the report when asked. */
   async audit(openReport = true): Promise<void> {
     if (this.settings.jdexFolder === "") await this.detectFolders(false);
     if (this.settings.jdexFolder === "") {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      new Notice("Set the JDex folder in the plugin settings first.");
+      new Notice(t().setJdexFolderFirst);
       return;
     }
     try {
       const { findings, reportPath } = await runAudit(this.app, this.settings);
       this.lastFindings = findings;
       const problems = countProblems(findings);
-      this.statusBar?.setText(`JD: ${problems} finding${problems === 1 ? "" : "s"}`);
-      new Notice(`Audit: ${problems} finding${problems === 1 ? "" : "s"}.`);
+      this.statusBar?.setText(t().statusFindings(problems));
+      new Notice(t().auditFindings(problems));
       if (openReport && reportPath) {
         const file = this.app.vault.getAbstractFileByPath(reportPath);
         if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
@@ -605,7 +591,7 @@ export default class JdexManagerPlugin extends Plugin {
     this.lastFindings = null;
     await this.audit(false);
     if (!this.lastFindings) return;
-    const effects = this.journalOperation("fix", "Reparar JDex");
+    const effects = this.journalOperation("fix", t().cmdRepair);
     const modal = new FixFindingsModal(this.app, this.lastFindings, async () => {
       await effects.flush().catch(() => undefined);
       await this.audit(false);
@@ -647,18 +633,17 @@ export default class JdexManagerPlugin extends Plugin {
   /** Frontmatter fixes for one note or for the whole JDex, with the checklist modal as preview. */
   async normalizeFrontmatter(only: TFile | null): Promise<void> {
     if (this.settings.jdexFolder === "") {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      new Notice("Set the JDex folder in the plugin settings first.");
+      new Notice(t().setJdexFolderFirst);
       return;
     }
     const index = scanVault(this.app, this.settings);
     const notes = (await jdexNoteMetas(this.app, this.settings)).filter((n) => !only || n.path === only.path);
     const findings = auditSystem({ index, notes, filePaths: [] }).filter((f) => f.kind === "frontmatter-mismatch");
     if (findings.length === 0) {
-      new Notice(only ? "Frontmatter already matches the name and position." : "Every JDex note already matches.");
+      new Notice(only ? t().frontmatterAlreadyMatches : t().everyNoteMatches);
       return;
     }
-    const effects = this.journalOperation("fix", "Normalize JDex frontmatter");
+    const effects = this.journalOperation("fix", t().labelNormalize);
     const modal = new FixFindingsModal(this.app, findings, async () => {
       await effects.flush().catch(() => undefined);
       await this.refreshHeaders(undefined, false);
@@ -674,10 +659,10 @@ export default class JdexManagerPlugin extends Plugin {
   async refreshHeaders(onlyCategory: string | undefined, announce: boolean): Promise<void> {
     if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
-    const effects = this.journalOperation("fix", onlyCategory ? `Update header lists of ${onlyCategory}` : "Update header lists");
+    const effects = this.journalOperation("fix", onlyCategory ? t().labelHeadersOf(onlyCategory) : t().cmdUpdateHeaders);
     const changed = await updateHeaders(this.app, index, onlyCategory, effects, (path) => this.undoShield.protects(path));
     await effects.flush().catch(() => undefined);
-    if (announce) new Notice(`Header lists updated in ${changed} note(s).`);
+    if (announce) new Notice(t().headerListsUpdated(changed));
   }
 
   async migrateHeaders(): Promise<void> {
@@ -685,25 +670,25 @@ export default class JdexManagerPlugin extends Plugin {
     const index = scanVault(this.app, this.settings);
     const todo = await headersToMigrate(this.app, index);
     if (todo.length === 0) {
-      new Notice("Every header note already has markers, or has no list to wrap.");
+      new Notice(t().nothingToWrap);
       return;
     }
     const ok = await confirm(
       this.app,
-      "Wrap header lists in markers",
+      t().wrapTitle,
       [
-        `${todo.length} header note(s) have a list of links without markers. The first list of each will be wrapped in <!-- jdex:hijos --> markers; nothing else changes.`,
-        ...todo.slice(0, 12).map((t) => t.file.basename),
-        ...(todo.length > 12 ? [`… and ${todo.length - 12} more`] : []),
+        t().wrapBody(todo.length),
+        ...todo.slice(0, 12).map((item) => item.file.basename),
+        ...(todo.length > 12 ? [t().andMore(todo.length - 12)] : []),
       ],
-      "Wrap",
+      t().wrapAction,
     );
     if (!ok) return;
     const wrapped = await applyHeaderWraps(this.app, todo);
-    await this.record("fix", "Wrap header lists in markers", wrapped.effects);
+    await this.record("fix", t().wrapTitle, wrapped.effects);
     new Notice(wrapped.skipped.length === 0
-      ? `Markers added to ${wrapped.written.length} note(s).`
-      : `Markers added to ${wrapped.written.length} note(s). Skipped ${wrapped.skipped.length} edited after the preview: ${wrapped.skipped.join(", ")}`, 10000);
+      ? t().markersAdded(wrapped.written.length)
+      : t().markersAddedSkipped(wrapped.written.length, wrapped.skipped.length, wrapped.skipped.join(", ")), 10000);
     await this.refreshHeaders(undefined, true);
   }
 
@@ -714,7 +699,7 @@ export default class JdexManagerPlugin extends Plugin {
    *  created it offline): they would mix two IDs. Returns whether it refused. */
   private refuseRepeated(index: JdIndex, entry: { id: string; system?: string; title: string }): boolean {
     if (!isRepeatedId(index, entry)) return false;
-    new Notice(repeatedIdMessage(entry), 10000);
+    new Notice(t().repeatedId(entry), 10000);
     return true;
   }
 
@@ -726,10 +711,10 @@ export default class JdexManagerPlugin extends Plugin {
     if (renamed.length === 0) return;
     for (const entry of renamed) pending.add(entry.from);
     try {
-      const ok = await confirm(this.app, "Update folder settings?", [
-        "A folder used by the plugin settings was renamed or moved:",
-        ...renamed.map((entry) => `${entry.label}: ${entry.from} → ${entry.to}`),
-      ], "Update");
+      const ok = await confirm(this.app, t().followSettingsTitle, [
+        t().followSettingsBody,
+        ...renamed.map((entry) => `${folderSettingName(entry.key)}: ${entry.from} → ${entry.to}`),
+      ], t().update);
       if (!ok) return;
       for (const entry of renamed) if (this.settings[entry.key] === entry.from) this.settings[entry.key] = entry.to;
       this.invalidateIndex();
@@ -769,15 +754,14 @@ export default class JdexManagerPlugin extends Plugin {
     const index = scanVault(this.app, this.settings);
     const action = pairAction({ oldPath, newPath: file.path, isFolder: file instanceof TFolder }, index, this.settings);
     if (action.type === "unnumbered" || action.type === "renumbered") {
-      const message = action.type === "unnumbered"
-        ? `«${action.oldId}» ha perdido su número: un ID nunca se renumera (johnnydecimal.com). Deshacer.`
-        : `«${action.oldId}» ha pasado a «${action.newId}»: un ID nunca se renumera (johnnydecimal.com). Deshacer.`;
+      // Obsidian has no clickable «Deshacer» like Hebra: the notice names the undo command.
+      const message = t().renumberNotice(action);
       new Notice(message, 10000);
       await this.record("move", message, [{ kind: "moved", from: oldPath, to: file.path, ...movedIdentity(file) }]);
       return;
     }
     if (action.type === "moved") {
-      new Notice(`${action.id} moved from ${action.from} to ${action.to}. An ID keeps its number; create a new ID in the destination and archive this one.`, 10000);
+      new Notice(t().movedNotice(action), 10000);
       return;
     }
     const newName = file.path.slice(file.path.lastIndexOf("/") + 1);
@@ -792,14 +776,14 @@ export default class JdexManagerPlugin extends Plugin {
         this.settings.renamePairsWithoutAsking ||
         (await confirm(
           this.app,
-          isNote ? "Rename the JDex note too?" : "Rename the folder too?",
+          isNote ? t().renameNoteTooTitle : t().renameFolderTooTitle,
           [`${action.partnerPath}`, `→ ${action.newPartnerPath}`],
-          "Rename",
+          t().rename,
         ));
       // Unloaded while the confirmation was open: no write.
       if (ok && !this.unloaded) {
         (this.ownRenames ??= new Map()).set(action.partnerPath, action.newPartnerPath);
-        const effects = this.journalOperation("move", `Rename ${action.partnerPath} with its pair`);
+        const effects = this.journalOperation("move", t().labelRenamePair(action.partnerPath));
         try {
           await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath }, effects);
         } catch (error) {
@@ -825,87 +809,40 @@ export default class JdexManagerPlugin extends Plugin {
     return true;
   }
 
-  /** Moves the file to the `.01` or `.09` of its category (00 when it lives outside the system). */
-  async sendToZero(file: TFile, zero: "01" | "09"): Promise<void> {
-    const index = scanVault(this.app, this.settings);
-    const owner = idFolderOfPath(index, file.path);
-    let category = owner ? systemKey(owner.category, owner.system) : categoryOfPath(this.settings.systemRoot, file.path);
-    if (category === null) {
-      const pick = await new Promise<string | null>((resolve) => {
+  /** The flows' choices and side effects, wired to Obsidian's modals (`src/vault/flows.ts`). */
+  private flowPorts(): FlowPorts {
+    return {
+      app: this.app,
+      settings: this.settings,
+      pickEntry: (index, placeholder, purpose) => new Promise<IdEntry | null>((resolve) => {
+        const modal = new IdSuggestModal(this.app, index, (e) => resolve(e), placeholder);
+        modal.setInstructions([{ command: "↵", purpose }]);
+        modal.onClose = () => resolve(null);
+        modal.open();
+      }),
+      pickCategory: (index) => new Promise<string | null>((resolve) => {
         const modal = new CategorySuggestModal(this.app, index, (c) => resolve(systemKey(c.number, c.system)));
         modal.onClose = () => resolve(null);
         modal.open();
-      });
-      if (pick === null) return;
-      category = pick;
-    }
-    const target = zeroOf(index, category, zero);
-    if (!target?.folderPath) {
-      new Notice(`${category}.${zero} has no folder. Create the category zeros first (Create category, or make the folder by hand).`, 8000);
-      return;
-    }
-    try {
-      const from = file.path;
-      const identity = movedIdentity(file);
-      const to = await moveInto(
-        this.app,
-        file,
-        target.folderPath,
-        zero === "09" ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined,
-      );
-      if (to !== from) await this.record("move", `${zero === "09" ? "Archive" : "Send to inbox"} ${file.name}`, [{ kind: "moved", from, to, ...identity }]);
-      new Notice(`Moved to ${to}.`);
-      this.refreshInboxCount();
-    } catch (error) {
-      this.logError("sendToZero", error);
-      new Notice(error instanceof Error ? error.message : String(error));
-    }
+      }),
+      confirm: (title, lines, action) => confirm(this.app, title, lines, action),
+      notice: (message, timeout) => void new Notice(message, timeout),
+      journal: (kind, label) => this.journalOperation(kind, label),
+      record: (kind, label, effects) => this.record(kind, label, effects),
+      logError: (where, error) => this.logError(where, error),
+      refreshInbox: () => this.refreshInboxCount(),
+    };
+  }
+
+  /** Moves the file to the `.01` or `.09` of its category (00 when it lives outside the system). */
+  async sendToZero(file: TFile, zero: "01" | "09"): Promise<void> {
+    await sendToZero(this.flowPorts(), file, zero);
   }
 
   /** Picks an ID and moves the file into its folder, creating the folder first when the ID has none. */
   async moveToIdFlow(file: TFile): Promise<void> {
     if (!this.ready()) return;
-    const index = scanVault(this.app, this.settings);
-    const entry = await new Promise<IdEntry | null>((resolve) => {
-      const modal = new IdSuggestModal(this.app, index, (e) => resolve(e), `Move ${file.name} to…`);
-      modal.setInstructions([{ command: "↵", purpose: "move here" }]);
-      modal.onClose = () => resolve(null);
-      modal.open();
-    });
-    if (!entry) return;
-    const effects = this.journalOperation("move", `Move ${file.name} to ${entry.id}`);
-    let folder = entry.folderPath;
-    if (!folder) {
-      const category = selectCreationSystem(index, entry.system).categories.find((c) => c.number === entry.category);
-      if (!category?.path) {
-        new Notice(`${entry.label} has no folder and category ${entry.category} has no folder in the system root to create it in.`, 8000);
-        return;
-      }
-      const wanted = normalizePath(`${category.path}/${entry.label}`);
-      const ok = await confirm(this.app, `Create the folder of ${entry.id}?`, [`${entry.label} has no folder yet.`, `It will be created at ${wanted}.`], "Create and move");
-      if (!ok) return;
-      try {
-        await ensureFolder(this.app, wanted, effects);
-      } catch (error) {
-        this.logError("moveToIdFlow", error);
-        new Notice(error instanceof Error ? error.message : String(error));
-        return;
-      }
-      folder = wanted;
-    }
-    try {
-      const date = this.settings.dateOnMove && isDatable(index, this.settings, `${folder}/${file.name}`) ? { when: fileDate(this.app, file), format: this.settings.dateFormat } : undefined;
-      const from = file.path;
-      const identity = movedIdentity(file);
-      const to = await moveInto(this.app, file, folder, date);
-      if (to !== from) effects.push({ kind: "moved", from, to, ...identity });
-      await effects.flush().catch(() => undefined);
-      new Notice(`Moved to ${to}.`);
-      this.refreshInboxCount();
-    } catch (error) {
-      this.logError("moveToIdFlow", error);
-      new Notice(error instanceof Error ? error.message : String(error));
-    }
+    await moveToId(this.flowPorts(), file);
   }
 
   /** Folder and label of the category the active file lives in, from the system folders. */
@@ -923,8 +860,8 @@ export default class JdexManagerPlugin extends Plugin {
     const query = pathQuery(folder);
     if (openGlobalSearch(this.app, query)) return;
     void navigator.clipboard.writeText(query).then(
-      () => new Notice(`Search is not available; the query for ${label} was copied to the clipboard.`, 8000),
-      () => new Notice(`Search is not available. Query for ${label}: ${query}`, 10000),
+      () => new Notice(t().searchCopied(label), 8000),
+      () => new Notice(t().searchUnavailable(label, query), 10000),
     );
   }
 
@@ -932,7 +869,7 @@ export default class JdexManagerPlugin extends Plugin {
   async healthReport(): Promise<void> {
     if (!this.ready()) return;
     if (this.settings.reportsFolder === "") {
-      new Notice("Set the reports folder first (00.02 by convention).");
+      new Notice(t().setReportsFolderFirst);
       return;
     }
     const index = scanVault(this.app, this.settings);
@@ -940,7 +877,7 @@ export default class JdexManagerPlugin extends Plugin {
     const date = todayIso();
     const content = renderHealthReport(index, filePaths, date, { maxFiles: this.settings.healthMaxFiles, nearlyFull: 70 });
     const path = normalizePath(`${this.settings.reportsFolder}/${healthFileName(date)}`);
-    const effects = this.journalOperation("fix", "Create health report");
+    const effects = this.journalOperation("fix", t().labelHealthReport);
     try {
       // A health report of the day edited by hand is kept; the new one goes to «(2)».
       const { file } = await writeDailyReport(this.app, this.settings.reportsFolder, path, content, effects);
@@ -954,12 +891,12 @@ export default class JdexManagerPlugin extends Plugin {
   async dateActive(file: TFile): Promise<void> {
     const index = scanVault(this.app, this.settings);
     if (!isDatable(index, this.settings, file.path)) {
-      new Notice("Only files inside a content ID folder are dated; JDex notes and management files are left alone.");
+      new Notice(t().onlyContentDated);
       return;
     }
     try {
       const to = await this.datedRename(file);
-      new Notice(to ? `Renamed to ${to.slice(to.lastIndexOf("/") + 1)}.` : "Already dated.");
+      new Notice(to ? t().renamedTo(to.slice(to.lastIndexOf("/") + 1)) : t().alreadyDated);
     } catch (error) {
       this.logError("dateActive", error);
       new Notice(error instanceof Error ? error.message : String(error));
@@ -971,7 +908,7 @@ export default class JdexManagerPlugin extends Plugin {
     const from = file.path;
     const identity = movedIdentity(file);
     const to = await dateFile(this.app, file, this.settings.dateFormat);
-    if (to) await this.record("move", `Date ${from.slice(from.lastIndexOf("/") + 1)}`, [{ kind: "moved", from, to, ...identity }]);
+    if (to) await this.record("move", t().labelDate(from.slice(from.lastIndexOf("/") + 1)), [{ kind: "moved", from, to, ...identity }]);
     return to;
   }
 
@@ -980,7 +917,7 @@ export default class JdexManagerPlugin extends Plugin {
     const index = scanVault(this.app, this.settings);
     const files = inboxFiles(this.app, index);
     if (files.length === 0) {
-      new Notice("Every inbox is empty.");
+      new Notice(t().inboxesEmpty);
       this.refreshInboxCount();
       return;
     }
@@ -1007,7 +944,7 @@ export default class JdexManagerPlugin extends Plugin {
     const index = this.cachedIndex();
     const loc = locate(index, this.settings, file.path);
     if (!loc) {
-      new Notice("The active file is not inside an ID.");
+      new Notice(t().notInsideId);
       return;
     }
     if (this.refuseRepeated(index, loc.entry)) return;
@@ -1022,7 +959,7 @@ export default class JdexManagerPlugin extends Plugin {
       return;
     }
     const n = inboxFiles(this.app, this.cachedIndex()).length;
-    this.inboxBar.setText(n === 0 ? "Inbox: empty" : `Inbox: ${n}`);
+    this.inboxBar.setText(n === 0 ? t().inboxBarEmpty : t().inboxBarCount(n));
   }
 
   async onCreate(file: TAbstractFile): Promise<void> {
@@ -1074,8 +1011,7 @@ export default class JdexManagerPlugin extends Plugin {
 
   private ready(): boolean {
     if (this.settings.jdexFolder !== "") return true;
-    // eslint-disable-next-line obsidianmd/ui/sentence-case
-    new Notice("Set the JDex folder in the plugin settings first.");
+    new Notice(t().setJdexFolderFirst);
     return false;
   }
 
@@ -1085,22 +1021,22 @@ export default class JdexManagerPlugin extends Plugin {
     const missing = missingStructureNotes(index);
     const total = missing.areas.length + missing.categories.length;
     if (total === 0) {
-      new Notice("Every area and category folder already has a note.");
+      new Notice(t().structureComplete);
       return;
     }
     const names = [...missing.areas.map((a) => a.label), ...missing.categories.map((c) => c.label)];
     const ok = await confirm(
       this.app,
-      "Create missing category and area notes",
-      [`${total} note(s) will be created in the JDex folder from the templates:`, ...names.slice(0, 15), ...(names.length > 15 ? [`… and ${names.length - 15} more`] : [])],
-      "Create",
+      t().cmdCreateStructureNotes,
+      [t().structureBody(total), ...names.slice(0, 15), ...(names.length > 15 ? [t().andMore(names.length - 15)] : [])],
+      t().create,
     );
     if (!ok) return;
     try {
-      const effects = this.journalOperation("create-structure", "Create missing category and area notes");
+      const effects = this.journalOperation("create-structure", t().cmdCreateStructureNotes);
       const created = await createMissingStructureNotes(this.app, this.settings, index, effects);
       await effects.flush().catch(() => undefined);
-      new Notice(`${created} note(s) created.`);
+      new Notice(t().notesCreated(created));
     } catch (error) {
       this.logError("createStructureNotes", error);
       new Notice(error instanceof Error ? error.message : String(error));
@@ -1111,40 +1047,39 @@ export default class JdexManagerPlugin extends Plugin {
   async refreshSystemIndex(announce: boolean): Promise<void> {
     if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
-    const effects = this.journalOperation("fix", "Update the system index");
+    const effects = this.journalOperation("fix", t().labelSystemIndex);
     const changed = await updateSystemIndex(this.app, this.settings, index, announce, effects);
     await effects.flush().catch(() => undefined);
-    if (announce) new Notice(changed ? "System index updated." : "System index unchanged.");
+    if (announce) new Notice(changed ? t().systemIndexUpdated : t().systemIndexUnchanged);
   }
 
   async createCategoryFlow(): Promise<void> {
     if (!this.ready()) return;
     const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
     if (index.areas.length === 0) {
-      new Notice("No areas found. Create an area first.");
+      new Notice(t().noAreas);
       return;
     }
     new AreaSuggestModal(this.app, index, (area) => {
-      new CreateCategoryModal(this.app, index, area, this.settings, () => this.refreshHeaders(undefined, false), this.journalOperation("create-structure", `Create category in ${area.label}`)).open();
+      new CreateCategoryModal(this.app, index, area, this.settings, () => this.refreshHeaders(undefined, false), this.journalOperation("create-structure", t().labelCategoryIn(area.label))).open();
     }).open();
   }
 
   async createAreaFlow(): Promise<void> {
     if (!this.ready()) return;
     const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
-    new CreateAreaModal(this.app, index, this.settings, async () => {}, this.journalOperation("create-structure", "Create area")).open();
+    new CreateAreaModal(this.app, index, this.settings, async () => {}, this.journalOperation("create-structure", t().cmdCreateArea)).open();
   }
 
   async createHeaderFlow(): Promise<void> {
     if (!this.ready()) return;
     const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
     if (index.categories.length === 0) {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      new Notice("No categories found. Check the system root and the JDex folder.");
+      new Notice(t().noCategories);
       return;
     }
     new CategorySuggestModal(this.app, index, (category) => {
-      new CreateHeaderModal(this.app, index, category, this.settings, () => this.refreshHeaders(category.number, false), this.journalOperation("create-id", `Create header in ${category.label}`)).open();
+      new CreateHeaderModal(this.app, index, category, this.settings, () => this.refreshHeaders(category.number, false), this.journalOperation("create-id", t().labelHeaderIn(category.label))).open();
     }).open();
   }
 
@@ -1155,14 +1090,14 @@ export default class JdexManagerPlugin extends Plugin {
     if (!entry) return;
     if (this.refuseRepeated(index, entry)) return;
     const lines = [
-      `${entry.label} keeps its number forever: the JDex note stays, marked tipo: archivado, with a line saying when and where.`,
-      entry.folderPath ? `Its folder moves to ${entry.category}.09 with today's date as prefix.` : "It has no folder.",
-      "Nothing is deleted.",
+      t().retireKeepsNumber(entry.label),
+      entry.folderPath ? t().retireFolderMoves(entry.category) : t().retireNoFolder,
+      t().nothingDeleted,
     ];
-    const ok = await confirm(this.app, `Retire ${entry.id}?`, lines, "Retire");
+    const ok = await confirm(this.app, t().retireTitle(entry.id), lines, t().retireAction);
     if (!ok) return;
     // Each step is journaled as it happens, so a partial retirement stays undoable.
-    const effects = this.journalOperation("retire", `Retire ${entry.id}`);
+    const effects = this.journalOperation("retire", t().labelRetire(entry.id));
     try {
       const done = await retireId(this.app, index, entry, undefined, effects);
       await effects.flush();
@@ -1179,16 +1114,16 @@ export default class JdexManagerPlugin extends Plugin {
     const index = scanVault(this.app, this.settings);
     const entry = index.ids.find((e) => e.id === parent.id && sameSystem(e, parent));
     if (!entry) return;
-    new CreateChildModal(this.app, index, entry, this.settings, async () => {}, this.journalOperation("create-id", `Create child of ${entry.label}`)).open();
+    new CreateChildModal(this.app, index, entry, this.settings, async () => {}, this.journalOperation("create-id", t().labelChildOf(entry.label))).open();
   }
 
   async createTemplates(): Promise<void> {
     if (this.settings.templatesFolder === "") {
-      new Notice("Set the templates folder first (00.03 by convention).");
+      new Notice(t().setTemplatesFolderFirst);
       return;
     }
     const { created, skipped } = await writeBuiltinTemplates(this.app, this.settings);
-    new Notice(`Templates: ${created} created, ${skipped} already existed.`);
+    new Notice(t().templatesWritten(created, skipped));
   }
 
   async createIdFlow(): Promise<void> {
@@ -1196,14 +1131,12 @@ export default class JdexManagerPlugin extends Plugin {
       await this.detectFolders(false);
     }
     if (this.settings.jdexFolder === "") {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      new Notice("Set the JDex folder in the plugin settings first.");
+      new Notice(t().setJdexFolderFirst);
       return;
     }
     const index = selectCreationSystem(scanVault(this.app, this.settings), namePrefix(this.settings));
     if (index.categories.length === 0) {
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      new Notice("No categories found. Check the system root and the JDex folder.");
+      new Notice(t().noCategories);
       return;
     }
     new CategorySuggestModal(this.app, index, (category) => {
@@ -1211,14 +1144,14 @@ export default class JdexManagerPlugin extends Plugin {
         await this.saveSettings();
         try {
           // Journaled effect by effect: a failure after creating the note keeps it undoable.
-          const effects = this.journalOperation("create-id", `Create ${request.id} ${request.title.trim()}`);
+          const effects = this.journalOperation("create-id", t().labelCreateId(request.id, request.title.trim()));
           const note = await createId(this.app, this.settings, index, category, request, effects);
           await effects.flush();
-          new Notice(`Created ${note.basename}.`);
+          new Notice(t().createdNote(note.basename));
           if (request.createFolder && this.settings.afterCreateOpen === "folder" && category.path) {
             // No public API reveals a folder in the explorer: open the note and say where the folder is.
             await this.app.workspace.getLeaf(false).openFile(note);
-            new Notice(`Folder: ${category.path}/${note.basename}`, 8000);
+            new Notice(t().folderAt(`${category.path}/${note.basename}`), 8000);
           } else {
             await this.app.workspace.getLeaf(false).openFile(note);
           }
@@ -1228,401 +1161,5 @@ export default class JdexManagerPlugin extends Plugin {
         }
       }).open();
     }).open();
-  }
-}
-
-class JdexManagerSettingTab extends PluginSettingTab {
-  private readonly plugin: JdexManagerPlugin;
-
-  constructor(app: App, plugin: JdexManagerPlugin) {
-    super(app, plugin);
-    this.plugin = plugin;
-  }
-
-  // `getSettingDefinitions` arrived in Obsidian 1.13; manifest.json minAppVersion is 1.7.2 (checked by npm run check:min-app), so it renders the tab itself.
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-
-    this.folderSetting(
-      "JDex folder",
-      "Folder that holds one note per ID (00.00 by convention).",
-      () => this.plugin.settings.jdexFolder,
-      (v) => (this.plugin.settings.jdexFolder = v),
-    );
-    this.folderSetting(
-      "System root",
-      "Folder that holds the area folders. Leave empty for the vault root.",
-      () => this.plugin.settings.systemRoot,
-      (v) => (this.plugin.settings.systemRoot = v),
-      "Empty = vault root",
-    );
-    this.folderSetting(
-      "Templates folder",
-      "Folder that holds the note templates (00.03 by convention).",
-      () => this.plugin.settings.templatesFolder,
-      (v) => (this.plugin.settings.templatesFolder = v),
-    );
-    this.folderSetting(
-      "Reports folder",
-      "Folder where audit reports are written (00.02 by convention).",
-      () => this.plugin.settings.reportsFolder,
-      (v) => (this.plugin.settings.reportsFolder = v),
-    );
-
-    new Setting(containerEl)
-      .setName("Detect folders")
-      .setDesc("Looks for 00.00, 00.02 and 00.03 under 00-09/00 and fills the empty fields above.")
-      .addButton((button) =>
-        button.setButtonText("Detect").onClick(async () => {
-          await this.plugin.detectFolders(true);
-          // Re-render so the filled fields show up (see the note on `display` above).
-          // eslint-disable-next-line @typescript-eslint/no-deprecated
-          this.display();
-        }),
-      );
-
-    new Setting(containerEl).setName("Several systems").setHeading();
-
-    new Setting(containerEl)
-      .setName("System identifier")
-      .setDesc("Only with several Johnny.Decimal systems: a letter and two digits (D01). Names like D01.21.22 are then understood. Empty = single system.")
-      .addText((text) => {
-        // Typing `D01` passes through `D` and `D0`: saving on each keystroke is silent, and the
-        // warning waits until the field loses focus, once.
-        text
-          .setPlaceholder("Empty = single system")
-          .setValue(this.plugin.settings.systemId)
-          .onChange(async (value) => {
-            const id = normalizeSystemId(value);
-            if (id === null) return;
-            this.plugin.settings.systemId = id;
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.addEventListener("blur", () => {
-          if (normalizeSystemId(text.getValue()) === null) {
-            // eslint-disable-next-line obsidianmd/ui/sentence-case
-            new Notice("A system identifier is a capital letter and two digits, like D01. The value was not saved.");
-          }
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Prefix new names with the system identifier")
-      .setDesc("New notes and folders are named D01.21.22 Title instead of 21.22 Title.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.prefixNamesWithSystem).onChange(async (value) => {
-          this.plugin.settings.prefixNamesWithSystem = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl).setName("Templates").setHeading();
-
-    const labels: Record<JdexNoteType, string> = {
-      id: "Template for IDs",
-      cabecera: "Template for headers",
-      categoria: "Template for categories",
-      area: "Template for areas",
-    };
-    for (const type of Object.keys(labels) as JdexNoteType[]) {
-      new Setting(containerEl)
-        .setName(labels[type])
-        // eslint-disable-next-line obsidianmd/ui/sentence-case
-        .setDesc("Note name inside the templates folder. A note named with a category or area suffix (JDex - id - 21, JDex - id - 20-29) wins for that scope; the built-in template is used when none exists.")
-        .addText((text) =>
-          text.setValue(this.plugin.settings.templateNames[type]).onChange(async (value) => {
-            this.plugin.settings.templateNames[type] = value.trim();
-            await this.plugin.saveSettings();
-          }),
-        );
-    }
-
-    new Setting(containerEl)
-      .setName("Write built-in templates")
-      .setDesc("Creates the four built-in templates in the templates folder so you can edit them. Existing notes are kept.")
-      .addButton((button) => button.setButtonText("Write").onClick(() => void this.plugin.createTemplates()));
-
-    new Setting(containerEl).setName("Audit").setHeading();
-
-    new Setting(containerEl)
-      .setName("Automatic maintenance")
-      .setDesc("After system changes, updates derived properties, header lists and the system index, with undo history.")
-      .addToggle((toggle) => toggle.setValue(this.plugin.settings.automaticMaintenance).onChange(async (value) => {
-        this.plugin.settings.automaticMaintenance = value;
-        await this.plugin.saveSettings();
-      }));
-
-    new Setting(containerEl)
-      .setName("Inbox age in days")
-      .setDesc("Notes created more than this many days ago in an inbox appear as informative findings.")
-      .addText((text) => text.setValue(String(this.plugin.settings.inboxStaleDays)).onChange(async (value) => {
-        const days = Number(value);
-        if (!Number.isInteger(days) || days < 1) return;
-        this.plugin.settings.inboxStaleDays = days;
-        await this.plugin.saveSettings();
-      }));
-
-    new Setting(containerEl)
-      .setName("Audit on startup")
-      .setDesc("Runs the audit when the vault has loaded and writes the report without opening it.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.auditOnStartup).onChange(async (value) => {
-          this.plugin.settings.auditOnStartup = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Health report: files per ID")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("IDs holding more files than this are listed in the health report as candidates for a + child or subfolders.")
-      .addText((text) =>
-        text.setValue(String(this.plugin.settings.healthMaxFiles)).onChange(async (value) => {
-          const n = Number.parseInt(value, 10);
-          if (!Number.isFinite(n) || n < 1) return;
-          this.plugin.settings.healthMaxFiles = n;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Notes without a folder count as findings")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Off by default: a JDex note without a system folder is listed for information only.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.noteWithoutFolderIsFinding).onChange(async (value) => {
-          this.plugin.settings.noteWithoutFolderIsFinding = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Empty descriptions count as findings")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("The audit lists JDex notes whose descripcion is empty and proposes the first sentence of the body.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.descriptionIsFinding).onChange(async (value) => {
-          this.plugin.settings.descriptionIsFinding = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Areas and categories without a note count as findings")
-      .setDesc("Off by default. Turn it on once the missing category and area notes have been created.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.structureNotesAreFindings).onChange(async (value) => {
-          this.plugin.settings.structureNotesAreFindings = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Debug log")
-      .setDesc("Off by default. Writes the date, place, path, error name and a sanitized stack of each error to a note in the reports folder (last 200 lines, no note content). Useful to report a failure on a phone.")
-      .addToggle((toggle) => toggle.setValue(this.plugin.settings.debugLog).onChange(async (value) => {
-        this.plugin.settings.debugLog = value;
-        await this.plugin.saveSettings();
-      }));
-
-    new Setting(containerEl).setName("System index").setHeading();
-
-    new Setting(containerEl)
-      .setName("Index note")
-      .setDesc("Note that holds the whole system between jdex:indice markers. Empty = the note of 00.00.")
-      .addText((text) =>
-        text
-          .setPlaceholder("Empty = note of 00.00")
-          .setValue(this.plugin.settings.systemIndexNote)
-          .onChange(async (value) => {
-            this.plugin.settings.systemIndexNote = value.trim();
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Update the index when an ID is created")
-      .setDesc("Regenerates the block after a new note appears in the index folder.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.updateSystemIndexOnCreate).onChange(async (value) => {
-          this.plugin.settings.updateSystemIndexOnCreate = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl).setName("Editor").setHeading();
-
-    new Setting(containerEl)
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setName("Autocomplete IDs while typing")
-      .setDesc("Typing 21.2 offers the IDs that start with it.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.autocomplete).onChange(async (value) => {
-          this.plugin.settings.autocomplete = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Autocomplete inserts")
-      .setDesc("Enter inserts a link to the JDex note or the bare number; Shift+Enter always inserts the number.")
-      .addDropdown((d) =>
-        d
-          // eslint-disable-next-line obsidianmd/ui/sentence-case
-          .addOption("link", "Link to the JDex note")
-          .addOption("number", "Number only")
-          .setValue(this.plugin.settings.autocompleteInsert)
-          .onChange(async (value) => {
-            this.plugin.settings.autocompleteInsert = value === "number" ? "number" : "link";
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Clickable numbers in reading view")
-      .setDesc("A bare 21.22 in reading view links to its JDex note. The file is not modified.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.readingLinks).onChange(async (value) => {
-          this.plugin.settings.readingLinks = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl).setName("Coherence").setHeading();
-
-    new Setting(containerEl)
-      .setName("Rename pairs without asking")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("When a JDex note or an ID folder is renamed, rename its partner at once instead of showing a confirmation.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.renamePairsWithoutAsking).onChange(async (value) => {
-          this.plugin.settings.renamePairsWithoutAsking = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Live header lists")
-      .setDesc("Regenerate the children list between the jdex:hijos markers of header notes when an ID is created or renamed.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.liveHeaders).onChange(async (value) => {
-          this.plugin.settings.liveHeaders = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl).setName("Files").setHeading();
-
-    new Setting(containerEl)
-      .setName("Date format")
-      .setDesc("Prefix added when dating a file name and when archiving.")
-      .addDropdown((d) =>
-        d
-          // eslint-disable-next-line obsidianmd/ui/sentence-case
-          .addOption("YYYY-MM-DD", "YYYY-MM-DD")
-          // eslint-disable-next-line obsidianmd/ui/sentence-case
-          .addOption("YYYY-MM", "YYYY-MM")
-          .setValue(this.plugin.settings.dateFormat)
-          .onChange(async (value) => {
-            this.plugin.settings.dateFormat = value === "YYYY-MM" ? "YYYY-MM" : "YYYY-MM-DD";
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Date files when they are created inside an ID")
-      .setDesc("Off by default. Never touches JDex notes or management folders (.00 to .09).")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.dateOnCreate).onChange(async (value) => {
-          this.plugin.settings.dateOnCreate = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Date files when moving them to an ID")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Off by default. Applies to \"Move active file to an ID\" when the target is a content ID.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.dateOnMove).onChange(async (value) => {
-          this.plugin.settings.dateOnMove = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl).setName("Subfolder pattern").setHeading();
-
-    new Setting(containerEl)
-      .setName("Default pattern")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Folders created inside a new ID, one per line (for example 70 Adjuntos). Empty = none.")
-      .addTextArea((text) =>
-        text.setValue(this.plugin.settings.subfolderPattern).onChange(async (value) => {
-          this.plugin.settings.subfolderPattern = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Pattern per category")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("One line per category: 21: 40 Audits y revisiones, 70 Adjuntos. Overrides the default for that category.")
-      .addTextArea((text) =>
-        text.setValue(formatCategoryPatterns(this.plugin.settings.subfolderPatternsByCategory)).onChange(async (value) => {
-          this.plugin.settings.subfolderPatternsByCategory = parseCategoryPatterns(value);
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl).setName("Create ID").setHeading();
-
-    new Setting(containerEl)
-      .setName("After creating an ID with its folder")
-      // eslint-disable-next-line obsidianmd/ui/sentence-case
-      .setDesc("Open the JDex note, or the note plus a notice with the folder path (Obsidian has no API to reveal a folder).")
-      .addDropdown((d) =>
-        d
-          .addOption("note", "Open the note")
-          .addOption("folder", "Open the note and show the folder path")
-          .setValue(this.plugin.settings.afterCreateOpen)
-          .onChange(async (value) => {
-            this.plugin.settings.afterCreateOpen = value === "folder" ? "folder" : "note";
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Create the folder by default")
-      .setDesc("Initial state of the checkbox in the dialog that creates an ID. The dialog remembers your last choice.")
-      .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.createFolderByDefault).onChange(async (value) => {
-          this.plugin.settings.createFolderByDefault = value;
-          await this.plugin.saveSettings();
-        }),
-      );
-  }
-
-  private folderSetting(
-    name: string,
-    desc: string,
-    get: () => string,
-    set: (value: string) => void,
-    placeholder = "Path inside the vault",
-  ): void {
-    new Setting(this.containerEl)
-      .setName(name)
-      .setDesc(desc)
-      .addText((text) => {
-        // The suggestions are a help; the field stays free text.
-        new FolderSuggest(this.app, text.inputEl);
-        return text
-          .setPlaceholder(placeholder)
-          .setValue(get())
-          .onChange(async (value) => {
-            set(value.trim().replace(/^\/+|\/+$/g, ""));
-            await this.plugin.saveSettings();
-          });
-      });
   }
 }
