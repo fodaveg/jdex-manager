@@ -158,6 +158,8 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
 
 export interface CreateCategoryDialogOptions {
   index: JdIndex;
+  /** Re-reads the library right before submitting: another device may have taken the number. */
+  refreshIndex?(): Promise<JdIndex>;
   areas: readonly AreaEntry[];
   createFolderDefault: boolean;
   onSubmit(request: CreateCategoryRequest): Promise<void>;
@@ -268,6 +270,24 @@ export function mountCreateCategoryDialog(
 
   async function trySubmit(): Promise<void> {
     if (currentError() !== null || !area) return;
+    if (options.refreshIndex) {
+      submit.disabled = true;
+      try {
+        options.index = await options.refreshIndex();
+      } catch (cause) {
+        error.textContent = cause instanceof Error ? cause.message : String(cause);
+        submit.disabled = false;
+        return;
+      }
+      const conflict = currentError();
+      if (conflict) {
+        number = nextFreeCategory(area.number, options.index.categories.map((c) => c.number)) ?? '';
+        numberField.input.value = number;
+        refresh();
+        error.textContent = `${conflict} Siguiente libre: ${number || 'ninguna'}.`;
+        return;
+      }
+    }
     await options.onSubmit({
       area,
       category: number,
@@ -285,6 +305,8 @@ export function mountCreateCategoryDialog(
 
 export interface CreateAreaDialogOptions {
   index: JdIndex;
+  /** Re-reads the library right before submitting: another device may have taken the number. */
+  refreshIndex?(): Promise<JdIndex>;
   createFolderDefault: boolean;
   onSubmit(request: CreateAreaRequest): Promise<void>;
 }
@@ -351,6 +373,25 @@ export function mountCreateAreaDialog(el: HTMLElement, options: CreateAreaDialog
   async function trySubmit(): Promise<void> {
     const area = parsedArea();
     if (currentError() !== null || area === null) return;
+    if (options.refreshIndex) {
+      submit.disabled = true;
+      try {
+        options.index = await options.refreshIndex();
+      } catch (cause) {
+        error.textContent = cause instanceof Error ? cause.message : String(cause);
+        submit.disabled = false;
+        return;
+      }
+      const conflict = currentError();
+      if (conflict) {
+        const free = nextFreeArea(options.index);
+        numberText = free === null ? '' : areaCode(free);
+        numberField.input.value = numberText;
+        refresh();
+        error.textContent = `${conflict} Siguiente libre: ${numberText || 'ninguna'}.`;
+        return;
+      }
+    }
     await options.onSubmit({
       area,
       title,

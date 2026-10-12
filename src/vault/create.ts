@@ -28,6 +28,15 @@ export async function createJdexNote(
       ? childrenPlus(index, number.id, number.system).find((entry) => titleForCompare(entry.title) === titleForCompare(parsed.title))
       : findId(index, number.id, number.system);
     if (existing) throw new Error(`${name}: number already used by ${existing.label}.`);
+  } else if (parsed?.number.kind === "category" || parsed?.number.kind === "area") {
+    // Categories and areas: the same number under another title is the same identity.
+    const index = scanVault(app, settings);
+    const number = parsed.number;
+    const system = number.system ?? "";
+    const existing = number.kind === "category"
+      ? index.categories.find((entry) => entry.number === number.category && (entry.system ?? "") === system)
+      : index.areas.find((entry) => entry.number === number.area && (entry.system ?? "") === system);
+    if (existing) throw new Error(`${name}: number already used by ${existing.label}.`);
   }
   return app.vault.create(path, content);
 }

@@ -506,17 +506,22 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       (el) =>
         mountCreateCategoryDialog(el, {
           index: currentIndex,
+          refreshIndex: async () => {
+            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
+          },
           areas: currentIndex.areas,
           createFolderDefault: settings.createFolderByDefault,
           onSubmit: async (request) => {
             try {
               const outcome = await journal.run('create-structure', 'Crear categoría', async (vault) => {
+                // Re-read at the write: the number may have been taken while the dialog was open.
+                const liveIndex = selectCreationSystem(await readJdexCreationIndex(vault, settings), namePrefix(settings));
                 const created = await createJdexCategory(
                   vault,
                   api.markdown,
-                  currentWalk,
+                  walk ?? currentWalk,
                   settings,
-                  currentIndex,
+                  liveIndex,
                   request
                 );
                 await afterJdexWrite(true, vault);
@@ -543,16 +548,21 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       (el) =>
         mountCreateAreaDialog(el, {
           index: currentIndex,
+          refreshIndex: async () => {
+            return selectCreationSystem(await readJdexCreationIndex(api.vault, settings), namePrefix(settings));
+          },
           createFolderDefault: settings.createFolderByDefault,
           onSubmit: async (request) => {
             try {
               const outcome = await journal.run('create-structure', 'Crear área', async (vault) => {
+                const liveIndex = selectCreationSystem(await readJdexCreationIndex(vault, settings), namePrefix(settings));
                 const created = await createJdexArea(
                   vault,
                   api.markdown,
-                  currentWalk,
+                  walk ?? currentWalk,
                   settings,
-                  request
+                  request,
+                  liveIndex
                 );
                 await afterJdexWrite(true, vault);
                 return created;
