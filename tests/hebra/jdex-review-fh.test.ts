@@ -116,6 +116,52 @@ describe('FH 2: undo acts on the operation the dialog showed (runtime)', () => {
   });
 });
 
+describe('FH 4: the host echoes our own settings saves (runtime)', () => {
+  it('saving the journal (discard) does not reload the settings nor walk the library again', async () => {
+    const { vault, fake, cleanup } = await setup();
+    await command(fake, JDEX_COMMAND_HEALTH).run();
+    vi.useFakeTimers();
+    const walks = vi.spyOn(vault, 'foldersList');
+    await command(fake, JDEX_COMMAND_UNDO).run();
+    const discard = document.querySelector<HTMLButtonElement>('dialog .hebra-jdex-dialog-discard')!;
+    discard.click();
+    discard.click(); // the second click confirms
+    await vi.waitFor(() => expect(fake.recorded.notices.join(' | ')).toContain('se quitó del diario'));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(walks).not.toHaveBeenCalled();
+    await cleanup();
+  });
+
+  it('a change from elsewhere that does not touch the index is adopted without a walk', async () => {
+    const { vault, api, cleanup, settingsFromElsewhere } = await setupWithHarness();
+    vi.useFakeTimers();
+    const walks = vi.spyOn(vault, 'foldersList');
+    const stored = await api.storage.settings.load<Record<string, unknown>>();
+    settingsFromElsewhere({ ...stored, autocomplete: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(walks).not.toHaveBeenCalled();
+    await cleanup();
+  });
+
+  it('control: a change from elsewhere to the JDex folder rebuilds', async () => {
+    const { vault, api, cleanup, settingsFromElsewhere } = await setupWithHarness();
+    vi.useFakeTimers();
+    const walks = vi.spyOn(vault, 'foldersList');
+    const stored = await api.storage.settings.load<Record<string, unknown>>();
+    settingsFromElsewhere({ ...stored, jdexFolder: REPORTS });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(walks).toHaveBeenCalled();
+    await cleanup();
+  });
+});
+
+async function setupWithHarness() {
+  const vault = libraryVault();
+  const harness = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX, reportsFolder: REPORTS } });
+  const cleanup = await activateJdex(harness.api);
+  return { ...harness, vault, cleanup };
+}
+
 describe('FH 3: creating a category in another system checks that system only (runtime)', () => {
   async function prefixed(settings: Record<string, unknown>, notes: [string, string][]) {
     const vault = new FakeJdexVault();

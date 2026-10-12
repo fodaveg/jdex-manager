@@ -91,7 +91,7 @@ import {
 } from './library-index';
 import { mountJdexAuditView } from './jdex-audit-view';
 import { mountJdexSettingsPanel } from './jdex-settings-panel';
-import { autodetectJdexSettings, jdexSettingsFromStored, loadJdexSettings, persistJdexSettings } from './settings';
+import { autodetectJdexSettings, jdexSettingsChangeNeedsRebuild, jdexSettingsFromStored, loadJdexSettings, persistJdexSettings, trackJdexSettingsSaves } from './settings';
 import {
   followedFolderNotice,
   followTrackedFolders,
@@ -220,11 +220,14 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const modals = trackJdexModals(api.ui);
   const host = modals.ui;
   await new Promise<void>((resolve) => host.onReady(resolve));
-  let settings = await loadJdexSettings(api.storage.settings);
-  let folderIds = await loadTrackedFolderIds(api.storage.settings);
+  // Every load and save goes through it, so the host's echo of our own saves is known.
+  const settingsSaves = trackJdexSettingsSaves(api.storage.settings);
+  const settingsStorage = settingsSaves.storage;
+  let settings = await loadJdexSettings(settingsStorage);
+  let folderIds = await loadTrackedFolderIds(settingsStorage);
   // Operations still queued when the module is turned off do not write.
   const journal = guardJdexJournal(
-    await createJdexJournal(api.vault, api.storage.settings, { device: jdexDeviceId(api.storage.device) }),
+    await createJdexJournal(api.vault, settingsStorage, { device: jdexDeviceId(api.storage.device) }),
     () => disposed
   );
 
@@ -428,16 +431,16 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       folderIds = followed.ids;
       for (const moved of followed.moved) host.notice(followedFolderNotice(moved));
       if (followed.moved.length > 0) {
-        await persistJdexSettings(api.storage.settings, settings).catch((error: unknown) => report(error, 'guardar-ajustes'));
+        await persistJdexSettings(settingsStorage, settings).catch((error: unknown) => report(error, 'guardar-ajustes'));
       }
-      await persistTrackedFolderIds(api.storage.settings, folderIds).catch((error: unknown) => report(error, 'guardar-ajustes'));
+      await persistTrackedFolderIds(settingsStorage, folderIds).catch((error: unknown) => report(error, 'guardar-ajustes'));
     }
     const { settings: autodetected, changed } = autodetectJdexSettings(settings, [
       ...paths.values()
     ]);
     if (changed) {
       settings = autodetected;
-      await persistJdexSettings(api.storage.settings, settings).catch((error: unknown) =>
+      await persistJdexSettings(settingsStorage, settings).catch((error: unknown) =>
         report(error, 'guardar-ajustes')
       );
     }
@@ -1376,12 +1379,15 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   });
   const offNotes = api.workspace.onNotesChange(onNotesChanged);
   // Settings or journal saved elsewhere (another tab; later, sync): adopt the settings and
-  // join the journal by identity, then rebuild with them.
-  const offSettingsChange = api.storage.settings.onChange((value) => {
-    if (disposed) return;
-    settings = jdexSettingsFromStored(value);
+  // join the journal by identity, then rebuild with them. The host also calls this after
+  // our own saves (an echo, not news), and a change outside the index needs no walk.
+  const offSettingsChange = settingsStorage.onChange((value) => {
+    if (disposed || settingsSaves.isOwnSave(value)) return;
     journal.absorb(value);
-    scheduleRebuild();
+    const next = jdexSettingsFromStored(value);
+    const needsRebuild = jdexSettingsChangeNeedsRebuild(settings, next);
+    settings = next;
+    if (needsRebuild) scheduleRebuild();
   });
 
   // Activation does not wait for the first walk (the host abandons a slow activation): the
@@ -1778,7 +1784,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         for (const key of TRACKED_FOLDER_KEYS) if (next[key] !== settings[key]) delete folderIds[key];
         const baseline = settings;
         settings = next;
-        void persistJdexSettings(api.storage.settings, settings, baseline).catch((error: unknown) =>
+        void persistJdexSettings(settingsStorage, settings, baseline).catch((error: unknown) =>
           report(error, 'guardar-ajustes')
         );
         void rebuild().catch((error: unknown) => report(error, 'rebuild-ajustes'));
