@@ -23,6 +23,7 @@ import { ID_PANEL_VIEW, IdPanelView } from "./ui/id-panel";
 import type { JdIndex } from "./jd/index";
 import { categoryOfPath, isDatable, locate } from "./jd/files";
 import { dateFile, inboxFiles } from "./vault/files";
+import { LocalCreations } from "./vault/local-creation";
 import { applyFix, collectAuditFindings, jdexNoteMetas, runAudit } from "./vault/audit";
 import { confirm } from "./ui/confirm";
 import { applyHeaderWraps, headersToMigrate, updateHeaders } from "./vault/headers";
@@ -65,6 +66,12 @@ export default class JdexManagerPlugin extends Plugin {
   /** Paths the last undo restored, kept away from automatic writes until they change again. */
   private get undoShield(): UndoShield {
     return (this.shield ??= new UndoShield());
+  }
+  private created?: LocalCreations;
+
+  /** Files created moments ago, waiting for Obsidian to open them (`src/vault/local-creation.ts`). */
+  private get localCreations(): LocalCreations {
+    return (this.created ??= new LocalCreations());
   }
   private maintenanceTimer: ReturnType<typeof activeWindow.setTimeout> | null = null;
   private maintenanceRunning = false;
@@ -399,6 +406,7 @@ export default class JdexManagerPlugin extends Plugin {
       void this.onCreate(file);
       this.queueMaintenance(file);
     }));
+    this.registerEvent(this.app.workspace.on("file-open", (file) => void this.onFileOpen(file)));
 
     this.addRibbonIcon("file-plus-2", t().cmdCreateId, () => void this.createIdFlow());
 
@@ -974,16 +982,9 @@ export default class JdexManagerPlugin extends Plugin {
     this.refreshInboxCount();
     // A note an undo restores is not new: it is not dated, indexed or listed again.
     if (this.undoShield.settling && this.undoShield.protects(file.path)) return;
-    if (this.settings.dateOnCreate) {
-      const index = scanVault(this.app, this.settings);
-      if (isDatable(index, this.settings, file.path)) {
-        try {
-          await this.datedRename(file, true);
-        } catch {
-          // A clash on the dated name is not worth a notice at creation time.
-        }
-      }
-    }
+    // A file that arrives through Sync fires "create" too, with its arrival as ctime: only a file
+    // Obsidian opens right away was created here, and it is dated then (`onFileOpen`).
+    if (this.settings.dateOnCreate) this.localCreations.add(file);
     // Unloaded while awaiting: no further write.
     if (this.unloaded) return;
     if (this.settings.updateSystemIndexOnCreate) {
@@ -997,6 +998,20 @@ export default class JdexManagerPlugin extends Plugin {
     if (rel === null || rel === "" || rel.includes("/")) return;
     const parsed = extractJdPrefix(file.basename);
     if (parsed?.number.kind === "id") await this.refreshHeaders(parsed.number.category, false);
+  }
+
+  /** Dates a file Obsidian opens right after creating it, when «date files when created» is on. */
+  async onFileOpen(file: TFile | null): Promise<void> {
+    const created = this.localCreations.take(file);
+    if (!created || this.unloaded || !this.settings.dateOnCreate || this.settings.jdexFolder === "") return;
+    if (this.app.vault.getAbstractFileByPath(created.path) !== created) return;
+    const index = scanVault(this.app, this.settings);
+    if (!isDatable(index, this.settings, created.path)) return;
+    try {
+      await this.datedRename(created, true);
+    } catch {
+      // A clash on the dated name is not worth a notice at creation time.
+    }
   }
 
   /** Index entry of the ID a file or folder IS: a JDex ID note or an ID folder (not a `+` child). */
