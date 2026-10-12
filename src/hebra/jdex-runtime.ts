@@ -153,6 +153,7 @@ import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
 import { jdexEditorExtension } from './jdex-editor-extension';
 import { createJdexJournal } from './jdex-journal';
+import { guardJdexJournal, trackJdexModals } from './jdex-lifecycle';
 import { mountJdexJournalView } from './jdex-journal-view';
 import { createJdexHealthReport } from './jdex-health';
 import { applyJdexRepair } from './jdex-repair';
@@ -206,11 +207,14 @@ function report(error: unknown, where: string): void {
 }
 
 export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> {
-  const host = api.ui;
+  // Dialogs opened through `host` are closed by the cleanup.
+  const modals = trackJdexModals(api.ui);
+  const host = modals.ui;
   await new Promise<void>((resolve) => host.onReady(resolve));
   let settings = await loadJdexSettings(api.storage.settings);
   let folderIds = await loadTrackedFolderIds(api.storage.settings);
-  const journal = await createJdexJournal(api.vault, api.storage.settings);
+  // Operations still queued when the module is turned off do not write.
+  const journal = guardJdexJournal(await createJdexJournal(api.vault, api.storage.settings), () => disposed);
 
   let walk: JdexLibraryWalk | null = null;
   let index: JdIndex | null = null;
@@ -228,6 +232,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
    *  propia línea sigue en zona muerta temporal (medido: `ReferenceError: Cannot
    *  access 'idSectionEl' before initialization` en el primer `rebuild()`). */
   let idSectionEl: HTMLElement | null = null;
+  /** Repaints registered by the open editors (`jdexEditorExtension`'s `subscribe`). */
+  const editorRepaints = new Set<() => void>();
+  /** «Reparar» rebuilds between steps: the audit view is refreshed once at its end. */
+  let repairing = false;
   let idSectionRequest = 0;
   let unmountIdSection: (() => void) | undefined;
 
@@ -371,6 +379,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     // activa: un `rebuild()` que crea un hijo o cambia el frontmatter no dispara
     // `onActiveNoteChange` (la nota activa no cambió), así que se refresca aquí.
     if (idSectionEl) renderIdSectionInto(idSectionEl);
+    // Open editors repaint their numbers, and an open audit view shows the new findings
+    // (not the ones captured when it was mounted). Not while Repair walks its selection.
+    for (const repaint of [...editorRepaints]) repaint();
+    if (auditViewEl && !repairing) {
+      unmountAuditView?.();
+      mountAuditViewInto(auditViewEl);
+    }
   }
 
   /** Reconstrucción COMPLETA: recorre la biblioteca desde cero. Reservada para la
@@ -874,6 +889,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const oldName = action.partnerPath.slice(action.partnerPath.lastIndexOf('/') + 1);
     const newName = action.newPartnerPath.slice(action.newPartnerPath.lastIndexOf('/') + 1);
     host.notice(`El título cambió. Renombrar carpeta «${oldName}» a «${newName}».`, () => {
+      // The notice outlives the module: pressing it after turning JDex off does nothing.
+      if (disposed) return;
       void journal.run('move', `Renombrar carpeta ${oldName}`, async (vault) => {
         const note = await vault.noteRead(event.noteId);
         const folders = await vault.foldersList();
@@ -1535,8 +1552,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         void (async () => {
           let done = 0;
           let failed = 0;
+          repairing = true;
           try {
             await journal.run('fix', 'Reparar JDex', async (vault) => {
+              // Turned off before this queued operation started: nothing to write.
+              if (disposed) return;
               const order = (finding: Finding): number => {
                 const type = finding.fix?.type;
                 if (type === 'create-note' || type === 'create-folder' || type === 'folders') return 0;
@@ -1546,8 +1566,12 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
               };
               for (const finding of [...selected].sort((a, b) => order(a) - order(b))) {
                 if (!finding.fix) continue;
+                // Turned off mid-loop: `rebuild()` no longer refreshes, so `findings` and
+                // `walk` would be stale; stop before writing anything else.
+                if (disposed) break;
                 try {
                   await rebuild();
+                  if (disposed) break;
                   if (!findings.some((fresh) => fresh.kind === finding.kind && JSON.stringify(fresh.fix) === JSON.stringify(finding.fix))) {
                     throw new Error(`${finding.paths[0]}: cambió desde la vista previa; vuelve a abrir Reparar.`);
                   }
@@ -1560,18 +1584,21 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
                   host.notice(error instanceof Error ? error.message : String(error));
                 }
               }
-              if (done > 0) await afterJdexWrite(true, vault);
+              if (done > 0 && !disposed) await afterJdexWrite(true, vault);
             });
           } catch (error) {
             report(error, 'reparar');
-            host.notice(error instanceof Error ? error.message : String(error));
+            if (!disposed) host.notice(error instanceof Error ? error.message : String(error));
           } finally {
-            await rebuild();
-            if (auditViewEl) {
-              unmountAuditView?.();
-              mountAuditViewInto(auditViewEl);
+            repairing = false;
+            if (!disposed) {
+              await rebuild();
+              if (auditViewEl) {
+                unmountAuditView?.();
+                mountAuditViewInto(auditViewEl);
+              }
+              host.notice(`Reparar: ${done} aplicado(s); ${failed} omitido(s) o fallido(s).`);
             }
-            host.notice(`Reparar: ${done} aplicado(s); ${failed} omitido(s) o fallido(s).`);
           }
         })();
       }
@@ -1652,6 +1679,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offEditorExtension = api.editor.registerExtension(
       jdexEditorExtension({
         ids: () => index?.ids ?? [],
+        subscribe: (repaint) => {
+          editorRepaints.add(repaint);
+          return () => void editorRepaints.delete(repaint);
+        },
         // Un número del texto lleva a su NOTA; la carpeta es la alternativa (⌘/Ctrl+Alt+clic).
         onNavigate: (entry, options) => {
           if (walk) gotoJdexEntry(entry, walk, !options?.folder);
@@ -1716,6 +1747,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   const cleanup: PluginCleanup = () => {
     disposed = true;
+    modals.closeAll();
     if (rebuildTimer !== null) clearTimeout(rebuildTimer);
     rebuildTimer = null;
     offActiveNote();

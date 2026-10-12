@@ -38,6 +38,7 @@ import { maintainSystem } from "./vault/maintenance";
 import { MaintenanceGate, onceNotifier } from "./vault/maintenance-gate";
 import { createSystemReport } from "./vault/system-report";
 import { renamedFolderSettings } from "./vault/settings-paths";
+import { closeTrackedModals } from "./ui/modal-registry";
 
 export default class JdexManagerPlugin extends Plugin {
   settings: JdexManagerSettings = mergeSettings(null);
@@ -52,6 +53,16 @@ export default class JdexManagerPlugin extends Plugin {
   private maintenanceRunning = false;
   private maintenanceGate = new MaintenanceGate();
   private maintenanceWarn = onceNotifier((message) => void new Notice(message));
+  /** Listeners of «index changed», called after the cache is invalidated. */
+  private indexListeners?: Set<() => void>;
+  /** Set on unload: in-flight passes and renames stop before their next write. */
+  private unloaded = false;
+
+  /** Subscribes to «index changed»; returns the unsubscribe. */
+  onIndexChanged(listener: () => void): () => void {
+    (this.indexListeners ??= new Set()).add(listener);
+    return () => void this.indexListeners?.delete(listener);
+  }
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -70,8 +81,14 @@ export default class JdexManagerPlugin extends Plugin {
     this.whereBar.addClass("mod-clickable");
     this.registerDomEvent(this.whereBar, "click", () => void this.toggleNoteAndFolder());
     this.registerEvent(this.app.workspace.on("file-open", () => this.refreshWhere()));
+    // Renaming the active ID (or any index change) updates the «where» bar too.
+    this.register(this.onIndexChanged(() => this.refreshWhere()));
+    this.register(() => {
+      if (this.maintenanceTimer !== null) window.clearTimeout(this.maintenanceTimer);
+      this.maintenanceTimer = null;
+    });
 
-    this.registerView(ID_PANEL_VIEW, (leaf) => new IdPanelView(leaf, { index: () => this.cachedIndex(), settings: () => this.settings }));
+    this.registerView(ID_PANEL_VIEW, (leaf) => new IdPanelView(leaf, { index: () => this.cachedIndex(), settings: () => this.settings, onIndexChanged: (listener) => this.onIndexChanged(listener) }));
     this.addRibbonIcon("hash", "Open ID panel", () => void this.openPanel());
     this.addCommand({ id: "open-id-panel", name: "Open ID panel", callback: () => void this.openPanel() });
 
@@ -346,6 +363,7 @@ export default class JdexManagerPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("delete", (file) => {
       this.invalidateIndex();
       this.refreshInboxCount();
+      void this.onDelete(file);
       this.queueMaintenance(file);
     }));
     // The index is built from paths only, so a modify never invalidates it.
@@ -380,7 +398,18 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   onunload(): void {
-    if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
+    this.unloaded = true;
+    // The timer is cleared by `this.register` (same `window` that created it).
+    closeTrackedModals();
+  }
+
+  /** A deleted JDex ID note leaves its header list (live headers on, the default). */
+  async onDelete(file: TAbstractFile): Promise<void> {
+    if (this.unloaded || !this.settings.liveHeaders || this.settings.jdexFolder === "" || !(file instanceof TFile)) return;
+    const rel = relativeTo(this.settings.jdexFolder, file.path);
+    if (rel === null || rel === "" || rel.includes("/")) return;
+    const parsed = extractJdPrefix(rel.replace(/\.md$/, ""));
+    if (parsed?.number.kind === "id") await this.refreshHeaders(parsed.number.category, false);
   }
 
   /** Coalesces vault changes; the pass's own writes never enqueue another pass, foreign ones during it enqueue one. */
@@ -396,8 +425,11 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   private scheduleMaintenance(): void {
-    if (this.maintenanceTimer !== null) activeWindow.clearTimeout(this.maintenanceTimer);
-    this.maintenanceTimer = activeWindow.setTimeout(() => {
+    if (this.unloaded) return;
+    // `window`, not `activeWindow`: unload clears it on the same window even if the active
+    // window changed in between (pop-out windows).
+    if (this.maintenanceTimer !== null) window.clearTimeout(this.maintenanceTimer);
+    this.maintenanceTimer = window.setTimeout(() => {
       this.maintenanceTimer = null;
       void this.maintainAutomatically();
     }, 200);
@@ -405,13 +437,13 @@ export default class JdexManagerPlugin extends Plugin {
 
   /** Records completed maintenance steps, including a partial pass. */
   async maintainAutomatically(): Promise<void> {
-    if (!this.settings.automaticMaintenance || this.maintenanceRunning) return;
+    if (!this.settings.automaticMaintenance || this.maintenanceRunning || this.unloaded) return;
     this.maintenanceRunning = true;
     this.maintenanceGate.begin();
     const effects: Effect[] = [];
     let again = false;
     try {
-      await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn);
+      await maintainSystem(this.app, this.settings, effects, this.maintenanceWarn, () => this.unloaded);
     } catch (error) {
       new Notice(`Automatic maintenance stopped: ${String(error)}`);
     } finally {
@@ -558,6 +590,8 @@ export default class JdexManagerPlugin extends Plugin {
   /** Vault events invalidate before any callback can consume the changed paths. */
   private invalidateIndex(): void {
     this.indexCache = null;
+    // After invalidating: listeners (ID panel, «where» bar) repaint against the new index.
+    for (const listener of [...(this.indexListeners ?? [])]) listener();
   }
 
   /** Frontmatter fixes for one note or for the whole JDex, with the checklist modal as preview. */
@@ -668,7 +702,7 @@ export default class JdexManagerPlugin extends Plugin {
 
   /** Rename in pairs, the "never renumber" warning and the moved-category warning. */
   private async handleRename(file: TAbstractFile, oldPath: string): Promise<void> {
-    if (this.renaming) return;
+    if (this.renaming || this.unloaded) return;
     if (file instanceof TFolder) await this.followRenamedFolderSettings(oldPath, file.path);
     if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
@@ -700,7 +734,8 @@ export default class JdexManagerPlugin extends Plugin {
           [`${action.partnerPath}`, `→ ${action.newPartnerPath}`],
           "Rename",
         ));
-      if (ok) {
+      // Unloaded while the confirmation was open: no write.
+      if (ok && !this.unloaded) {
         (this.ownRenames ??= new Map()).set(action.partnerPath, action.newPartnerPath);
         try {
           await applyFix(this.app, { type: "rename", from: action.partnerPath, to: action.newPartnerPath });

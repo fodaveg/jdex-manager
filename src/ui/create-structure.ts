@@ -6,6 +6,7 @@ import { type JdexManagerSettings, namePrefix } from "../settings";
 import { titleForCompare } from "../jd/title";
 import { scanVault } from "../vault/scan";
 import { createJdexNote, ensureFolder } from "../vault/create";
+import { trackModal } from "./modal-registry";
 
 export class AreaSuggestModal extends SuggestModal<AreaEntry> {
   private readonly areas: AreaEntry[];
@@ -49,6 +50,7 @@ abstract class StructureModal extends Modal {
   protected abstract perform(): Promise<TFile | null>;
 
   onOpen(): void {
+    trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
     this.setTitle(this.heading());

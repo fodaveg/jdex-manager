@@ -1,6 +1,7 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 import { FINDING_KINDS, type Finding, type Fix } from "../jd/audit";
 import { describeFix, KIND_TITLES } from "../jd/audit-report";
+import { trackModal } from "./modal-registry";
 import type { JdexManagerSettings } from "../settings";
 import type { Effect } from "../jd/journal";
 import { applyFix } from "../vault/audit";
@@ -36,6 +37,7 @@ export class FixFindingsModal extends Modal {
   }
 
   onOpen(): void {
+    trackModal(this);
     const { contentEl } = this;
     contentEl.empty();
     // eslint-disable-next-line obsidianmd/ui/sentence-case
