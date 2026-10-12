@@ -4,7 +4,7 @@
  * keep two technical identities (distinct paths in the walk, both openable), and actions
  * on a repeated number are refused.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import { JDEX_AUDIT_VIEW_ID, JDEX_COMMAND_GOTO_ID } from '../../src/hebra/jdex-runtime';
 import { walkJdexLibrary } from '../../src/hebra/library-index';
@@ -71,6 +71,43 @@ describe('Hebra: same-title notes keep separate identities (37c115ca)', () => {
     expect(fake.recorded.notices.some((notice) => notice.includes('21.23 está repetido'))).toBe(true);
     expect(document.body.textContent).not.toContain('se retira');
     expect(vault.rewriteCalls.length).toBe(before);
+    await cleanup();
+  });
+});
+
+describe('Hebra: folder-to-note paired rename on a repeated number (37c115ca)', () => {
+  async function renameFolder(notes: { id: string; title: string }[]) {
+    const vault = new FakeJdexVault();
+    for (const folder of [
+      fakeFolder('sys', null, '00-09 Sistema'),
+      fakeFolder('sys-cat', 'sys', '00 Sistema'),
+      fakeFolder('jdex', 'sys-cat', '00.00 JDex'),
+      fakeFolder('area', null, '20-29 Productos'),
+      fakeFolder('cat', 'area', '21 Software'),
+      fakeFolder('id', 'cat', '21.23 Alfa')
+    ]) vault.seedFolder(folder);
+    for (const note of notes) vault.seedNote(fakeNote(note.id, 'jdex', `---\ndescripcion: "x"\n---\n# ${note.title}\n`));
+    const { api, fake, workspace } = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX, renamePairsWithoutAsking: true } });
+    const cleanup = await activateJdex(api);
+    expect(await workspace.changeFolderAsHost(vault, { kind: 'folder-rename', folderId: 'id', newName: '21.23 Alfa nueva' })).toBe(true);
+    workspace.emitFolders(await vault.foldersList());
+    return { vault, fake, cleanup };
+  }
+
+  it('the folder is renamed but its note does not follow, with a notice', async () => {
+    const { vault, fake, cleanup } = await renameFolder([{ id: 'n-alfa', title: '21.23 Alfa' }, { id: 'n-beta', title: '21.23 Beta' }]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((await vault.noteRead('n-alfa'))?.title).toBe('21.23 Alfa');
+    expect((await vault.noteRead('n-beta'))?.title).toBe('21.23 Beta');
+    expect(fake.recorded.notices.some((notice) => notice.includes('21.23 está repetido'))).toBe(true);
+    expect((await vault.foldersList()).find((folder) => folder.id === 'id')?.name).toBe('21.23 Alfa nueva');
+    await cleanup();
+  });
+
+  it('control: with a unique number the note follows the folder', async () => {
+    const { vault, fake, cleanup } = await renameFolder([{ id: 'n-alfa', title: '21.23 Alfa' }]);
+    await vi.waitFor(async () => expect((await vault.noteRead('n-alfa'))?.title).toBe('21.23 Alfa nueva'));
+    expect(fake.recorded.notices.some((notice) => notice.includes('está repetido'))).toBe(false);
     await cleanup();
   });
 });

@@ -23,7 +23,7 @@
  * never renames the note.
  */
 import type { PluginFolder, PluginFolderRenameEvent, PluginMarkdown, PluginModalHandle, PluginUi, PluginVault } from 'hebra-plugin-api';
-import type { JdIndex } from './engine';
+import { extractJdPrefix, isRepeatedId, repeatedIdMessage, type JdIndex } from './engine';
 import { jdexFolderPairRename, jdexPairNoticeMessage, jdexRenameWarning, jdexRenameWarningMessage } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import type { JdexLibraryWalk } from './library-index';
@@ -121,6 +121,16 @@ export function createJdexFolderRenameGuard(deps: JdexFolderRenameDeps): JdexFol
     if (!action || oldPath === undefined || event.kind !== 'folder-rename') return;
     const note = snapshot.walk.systemNotes.find((entry) => entry.path === action.partnerPath);
     if (!note) return;
+    // A repeated number: "the" note of this folder could be the other ID's. The folder
+    // rename goes ahead (the user's own change); its note does not follow.
+    const parsed = extractJdPrefix(note.title);
+    if (parsed?.number.kind === 'id') {
+      const entry = { id: parsed.number.extension ? `${parsed.number.id}+` : parsed.number.id, system: parsed.number.system, title: parsed.title };
+      if (isRepeatedId(snapshot.index, entry)) {
+        deps.ui.notice(repeatedIdMessage(entry));
+        return;
+      }
+    }
     const newTitle = baseName(action.newPartnerPath).replace(/\.md$/u, '');
     pending.set(event.folderId, { folderId: event.folderId, oldName: baseName(oldPath), newName: event.newName, noteId: note.id, oldTitle: note.title, newTitle, at: now() });
   }
