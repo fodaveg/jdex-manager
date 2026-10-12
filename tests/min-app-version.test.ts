@@ -19,7 +19,8 @@ const { findTooNewApis, isNewer } = script as {
 const ROOT = cwd();
 const PROBE = join(ROOT, 'src', '__probe_min_app__.ts');
 
-describe('minAppVersion guard (scripts/check-min-app-version.mjs)', () => {
+// Each case runs the TypeScript checker over src/; GitHub runners take 5-8 s.
+describe('minAppVersion guard (scripts/check-min-app-version.mjs)', { timeout: 60_000 }, () => {
   it('compares versions numerically', () => {
     expect(isNewer('1.11.1', '1.7.2')).toBe(true);
     expect(isNewer('1.7.2', '1.7.2')).toBe(false);
