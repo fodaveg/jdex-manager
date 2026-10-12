@@ -41,7 +41,6 @@
 import type {
   HebraPluginApi,
   PluginCleanup,
-  PluginFolderRenameEvent,
   PluginModalHandle,
   PluginActiveNote,
   PluginNoteTitleRenamedEvent,
@@ -98,6 +97,7 @@ import {
 } from './jdex-create-view';
 import { isJdexChildEntry, JDEX_CHILD_OF_CHILD_MESSAGE, jdexCreationIndex } from './jdex-create';
 import { jdexTemplatesOutcomeMessage, writeJdexBuiltinTemplates } from './jdex-templates';
+import { createJdexFolderRenameGuard } from './jdex-folder-rename';
 import {
   createJdexArea,
   createJdexCategory,
@@ -117,8 +117,7 @@ import { applyJdexWrap, findJdexWrapCandidates } from './jdex-wrap-headers';
 import { mountJdexWrapHeadersView } from './jdex-wrap-headers-view';
 import {
   jdexRenameNoticeMessage,
-  jdexRenameWarning,
-  jdexRenameWarningMessage
+  jdexRenameWarning
 } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
 import { mountJdexGotoView } from './jdex-goto-view';
@@ -736,38 +735,19 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   // categoría al renombrar o mover -------------------------------------------
 
   /** `api.workspace.onBeforeFolderRename`: Hebra llama esto ANTES de
-   *  `folderRename`/`folderMove`. Sin índice aún cargado, deja pasar (más seguro
-   *  que bloquear una carpeta cualquiera mientras el módulo arranca). */
-  async function confirmRename(event: PluginFolderRenameEvent): Promise<boolean> {
-    if (!walk || !index) return true;
-    const warning = jdexRenameWarning(event, walk, index, settings);
-    if (!warning) return true;
-    return new Promise<boolean>((resolve) => {
-      let decided = false;
-      const settle = (value: boolean): void => {
-        if (decided) return;
-        decided = true;
-        resolve(value);
-      };
-      let handle: PluginModalHandle | undefined;
-      handle = host.openModal(
-        (el) =>
-          mountJdexRenameWarningView(el, {
-            message: jdexRenameWarningMessage(warning),
-            onContinue: () => {
-              settle(true);
-              handle?.close();
-            },
-            onCancel: () => {
-              settle(false);
-              handle?.close();
-            }
-          }),
-        // Escape o clic fuera cierran sin decidir: la opción segura es cancelar.
-        { title: 'JDex: confirmar', onClosed: () => settle(false) }
-      );
-    });
-  }
+   *  `folderRename`/`folderMove`. A change that needs a warning is refused at once and
+   *  redone by the plugin only if the user confirms (`jdex-folder-rename.ts`): Hebra lets
+   *  a guard through after 5 s, so waiting for the answer is not safe. Sin índice aún
+   *  cargado, deja pasar. */
+  const confirmRename = createJdexFolderRenameGuard({
+    ui: host,
+    snapshot: () => (walk && index ? { walk, index, settings } : null),
+    write: (label, action) => journal.run('move', label, async (vault) => {
+      await action(vault);
+      await afterJdexWrite(true, vault);
+    }),
+    report
+  });
 
   // ---- Lote 5: avisar tras renombrar el TÍTULO de una nota JDex, sin bloquear
   // el guardado (encargo de David, 29 sep 2026) ---------------------------------
