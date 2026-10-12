@@ -156,16 +156,20 @@ describe('rewriteJdexNotes', () => {
   it('si el reintento también queda `stale`, la nota sale en `skipped` sin pisarla', async () => {
     const vault = new FakeJdexVault();
     vault.seedNote(fakeNote('n1', 'f1', '# Antes\n'));
+    let edits = 0;
     const library: JdexRewriteLibrary = {
       noteRead: (id) => vault.noteRead(id),
       notesRewriteBatch: async (entries, options) => {
-        vault.saveElsewhere('n1', '# Otro cambio\n');
+        // A different body each time: with real hashes, the same body twice would keep the
+        // hash and the (non-strict) batch would accept it, exactly as the host does.
+        edits += 1;
+        vault.saveElsewhere('n1', `# Otro cambio ${edits}\n`);
         return vault.notesRewriteBatch(entries, options);
       }
     };
     const result = await rewriteJdexNotes(library, ['n1'], () => '# Mío\n');
     expect(result).toEqual({ written: [], skipped: ['n1'] });
-    expect((await vault.noteRead('n1'))?.body).toBe('# Otro cambio\n');
+    expect((await vault.noteRead('n1'))?.body).toBe('# Otro cambio 2\n');
   });
 
   it('una nota protegida (`locked`, sin cuerpo) no se toca nunca', async () => {

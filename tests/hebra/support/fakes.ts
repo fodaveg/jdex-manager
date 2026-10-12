@@ -17,6 +17,7 @@
  *   aquí va su port fiel (`src/vault/frontmatter-lines.ts`), medido contra el host, para que las
  *   pruebas del adaptador vean el cuerpo que llegaría a Hebra.
  */
+import { createHash } from 'node:crypto';
 import { vi } from 'vitest';
 import type {
   HebraPluginApi,
@@ -50,24 +51,59 @@ export { FAKE_ROOT_FOLDER_ID };
 
 // ---- títulos y notas ----
 
-/** `title:` del frontmatter o, si no hay, el primer `# …` (la regla de `PluginVault`). */
+/** Hebra's `TITLE_MAX_LENGTH` (`library/derive.ts`): the stored title is cut there. */
+export const HOST_TITLE_MAX_LENGTH = 200;
+
+/** SHA-256 hex of the UTF-8 body: what Hebra stores as `bodySha256` (`sha256HexOf` in
+ *  `sqlite-engine.ts`). The fake hashes the body, never an id plus a counter: otherwise two
+ *  identical bodies could never share a hash and a same-body revision could not be tested. */
+export function bodySha256Of(body: string): string {
+  return createHash('sha256').update(body, 'utf8').digest('hex');
+}
+
+/** Hebra's `decodeScalar` (`notes/markdown.ts:244`): JSON for `"…"`, the `''` escape for `'…'`. */
+function decodeTitleScalar(raw: string): string {
+  const scalar = raw.trim();
+  if (scalar.startsWith('"')) {
+    try {
+      const decoded: unknown = JSON.parse(scalar);
+      return typeof decoded === 'string' ? decoded : scalar;
+    } catch {
+      return scalar.slice(1, scalar.endsWith('"') ? -1 : undefined);
+    }
+  }
+  if (scalar.length >= 2 && scalar.startsWith("'") && scalar.endsWith("'")) {
+    return scalar.slice(1, -1).replace(/''/gu, "'");
+  }
+  return scalar;
+}
+
+/** `title:` del frontmatter o, si no hay, el primer `# …`, cortado a 200 caracteres sin
+ *  partir un par sustituto (la regla de `PluginVault` y de `deriveNote`, `library/derive.ts`). */
 export function titleOf(body: string): string {
+  const full = untruncatedTitleOf(body);
+  if (full.length <= HOST_TITLE_MAX_LENGTH) return full;
+  const cut = full.slice(0, HOST_TITLE_MAX_LENGTH);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+function untruncatedTitleOf(body: string): string {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/u.exec(body);
   if (frontmatter) {
     for (const line of frontmatter[1].split(/\r?\n/u)) {
       const match = /^title:\s*(.*)$/u.exec(line);
       if (!match) continue;
-      const raw = match[1].trim();
-      try {
-        const parsed: unknown = raw.startsWith('"') ? JSON.parse(raw) : raw;
-        if (typeof parsed === 'string' && parsed.trim() !== '') return parsed.trim();
-      } catch {
-        // Comillas rotas: se ignora, como un `title:` vacío.
-      }
+      const decoded = decodeTitleScalar(match[1]).trim();
+      if (decoded !== '') return decoded;
     }
   }
   const rest = frontmatter ? body.slice(frontmatter[0].length) : body;
-  return /^#[ \t]+(.+?)[ \t#]*$/mu.exec(rest)?.[1]?.trim() ?? '';
+  // Hebra's rule since 25 Sep 2026 (`firstHeading`, `notes/markdown.ts`): only the FIRST
+  // non-blank line can be the title, and only as `^\s{0,3}#\s+(.+?)\s*#*\s*$`. A `# …`
+  // further down is body: `intro\n\n# Capítulo` has no title.
+  const first = rest.split(/\r?\n/u).find((line) => !/^\s*$/u.test(line));
+  return first === undefined ? '' : /^\s{0,3}#\s+(.+?)\s*#*\s*$/u.exec(first)?.[1]?.trim() ?? '';
 }
 
 /** Una nota lista para `seedNote`: el título se deriva del cuerpo, como en Hebra. */
@@ -88,7 +124,7 @@ export function fakeNote(
     favorite: false,
     trashedAt: null,
     archivedAt: null,
-    revision: { localSeq: 1, bodySha256: `sha-${id}` },
+    revision: { localSeq: 1, bodySha256: bodySha256Of(body) },
     ...overrides
   };
 }
@@ -191,8 +227,18 @@ export class FakeJdexVault implements PluginVault {
     this.#notes.set(id, {
       ...current,
       locked,
-      revision: { localSeq, bodySha256: `sha-${id}-${locked ? "locked" : "open"}-${localSeq}` }
+      revision: { localSeq, bodySha256: bodySha256Of(`${locked ? 'locked' : 'open'}:${id}:${localSeq}`) }
     });
+  }
+
+  /** The stored note as is (also a protected one, with its body), for test arrangement. */
+  peek(id: string): PluginNote {
+    return this.#clone(this.#require(id));
+  }
+
+  /** The stored body (`''` when protected). */
+  peekBody(id: string): string {
+    return this.#require(id).body ?? '';
   }
 
   /** Baja definitiva: la nota deja de existir. */
@@ -218,7 +264,7 @@ export class FakeJdexVault implements PluginVault {
       body,
       title,
       updatedAt: current.updatedAt + 1,
-      revision: { localSeq, bodySha256: `sha-${current.id}-${localSeq}` }
+      revision: { localSeq, bodySha256: bodySha256Of(body) }
     };
   }
 
@@ -232,7 +278,7 @@ export class FakeJdexVault implements PluginVault {
     const note = fakeNote(id, input.folderId ?? this.rootFolderId(), input.body, {
       createdAt: this.#noteSeq,
       updatedAt: this.#noteSeq,
-      revision: { localSeq: 1, bodySha256: `sha-${id}-1` }
+      revision: { localSeq: 1, bodySha256: bodySha256Of(input.body) }
     });
     this.#notes.set(id, note);
     return this.#clone(note);
@@ -256,10 +302,26 @@ export class FakeJdexVault implements PluginVault {
     this.rewriteCalls.push({ entries: entries.map((entry) => ({ ...entry })), options });
     const written: string[] = [];
     const stale: string[] = [];
+    const missing: string[] = [];
     const committed: { id: string; body: string; revision: PluginNote['revision'] }[] = [];
+    // Host (`vault-facade.ts` `notesRewriteBatch` + `sqlite-engine.ts`): a protected note
+    // rejects the WHOLE batch with `note-locked` before anything is written; a purged note
+    // goes to `stale` and, apart, to `missing`; a trashed note is still rewritable.
     for (const entry of entries) {
       const current = this.#notes.get(entry.id);
-      if (!current || current.locked || current.trashedAt !== null || current.revision.localSeq !== entry.expected.localSeq || current.revision.bodySha256 !== entry.expected.bodySha256) {
+      if (current?.locked) throw hostApiError('note-locked', `La nota «${entry.id}» está protegida: los plugins no pueden cambiar su texto.`);
+    }
+    for (const entry of entries) {
+      const current = this.#notes.get(entry.id);
+      if (!current) {
+        missing.push(entry.id);
+        stale.push(entry.id);
+        continue;
+      }
+      const sameSeq = current.revision.localSeq === entry.expected.localSeq;
+      const sameHash = current.revision.bodySha256 === entry.expected.bodySha256.toLowerCase();
+      // `strictRevision` wants sequence AND hash; otherwise either one is enough.
+      if (!(entry.strictRevision ? sameSeq && sameHash : sameSeq || sameHash)) {
         stale.push(entry.id);
         continue;
       }
@@ -268,7 +330,7 @@ export class FakeJdexVault implements PluginVault {
       written.push(entry.id);
       committed.push({ id: entry.id, body: next.body!, revision: { ...next.revision } });
     }
-    return { written, stale, committed };
+    return { written, stale, ...(missing.length > 0 ? { missing } : {}), committed };
   }
 
   async noteMove(id: string, folderId: string): Promise<PluginNote> {
@@ -401,8 +463,12 @@ export class FakeJdexVault implements PluginVault {
   }
 
   async folderTrashEmpty(id: string, expected: { name: string; parentId: string | null }): Promise<boolean> {
+    // Host (`sqlite-engine.ts` `folderTrashEmpty`): the root never goes, a `null` parent
+    // means the root, and a live subfolder or any note inside blocks it.
+    const root = this.rootFolderId();
     const current = this.#folders.get(id);
-    if (!current || current.name !== expected.name || current.parentId !== expected.parentId || [...this.#folders.values()].some((folder) => folder.parentId === id) || [...this.#notes.values()].some((note) => note.folderId === id)) return false;
+    if (id === root || !current || current.name !== expected.name || (current.parentId ?? root) !== (expected.parentId ?? root)) return false;
+    if ([...this.#folders.values()].some((folder) => folder.parentId === id) || [...this.#notes.values()].some((note) => note.folderId === id)) return false;
     this.#folders.delete(id);
     return true;
   }
@@ -439,6 +505,39 @@ export class FakeJdexVault implements PluginVault {
   onChange(): PluginUnregister {
     return () => {};
   }
+}
+
+// ---- capabilities ----
+
+const VAULT_READ_METHODS: ReadonlySet<string> = new Set([
+  'libraryId', 'rootFolderId', 'noteRead', 'noteSummary', 'notesPage', 'foldersList', 'filesPage', 'fileRead', 'blobRead', 'onChange'
+]);
+
+const SYNC_VAULT_METHODS: ReadonlySet<string> = new Set(['libraryId', 'rootFolderId', 'onChange']);
+
+/**
+ * The host gates every `api.vault` call on `vault.read` / `vault.write` (`vault-facade.ts`
+ * `read()`/`write()`): an undeclared capability throws `capability-not-declared` before the
+ * store is touched. This wraps any vault with the same gate.
+ */
+export function withVaultCapabilities<T extends PluginVault>(vault: T, capabilities: readonly PluginCapability[]): T {
+  const declared = new Set<PluginCapability>(capabilities);
+  return new Proxy(vault, {
+    get(target, property, receiver) {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== 'function' || typeof property !== 'string') return value;
+      const needed: PluginCapability = VAULT_READ_METHODS.has(property) ? 'vault.read' : 'vault.write';
+      return (...args: unknown[]) => {
+        if (!declared.has(needed)) {
+          const error = hostApiError('capability-not-declared', `«${needed}» sin declarar.`);
+          // `libraryId`, `rootFolderId` and `onChange` are synchronous in the host: they throw.
+          if (SYNC_VAULT_METHODS.has(property)) throw error;
+          return Promise.reject(error);
+        }
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    }
+  });
 }
 
 // ---- markdown ----
@@ -495,21 +594,35 @@ export class FakeWorkspace {
     return () => void set.delete(listener);
   }
 
+  /** Errors thrown by a listener. The host (`workspace-bridge.ts` `#emit`) reports them and
+   *  keeps notifying the rest: one plugin listener never stops the others. */
+  readonly listenerFaults: unknown[] = [];
+
+  #emit<T>(listeners: Iterable<(value: T) => void>, value: T): void {
+    for (const listener of [...listeners]) {
+      try {
+        listener(value);
+      } catch (error) {
+        this.listenerFaults.push(error);
+      }
+    }
+  }
+
   setActiveNote(note: PluginActiveNote | null): void {
     this.active = note;
-    for (const listener of [...this.#activeListeners]) listener(note);
+    this.#emit(this.#activeListeners, note);
   }
 
   emitFolders(folders: readonly PluginFolder[]): void {
-    for (const listener of [...this.#foldersListeners]) listener(folders);
+    this.#emit(this.#foldersListeners, folders);
   }
 
   emitNotes(change: PluginNotesChange): void {
-    for (const listener of [...this.#notesListeners]) listener(change);
+    this.#emit(this.#notesListeners, change);
   }
 
   emitTitleRenamed(event: PluginNoteTitleRenamedEvent): void {
-    for (const listener of [...this.#titleListeners]) listener(event);
+    this.#emit(this.#titleListeners, event);
   }
 
   /** Faults the host would report (`workspace.onBeforeFolderRename`): a guard that threw or
