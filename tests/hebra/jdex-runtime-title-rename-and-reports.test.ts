@@ -26,7 +26,7 @@ async function setup(oldTitle = '21.11 Antes') {
 
 afterEach(() => { document.body.replaceChildren(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
-describe('L7 runtime Hebra', () => {
+describe('runtime Hebra: title rename, maintenance and reports', () => {
   it('tras crear un ID reconstruye una vez y no relee cuerpos JDex sin cambios', async () => {
     const { vault, fake, workspace, cleanup } = await setup();
     const noteRead = vi.spyOn(vault, 'noteRead');

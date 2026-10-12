@@ -166,9 +166,22 @@ export function withHostRewriteBatchLimit<T extends Pick<PluginVault, 'notesRewr
   return vault;
 }
 
+/**
+ * A `FakeJdexVault` seeded from a `folder id -> notes` map (and, optionally, the folders):
+ * the shape the library-index and runtime fixtures were written in. Use this instead of
+ * hand-writing another `PluginVault` (and another copy of the paging).
+ */
+export function vaultFromNotes(notesByFolder: ReadonlyMap<string, readonly PluginNote[]>, folders: readonly PluginFolder[] = []): FakeJdexVault {
+  const vault = new FakeJdexVault();
+  for (const folder of folders) vault.seedFolder(folder);
+  for (const notes of notesByFolder.values()) for (const note of notes) vault.seedNote(note);
+  return vault;
+}
+
 export class FakeJdexVault implements PluginVault {
   readonly #notes = new Map<string, PluginNote>();
   readonly #folders = new Map<string, PluginFolder>();
+  readonly #files = new Map<string, PluginFile>();
   #noteSeq = 0;
   #folderSeq = 0;
   /** Simula un host 1.0.0: `noteSummary` no trae `bodySha256` ni `revision`. */
@@ -473,9 +486,30 @@ export class FakeJdexVault implements PluginVault {
     return true;
   }
 
-  /** Esta biblioteca de pruebas no modela ficheros (adjuntos), solo notas. */
-  async filesPage(): Promise<PluginFilesPage> {
-    return { items: [], nextCursor: null };
+  /** Seeds a loose file (an attachment, a `.base`…) so `filesPage` lists it. The double
+   *  does not model file contents, only the listing. */
+  seedFile(file: PluginFile): void {
+    this.#files.set(file.id, { ...file });
+  }
+
+  /** The files of a folder (and of its descendants with `subfolders`), live ones only,
+   *  in insertion order. One page: the double does not model file paging. */
+  async filesPage(folderId: string, subfolders: boolean): Promise<PluginFilesPage> {
+    const wanted = new Set<string>([folderId]);
+    if (subfolders) {
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const folder of this.#folders.values()) {
+          if (folder.parentId !== null && wanted.has(folder.parentId) && !wanted.has(folder.id)) {
+            wanted.add(folder.id);
+            grew = true;
+          }
+        }
+      }
+    }
+    const items = [...this.#files.values()].filter((file) => wanted.has(file.folderId) && file.trashedAt === null);
+    return { items: items.map((file) => ({ ...file })), nextCursor: null };
   }
 
   async fileRead(): Promise<PluginFile | null> {

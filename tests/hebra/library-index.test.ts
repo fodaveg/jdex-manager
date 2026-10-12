@@ -1,5 +1,5 @@
 import { createFakePluginApi } from 'hebra-plugin-api/testing';
-import type { PluginFolder, PluginNote, PluginNoteSummary, PluginNotesPage, PluginNotesScope } from 'hebra-plugin-api';
+import type { PluginFolder, PluginNote } from 'hebra-plugin-api';
 import { describe, expect, it, vi } from 'vitest';
 import { auditSystem, buildIndex, countProblems, locate } from '../../src/hebra/engine';
 import {
@@ -16,14 +16,14 @@ import {
   jdexFolderPaths,
   jdexNotePath,
   jdexResolveFolderId,
-  walkJdexLibrary,
-  type JdexLibraryPort
+  walkJdexLibrary
 } from '../../src/hebra/library-index';
 import {
   FAKE_ROOT_FOLDER_ID as ROOT_FOLDER_ID,
   FakeJdexVault,
   fakeFolder,
-  fakeNote
+  fakeNote,
+  vaultFromNotes
 } from './support/fakes';
 
 /** `api.markdown` del host falso: `frontmatterRange` es lo único que usa el adaptador. */
@@ -42,38 +42,8 @@ function noteRow(id: string, folderId: string, title: string, body = ''): Plugin
   return fakeNote(id, folderId, body, { title });
 }
 
-function fakeLibrary(notesByFolder: Map<string, PluginNote[]>): JdexLibraryPort {
-  const noteById = (id: string) => [...notesByFolder.values()].flat().find((note) => note.id === id);
-  return {
-    async notesPage(cursor, limit, scope?: PluginNotesScope): Promise<PluginNotesPage> {
-      if (!scope || scope.kind !== 'folder') throw new Error('se esperaba un ámbito de carpeta');
-      const notes = notesByFolder.get(scope.folderId) ?? [];
-      const start = cursor ? notes.findIndex((n) => n.id === cursor) + 1 : 0;
-      const page = notes.slice(start, start + limit);
-      const hasMore = start + limit < notes.length;
-      return {
-        items: page.map((n) => ({
-          id: n.id,
-          title: n.title,
-          excerpt: '',
-          updatedAt: n.updatedAt,
-          favorite: false,
-          createdAt: n.createdAt,
-          locked: false
-        })),
-        nextCursor: hasMore ? page[page.length - 1].id : null
-      };
-    },
-    async noteRead(id) {
-      return noteById(id) ?? null;
-    },
-    async noteSummary(ids): Promise<PluginNoteSummary[]> {
-      return ids.flatMap((id) => {
-        const note = noteById(id);
-        return note ? [{ ...note, excerpt: '', bodySha256: note.revision.bodySha256 }] : [];
-      });
-    }
-  };
+function fakeLibrary(notesByFolder: Map<string, PluginNote[]>): FakeJdexVault {
+  return vaultFromNotes(notesByFolder);
 }
 
 /** Vault de ejemplo: `00-09 Sistema` con el JDex y el inbox del sistema; `20-29

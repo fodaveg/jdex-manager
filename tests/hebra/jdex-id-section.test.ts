@@ -1,9 +1,9 @@
 import { createFakePluginApi } from 'hebra-plugin-api/testing';
 import { describe, expect, it } from 'vitest';
 import { buildIndex, type IndexInput } from '../../src/hebra/engine';
-import { loadJdexIdSection, type JdexIdSectionLibrary } from '../../src/hebra/jdex-id-section';
+import { loadJdexIdSection } from '../../src/hebra/jdex-id-section';
 import type { JdexLibraryWalk } from '../../src/hebra/library-index';
-import { fakeNote } from './support/fakes';
+import { FakeJdexVault, fakeNote } from './support/fakes';
 
 const markdown = createFakePluginApi().api.markdown;
 
@@ -51,54 +51,24 @@ function walk(): JdexLibraryWalk {
   };
 }
 
-function fakeLibrary(): JdexIdSectionLibrary {
-  return {
-    async noteRead(id: string) {
-      if (id === 'n-hebra') {
-        return fakeNote(
-          id,
-          'f-jdex',
-          ['---', 'jd: 21.11', 'descripcion: Notas locales.', '---', ''].join('\n'),
-          { title: '21.11 Hebra' }
-        );
-      }
-      return null;
-    },
-    async notesPage() {
-      return {
-        items: [
-          {
-            id: 'n-content',
-            title: 'Notas de Hebra',
-            excerpt: '',
-            updatedAt: 100,
-            createdAt: 0,
-            favorite: false,
-            locked: false
-          }
-        ],
-        nextCursor: null
-      };
-    },
-    async filesPage() {
-      return {
-        items: [
-          {
-            id: 'f1',
-            folderId: 'f-hebra',
-            name: 'captura.png',
-            sha256: 'sha',
-            byteLength: 1,
-            mime: 'image/png',
-            createdAt: 0,
-            updatedAt: 200,
-            trashedAt: null
-          }
-        ],
-        nextCursor: null
-      };
-    }
-  };
+function fakeLibrary(): FakeJdexVault {
+  const vault = new FakeJdexVault();
+  vault.seedNote(
+    fakeNote('n-hebra', 'f-jdex', ['---', 'jd: 21.11', 'descripcion: Notas locales.', '---', ''].join('\n'), { title: '21.11 Hebra' })
+  );
+  vault.seedNote(fakeNote('n-content', 'f-hebra', '', { title: 'Notas de Hebra', updatedAt: 100, createdAt: 0 }));
+  vault.seedFile({
+    id: 'f1',
+    folderId: 'f-hebra',
+    name: 'captura.png',
+    sha256: 'sha',
+    byteLength: 1,
+    mime: 'image/png',
+    createdAt: 0,
+    updatedAt: 200,
+    trashedAt: null
+  });
+  return vault;
 }
 
 describe('loadJdexIdSection', () => {
@@ -153,7 +123,7 @@ describe('loadJdexIdSection', () => {
 
   it('flags a truncated listing when the page has a next cursor', async () => {
     const index = buildIndex(INDEX_INPUT);
-    const library = { ...fakeLibrary(), notesPage: async () => ({ items: [], nextCursor: 'more' }) };
+    const library = Object.assign(fakeLibrary(), { notesPage: async () => ({ items: [], nextCursor: 'more' }) });
     const data = await loadJdexIdSection(library, markdown, walk(), index, { jdexFolder: INDEX_INPUT.jdexFolder },
       { id: 'n-hebra', folderId: 'f-jdex', title: '21.11 Hebra' });
     expect(data.truncated).toEqual({ notes: true, files: false });

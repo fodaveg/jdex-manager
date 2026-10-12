@@ -5,9 +5,18 @@ import { createJdexJournal } from '../../src/hebra/jdex-journal';
 import { JdexPartialRewriteError, rewriteJdexNotes, type JdexRewriteLibrary } from '../../src/hebra/jdex-write';
 import { FakeJdexVault, HOST_REWRITE_BATCH_MAX, fakeNote, withHostRewriteBatchLimit } from './support/fakes';
 
-/** El `vault` del host falso del paquete, con notas en la raíz. */
-function fakeVault(notes: NonNullable<FakePluginApiOptions['notes']>) {
+/** El `vault` del host falso del paquete, con notas en la raíz (solo para comparar su límite de lote). */
+function packageVault(notes: NonNullable<FakePluginApiOptions['notes']>) {
   return withHostRewriteBatchLimit(createFakePluginApi({ capabilities: ['vault.read', 'vault.write'], notes }).api.vault);
+}
+
+/** El doble oficial con las notas dadas (`id -> cuerpo` o `{ body, title }`) en la carpeta `f1`. */
+function fakeVault(notes: Record<string, string | { body: string; title: string }>): FakeJdexVault {
+  const vault = new FakeJdexVault();
+  for (const [id, value] of Object.entries(notes)) {
+    vault.seedNote(typeof value === 'string' ? fakeNote(id, 'f1', value) : fakeNote(id, 'f1', value.body, { title: value.title }));
+  }
+  return vault;
 }
 
 /** A FakeJdexVault with `count` notes `n000…`, each with body `# Nota <i>\n`. */
@@ -28,8 +37,8 @@ describe('host batch limit in the doubles', () => {
     const entries = await Promise.all(ids.map(async (id) => ({ id, body: '# X\n', expected: (await vault.noteRead(id))!.revision })));
     await expect(vault.notesRewriteBatch(entries)).rejects.toSatisfy((error) => isPluginApiError(error, 'invalid-argument'));
     await expect(vault.notesRewriteBatch(entries.slice(0, HOST_REWRITE_BATCH_MAX))).resolves.toMatchObject({ stale: [] });
-    const packageVault = fakeVault({ n1: '# A\n' });
-    await expect(packageVault.notesRewriteBatch(entries)).rejects.toThrow(/Como mucho 200/);
+    const hostFake = packageVault({ n1: '# A\n' });
+    await expect(hostFake.notesRewriteBatch(entries)).rejects.toThrow(/Como mucho 200/);
   });
 });
 

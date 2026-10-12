@@ -25,7 +25,7 @@ async function setup(automaticMaintenance = false) {
 
 afterEach(() => { document.body.replaceChildren(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
-describe('L8 runtime Hebra', () => {
+describe('runtime Hebra: optional maintenance and inbox report', () => {
   it('only writes derived fields and managed lists with maintenance enabled, without an event loop', async () => {
     const { vault, api, workspace, cleanup } = await setup(true);
     vi.useFakeTimers();
