@@ -32,7 +32,7 @@ describe('Obsidian retirement', () => {
     vi.mocked(renameFile).mockRejectedValue(new Error('Move failed'));
     const effects: Effect[] = [];
     await expect(retireId(app, index, entry, undefined, effects)).rejects.toThrow('Move failed');
-    expect(effects).toMatchObject([{ kind: 'note-rewrite', before: '---\ntipo: id\n---\n# 21.11 Note\n' }]);
+    expect(effects).toMatchObject([{ kind: 'frontmatter-block', before: '---\ntipo: id\n---\n' }]);
     expect((effects[0] as { after: string }).after).toContain('tipo: "archivado"');
   });
 
@@ -45,6 +45,6 @@ describe('Obsidian retirement', () => {
     expect(v.exists(moved.to)).toBe(true);
     expect(v.exists('20-29 Area/21 Cat/21.11 Note')).toBe(false);
     expect(v.exists(path)).toBe(true);
-    expect(effects.map((effect) => effect.kind)).toEqual(['note-rewrite', 'moved', 'line']);
+    expect(effects.map((effect) => effect.kind)).toEqual(['frontmatter-block', 'moved', 'line']);
   });
 });

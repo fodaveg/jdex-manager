@@ -7,6 +7,12 @@
 export type Effect =
   /** A managed block update, guarded against later body edits at undo time. */
   | { kind: "note-rewrite"; path: string; before: string; after: string }
+  /**
+   * A frontmatter correction: only the frontmatter block before and after (delimiters included,
+   * `""` when there was none). Undo compares and restores that block alone, so later edits to
+   * the body do not block it.
+   */
+  | { kind: "frontmatter-block"; path: string; before: string; after: string }
   /** A note the plugin wrote, with the content it wrote (to tell "untouched" from "edited" at undo time). */
   | { kind: "created-note"; path: string; content: string }
   /** Exact bytes of a duplicate conflict note sent to trash, for guarded recreation. */
@@ -125,7 +131,7 @@ export function appendOperation<E>(state: JournalState<E>, op: Operation<E>, max
   return { entries: next.slice(next.length - max), removed: [...state.removed, ...evicted].slice(-JOURNAL_REMOVED_MAX) };
 }
 
-const KNOWN_EFFECTS = new Set(["note-rewrite", "created-note", "trashed-note", "created-folder", "moved", "frontmatter", "line"]);
+const KNOWN_EFFECTS = new Set(["note-rewrite", "frontmatter-block", "created-note", "trashed-note", "created-folder", "moved", "frontmatter", "line"]);
 
 /** True for an effect kind this version knows how to undo. */
 export function isKnownEffect(effect: { kind?: unknown }): boolean {
@@ -170,6 +176,9 @@ export function describeUndo(op: Operation): string[] {
     switch (e.kind) {
       case "note-rewrite":
         lines.push(`Restore the managed blocks in ${e.path}.`);
+        break;
+      case "frontmatter-block":
+        lines.push(`Restore the frontmatter of ${e.path}.`);
         break;
       case "created-note":
         lines.push(`Move ${e.path} to the trash.`);

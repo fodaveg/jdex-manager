@@ -180,6 +180,15 @@ export function frontmatterSource(markdown: string): string | null {
   return markdown.slice(firstNewline + 1, span.contentTo);
 }
 
+/**
+ * The frontmatter block at the start, delimiters and final newline included, exactly as written;
+ * `""` when the note has none. The rest of the note is `markdown.slice(block.length)`.
+ */
+export function frontmatterBlock(markdown: string): string {
+  const span = findFrontmatter(markdown);
+  return span ? markdown.slice(0, span.bodyFrom) : '';
+}
+
 /** The frontmatter as Obsidian reads it (`parseYaml`), or `null` without one or when unreadable. */
 export function readFrontmatter(markdown: string): Record<string, unknown> | null {
   const source = frontmatterSource(markdown);

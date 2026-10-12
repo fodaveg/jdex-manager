@@ -95,7 +95,7 @@ describe("retire then undo: the exact state comes back", () => {
     const index = buildIndex({ systemRoot: "", jdexFolder: "J", notePaths: [NOTE], folderPaths: ["20-29 Area", "20-29 Area/21 Cat", ARCHIVE] });
     const effects: Effect[] = [];
     const notes = await retireId(v.app, index, index.ids.find((e) => e.id === "21.11")!, undefined, effects);
-    expect(effects.map((e) => e.kind)).toEqual(["note-rewrite", "line"]);
+    expect(effects.map((e) => e.kind)).toEqual(["frontmatter-block", "line"]);
     expect(notes.join(" ")).toContain("marked as retired");
     await undoOperation(v.app, op(effects));
     expect(v.bodies.get(NOTE)).toBe(BODY);
@@ -109,7 +109,7 @@ describe("retire then undo: partial failures", () => {
     vi.mocked(v.app.fileManager.renameFile).mockRejectedValueOnce(new Error("Move failed"));
     const effects: Effect[] = [];
     await expect(retireId(v.app, index, entry, undefined, effects)).rejects.toThrow("Move failed");
-    expect(effects.map((e) => e.kind)).toEqual(["note-rewrite"]);
+    expect(effects.map((e) => e.kind)).toEqual(["frontmatter-block"]);
     expect(v.frontmatter.get(NOTE)).toMatchObject({ tipo: "archivado" });
     expect(v.exists(FOLDER)).toBe(true);
     await undoOperation(v.app, op(effects));
@@ -138,7 +138,7 @@ describe("retire then undo: partial failures", () => {
     const effects: Effect[] = [];
     await expect(retireId(v.app, index, entry, undefined, effects)).rejects.toThrow("already exists");
     expect(v.exists(FOLDER)).toBe(true);
-    expect(effects.map((e) => e.kind)).toEqual(["note-rewrite"]);
+    expect(effects.map((e) => e.kind)).toEqual(["frontmatter-block"]);
     await undoOperation(v.app, op(effects));
     expect(snapshot(v)).toEqual(taken);
     expect(taken.nodes.length).toBe(before.nodes.length + 1);
@@ -155,20 +155,23 @@ describe("retire then undo: edits made after the retirement", () => {
     const operation = op(effects);
     await expect(undoOperation(v.app, operation)).rejects.toThrow("edited after");
     // The later steps were undone first (line, folder); the frontmatter rewrite is what is left.
-    expect(operation.effects.map((e) => e.kind)).toEqual(["note-rewrite"]);
+    expect(operation.effects.map((e) => e.kind)).toEqual(["frontmatter-block"]);
     expect(v.exists(FOLDER)).toBe(true);
     expect(v.frontmatter.get(NOTE)).toMatchObject({ tipo: "archivado", descripcion: "Rewritten after retiring" });
   });
 
-  it("text typed into the body after retiring also stops the frontmatter step, and nothing is lost", async () => {
+  // Code review 12 Oct 2026, finding 6 (decided): the frontmatter step journals only the block,
+  // so text typed into the body after retiring no longer blocks its undo, and is kept.
+  it("text typed into the body after retiring does not stop the frontmatter step, and is kept", async () => {
     const { v, index, entry } = setup();
+    const before = v.bodies.get(NOTE)!;
     const effects: Effect[] = [];
     await retireId(v.app, index, entry, undefined, effects);
     v.bodies.set(NOTE, `${v.bodies.get(NOTE)!}\nAdded later.\n`);
     const operation = op(effects);
-    await expect(undoOperation(v.app, operation)).rejects.toThrow("edited after");
-    expect(v.bodies.get(NOTE)).toContain("Added later.");
-    expect(operation.effects.map((e) => e.kind)).toEqual(["note-rewrite"]);
+    await undoOperation(v.app, operation);
+    expect(v.bodies.get(NOTE)).toBe(`${before}\nAdded later.\n`);
+    expect(operation.effects).toEqual([]);
   });
 
   it("does not move back a folder that is no longer where the retirement left it", async () => {
@@ -179,7 +182,7 @@ describe("retire then undo: edits made after the retirement", () => {
     await v.app.fileManager.renameFile(v.app.vault.getAbstractFileByPath(moved.to)!, `${ARCHIVE}/renamed by me`);
     const operation = op(effects);
     await expect(undoOperation(v.app, operation)).rejects.toThrow("not there any more");
-    expect(operation.effects.map((e) => e.kind)).toEqual(["note-rewrite", "moved"]);
+    expect(operation.effects.map((e) => e.kind)).toEqual(["frontmatter-block", "moved"]);
     expect(v.exists(`${ARCHIVE}/renamed by me/doc.pdf`)).toBe(true);
     expect(v.exists(FOLDER)).toBe(false);
   });
@@ -191,7 +194,7 @@ describe("retire then undo: edits made after the retirement", () => {
     v.folder(FOLDER);
     const operation = op(effects);
     await expect(undoOperation(v.app, operation)).rejects.toThrow("exists again");
-    expect(operation.effects.map((e) => e.kind)).toEqual(["note-rewrite", "moved"]);
+    expect(operation.effects.map((e) => e.kind)).toEqual(["frontmatter-block", "moved"]);
     expect(v.exists(`${FOLDER}/doc.pdf`)).toBe(false);
   });
 });
@@ -230,7 +233,7 @@ describe("retire then undo through the plugin and its saved journal", () => {
     expect(notices().join(" ")).toContain("21.11 marked as retired");
     expect(saved().journal).toHaveLength(1);
     expect(saved().journal[0]).toMatchObject({ kind: "retire", label: "Retire 21.11" });
-    expect(saved().journal[0].effects.map((e) => e.kind)).toEqual(["note-rewrite", "moved", "line"]);
+    expect(saved().journal[0].effects.map((e) => e.kind)).toEqual(["frontmatter-block", "moved", "line"]);
     expect(v.exists(FOLDER)).toBe(false);
     await undo();
     expect(snapshot(v)).toEqual(before);
@@ -246,7 +249,7 @@ describe("retire then undo through the plugin and its saved journal", () => {
     await p.retireFlow(entry);
     expect(notices()).toContain("Move failed");
     expect(saved().journal).toHaveLength(1);
-    expect(saved().journal[0].effects.map((e) => e.kind)).toEqual(["note-rewrite"]);
+    expect(saved().journal[0].effects.map((e) => e.kind)).toEqual(["frontmatter-block"]);
     await undo();
     expect(snapshot(v)).toEqual(before);
     expect(data.journal.entries).toEqual([]);
@@ -260,7 +263,7 @@ describe("retire then undo through the plugin and its saved journal", () => {
     expect(await undo()).toBeNull();
     expect(said.at(-1)).toMatch(/^Undo stopped: .*edited after.* The operation stays in the journal\.$/);
     expect(data.journal.entries).toHaveLength(1);
-    expect(saved().journal[0].effects.map((e) => e.kind)).toEqual(["note-rewrite"]);
+    expect(saved().journal[0].effects.map((e) => e.kind)).toEqual(["frontmatter-block"]);
     expect(v.frontmatter.get(NOTE)).toMatchObject({ descripcion: "Edited later" });
   });
 });

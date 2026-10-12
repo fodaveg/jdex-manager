@@ -27,7 +27,7 @@ describe("Obsidian frontmatter inverse", () => {
     const effects: Effect[] = [];
     await applyFix(v.app, { type: "frontmatter", path: NOTE, set: { tipo: "id", descripcion: "Fixed" } }, effects);
     // Since L2 the fix writes only its lines and journals the exact rewrite.
-    expect(effects[0]).toMatchObject({ kind: "note-rewrite", path: NOTE });
+    expect(effects[0]).toMatchObject({ kind: "frontmatter-block", path: NOTE });
     v.setFm(NOTE, "descripcion", "Written by hand");
     const operation = op(effects);
     await expect(undoOperation(v.app, operation)).rejects.toThrow("edited after");
@@ -104,7 +104,7 @@ describe("Obsidian retire inverse", () => {
     const operation = op(effects, "retire");
     await expect(undoOperation(v.app, operation)).rejects.toThrow("edited after");
     expect(v.frontmatter.get(NOTE)).toMatchObject({ tipo: "archivado", archivado: "2020-01-01" });
-    expect(operation.effects.map((e) => e.kind)).toEqual(["note-rewrite"]);
+    expect(operation.effects.map((e) => e.kind)).toEqual(["frontmatter-block"]);
   });
 
   it("removes the line of a note without H1 from right after the frontmatter", async () => {
@@ -113,9 +113,10 @@ describe("Obsidian retire inverse", () => {
     await retireId(v.app, index, entry, undefined, effects);
     const lines = v.bodies.get(NOTE)!.split("\n");
     expect(lines[lines.indexOf("---", 1) + 1]).toContain("Retirado el");
-    const marked = effects.find((e) => e.kind === "note-rewrite")!;
+    // The frontmatter step journals only the block (code review 12 Oct 2026, finding 6).
+    const marked = effects.find((e) => e.kind === "frontmatter-block")!;
     await undoOperation(v.app, op(effects.filter((e) => e.kind === "line")));
-    expect(v.bodies.get(NOTE)).toBe((marked as { after: string }).after);
+    expect(v.bodies.get(NOTE)).toBe(`${(marked as { after: string }).after}No heading here.\n`);
   });
 });
 

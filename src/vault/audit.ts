@@ -13,7 +13,7 @@ import { patchFrontmatter, readFrontmatter } from "./frontmatter-lines";
 import { resolveTemplate } from "./templates";
 import { fileDate } from "./file-date";
 import type { Effect } from "../jd/journal";
-import { movedIdentity } from "./journal";
+import { frontmatterRewrite, movedIdentity } from "./journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
 import type { JdIndex } from "../jd/index";
 
@@ -130,7 +130,7 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
       await app.vault.process(file, (current) => {
         outcome = plan(current);
         if (!outcome.changes) return current;
-        rewrite = { kind: "note-rewrite", path: fix.path, before: current, after: outcome.body };
+        rewrite = frontmatterRewrite(fix.path, current, outcome.body);
         return outcome.body;
       });
     }

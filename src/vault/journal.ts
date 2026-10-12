@@ -1,6 +1,6 @@
 import { type App, type TAbstractFile, TFile, TFolder } from "obsidian";
 import { type Effect, frontmatterConflicts, frontmatterUndoState, isKnownEffect, type Operation, removeInsertedLine } from "../jd/journal";
-import { readFrontmatter, removeFrontmatterProperty, setFrontmatterProperty } from "./frontmatter-lines";
+import { frontmatterBlock, readFrontmatter, removeFrontmatterProperty, setFrontmatterProperty } from "./frontmatter-lines";
 
 export interface UndoOptions {
   /** The user confirmed a preview that warned about entries written before 0.5. */
@@ -24,6 +24,17 @@ export async function undoOperation(app: App, op: Operation, onProgress?: () => 
   }
   if (op.effects.length === 0 && done.length === 0) await onProgress?.();
   return done;
+}
+
+/**
+ * The journal entry of a frontmatter correction: only the frontmatter block when nothing else in
+ * the note changed (the usual case), the whole note otherwise.
+ */
+export function frontmatterRewrite(path: string, before: string, after: string): Effect {
+  const from = frontmatterBlock(before);
+  const to = frontmatterBlock(after);
+  if (before.slice(from.length) === after.slice(to.length)) return { kind: "frontmatter-block", path, before: from, after: to };
+  return { kind: "note-rewrite", path, before, after };
 }
 
 /** First-level child names of a folder, to recognise it after a move. */
@@ -59,6 +70,17 @@ async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<st
         return e.before;
       });
       return `Restored the managed blocks in ${e.path}.`;
+    }
+    case "frontmatter-block": {
+      const file = app.vault.getAbstractFileByPath(e.path);
+      if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
+      // Only the block is compared and restored: edits to the body since then are kept.
+      await app.vault.process(file, (current) => {
+        const block = frontmatterBlock(current);
+        if (block !== e.after) throw new Error(`the frontmatter of ${e.path} was edited after the operation; nothing was restored, review manually`);
+        return e.before + current.slice(block.length);
+      });
+      return `Restored the frontmatter of ${e.path}.`;
     }
     case "created-note": {
       const file = app.vault.getAbstractFileByPath(e.path);
