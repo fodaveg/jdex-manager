@@ -696,6 +696,8 @@ export default class JdexManagerPlugin extends Plugin {
 
   private renaming = false;
   private followingSettingPaths?: Set<string>;
+  /** Folder-setting updates the user declined this session (setting, old path, new path). */
+  private declinedSettingRenames?: Set<string>;
 
   /** Actions that pick "the" note or folder of a number refuse a repeated one (two devices
    *  created it offline): they would mix two IDs. Returns whether it refused. */
@@ -709,7 +711,10 @@ export default class JdexManagerPlugin extends Plugin {
    *  Declining keeps the old path, which the audit then reports as missing. */
   private async followRenamedFolderSettings(oldPath: string, newPath: string): Promise<void> {
     const pending = (this.followingSettingPaths ??= new Set());
-    const renamed = renamedFolderSettings(this.settings, oldPath, newPath).filter((entry) => !pending.has(entry.from));
+    // Obsidian emits one rename per descendant: a declined update is not asked again this session.
+    const declined = (this.declinedSettingRenames ??= new Set());
+    const declineKey = (entry: { key: string; from: string; to: string }) => `${entry.key}\n${entry.from}\n${entry.to}`;
+    const renamed = renamedFolderSettings(this.settings, oldPath, newPath).filter((entry) => !pending.has(entry.from) && !declined.has(declineKey(entry)));
     if (renamed.length === 0) return;
     for (const entry of renamed) pending.add(entry.from);
     try {
@@ -717,7 +722,10 @@ export default class JdexManagerPlugin extends Plugin {
         t().followSettingsBody,
         ...renamed.map((entry) => `${folderSettingName(entry.key)}: ${entry.from} → ${entry.to}`),
       ], t().update);
-      if (!ok) return;
+      if (!ok) {
+        for (const entry of renamed) declined.add(declineKey(entry));
+        return;
+      }
       for (const entry of renamed) if (this.settings[entry.key] === entry.from) this.settings[entry.key] = entry.to;
       this.invalidateIndex();
       await this.saveSettings();
