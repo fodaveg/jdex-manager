@@ -5,6 +5,7 @@ import {
   archiveJdexInboxNote,
   jdexInboxArchiveTarget,
   jdexInboxQueue,
+  jdexZeroTarget,
   moveJdexInboxNote
 } from '../../src/hebra/jdex-inbox-process';
 import type { JdexInboxSummary, JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
@@ -111,6 +112,21 @@ describe('archiveJdexInboxNote', () => {
     });
     await expect(archiveJdexInboxNote(library, markdown, note('n1', 'inbox', 'Suelta'), walk, index, 'YYYY-MM-DD')).rejects.toThrow('cambió antes de moverla');
     expect((await library.noteRead('n1'))).toMatchObject({ folderId: 'inbox', body: '# Edición concurrente\n' });
+  });
+
+  it('archives from an origin that is not the .01 (a content ID of the category)', async () => {
+    const { library, walk: base } = fixture();
+    const contentPath = '20-29 Productos/21 Software/21.11 Hebra';
+    const withContent = buildIndex({ systemRoot: '', jdexFolder: '', notePaths: [], folderPaths: [
+      '20-29 Productos', '20-29 Productos/21 Software', '20-29 Productos/21 Software/21.01 Inbox', '20-29 Productos/21 Software/21.09 Archivo', contentPath
+    ] });
+    const walk: JdexLibraryWalk = { ...base, folderPaths: new Map([...base.folderPaths, ['content', contentPath]]) };
+    library.seedNote(fakeNote('n2', 'content', '# Idea\n', { createdAt: new Date(2026, 8, 28).getTime() }));
+    const ref = note('n2', 'content', 'Idea');
+    expect(jdexInboxArchiveTarget(ref, walk, withContent)).toBeNull();
+    expect(jdexZeroTarget(ref, walk, withContent, '09')?.folderId).toBe('archive');
+    await archiveJdexInboxNote(library, markdown, ref, walk, withContent, 'YYYY-MM');
+    expect(await library.noteRead('n2')).toMatchObject({ folderId: 'archive', title: '2026-09 Idea' });
   });
 
 });

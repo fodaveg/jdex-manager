@@ -123,6 +123,14 @@ import { mountJdexGotoView } from './jdex-goto-view';
 import { retireJdexId } from './jdex-retire';
 import { archiveJdexInboxNote, jdexInboxArchiveTarget, jdexInboxQueue, moveJdexInboxNote } from './jdex-inbox-process';
 import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
+import { registerJdexActiveNoteCommands } from './jdex-active-note-commands';
+export {
+  JDEX_COMMAND_ARCHIVE_NOTE,
+  JDEX_COMMAND_COPY_JD_PATH,
+  JDEX_COMMAND_COPY_NOTE_ID,
+  JDEX_COMMAND_SEARCH_CATEGORY,
+  JDEX_COMMAND_SEND_TO_INBOX
+} from './jdex-active-note-commands';
 import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';
 import { jdexEditorExtension } from './jdex-editor-extension';
@@ -1286,6 +1294,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     name: 'JDex: procesar inbox',
     run: () => openProcessInboxDialog()
   });
+  const offActiveNoteCommands = registerJdexActiveNoteCommands({
+    api,
+    state: () => (walk && index ? { walk, index, jdexFolder: settings.jdexFolder, dateFormat: settings.dateFormat } : null),
+    journal,
+    rebuild,
+    copy: copyToClipboard
+  });
   const offCommandUndo = host.registerCommand({
     id: JDEX_COMMAND_UNDO,
     name: 'JDex: deshacer la última operación',
@@ -1548,6 +1563,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offCommandWrapHeaders();
     offCommandGotoId();
     offCommandProcessInbox();
+    offActiveNoteCommands();
     offCommandUndo();
     offCommandHealth();
     offCommandSystemReport();
