@@ -68,6 +68,7 @@ export interface JdexFolderRenameDeps {
 }
 
 const CHANGED = 'La carpeta cambió desde el aviso; no se ha tocado.';
+const NO_INDEX = 'JDex aún está cargando el índice (o no pudo cargarlo) y no ha cambiado esta carpeta. Vuelve a intentarlo en unos segundos; si sigue, usa «JDex: actualizar el índice del sistema».';
 
 function baseName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
@@ -162,8 +163,12 @@ export function createJdexFolderRenameGuard(deps: JdexFolderRenameDeps): JdexFol
 
   const confirm = async (event: PluginFolderRenameEvent): Promise<boolean> => {
     const snapshot = deps.snapshot();
-    // While the first index is being built nothing is known about this folder.
-    if (!snapshot) return true;
+    // Without an index (a long first walk, or after the rebuild gave up) nothing is known
+    // about this folder: a renumbering must not slip through unasked.
+    if (!snapshot) {
+      deps.ui.notice(NO_INDEX);
+      return false;
+    }
     let warning: ReturnType<typeof jdexRenameWarning>;
     try {
       warning = jdexRenameWarning(event, snapshot.walk, snapshot.index, snapshot.settings);

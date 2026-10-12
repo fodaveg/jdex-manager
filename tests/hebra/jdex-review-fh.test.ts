@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import { JDEX_COMMAND_CREATE_CATEGORY, JDEX_COMMAND_HEALTH, JDEX_COMMAND_UNDO } from '../../src/hebra/jdex-runtime';
 import { guardJdexJournal } from '../../src/hebra/jdex-lifecycle';
+import { createJdexFolderRenameGuard } from '../../src/hebra/jdex-folder-rename';
 import type { JdexJournal } from '../../src/hebra/jdex-journal';
 import { activateJdex } from './support/activate';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
@@ -152,6 +153,23 @@ describe('FH 4: the host echoes our own settings saves (runtime)', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(walks).toHaveBeenCalled();
     await cleanup();
+  });
+});
+
+describe('FH 5: without an index the rename guard does not let a renumbering through', () => {
+  it('refuses the change with a notice while there is no index, and writes nothing', async () => {
+    const notices: string[] = [];
+    const write = vi.fn();
+    const guard = createJdexFolderRenameGuard({
+      ui: { notice: (text: string) => void notices.push(text), openModal: vi.fn() },
+      markdown: { withTitle: (body: string) => body },
+      snapshot: () => null,
+      write,
+      report: vi.fn()
+    });
+    expect(await guard.confirm({ kind: 'folder-rename', folderId: 'f-id', newName: '21.12 Otro número' } as never)).toBe(false);
+    expect(notices.join(' ')).toContain('aún está cargando el índice');
+    expect(write).not.toHaveBeenCalled();
   });
 });
 
