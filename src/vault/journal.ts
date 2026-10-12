@@ -1,6 +1,7 @@
 import { type App, type TAbstractFile, TFile, TFolder } from "obsidian";
 import { type Effect, frontmatterConflicts, frontmatterUndoState, isKnownEffect, type Operation, removeInsertedLine } from "../jd/journal";
 import { frontmatterBlock, readFrontmatter, removeFrontmatterProperty, setFrontmatterProperty } from "./frontmatter-lines";
+import { t } from "../ui/i18n";
 
 export interface UndoOptions {
   /** The user confirmed a preview that warned about entries written before 0.5. */
@@ -76,73 +77,73 @@ function sameMovedItem(e: Extract<Effect, { kind: "moved" }>, target: TAbstractF
 }
 
 async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<string> {
-  if (!isKnownEffect(e)) throw new Error(`a step of kind "${String((e as { kind?: unknown }).kind)}" comes from another version of the plugin and cannot be undone here`);
+  if (!isKnownEffect(e)) throw new Error(t().undoUnknownStep(String((e as { kind?: unknown }).kind)));
   switch (e.kind) {
     case "note-rewrite": {
       const file = app.vault.getAbstractFileByPath(e.path);
-      if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
+      if (!(file instanceof TFile)) throw new Error(t().undoNotANote(e.path));
       await app.vault.process(file, (current) => {
-        if (current !== e.after) throw new Error(`${e.path} was edited after updating its managed blocks; review manually.`);
+        if (current !== e.after) throw new Error(t().undoBlocksEdited(e.path));
         return e.before;
       });
-      return `Restored the managed blocks in ${e.path}.`;
+      return t().undoRestoredBlocks(e.path);
     }
     case "frontmatter-block": {
       const file = app.vault.getAbstractFileByPath(e.path);
-      if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
+      if (!(file instanceof TFile)) throw new Error(t().undoNotANote(e.path));
       // Only the block is compared and restored: edits to the body since then are kept.
       await app.vault.process(file, (current) => {
         const block = frontmatterBlock(current);
-        if (block !== e.after) throw new Error(`the frontmatter of ${e.path} was edited after the operation; nothing was restored, review manually`);
+        if (block !== e.after) throw new Error(t().undoFrontmatterEdited(e.path));
         return e.before + current.slice(block.length);
       });
-      return `Restored the frontmatter of ${e.path}.`;
+      return t().undoRestoredFrontmatter(e.path);
     }
     case "created-note": {
       const file = app.vault.getAbstractFileByPath(e.path);
-      if (!(file instanceof TFile)) return `${e.path} was already gone.`;
+      if (!(file instanceof TFile)) return t().undoAlreadyGone(e.path);
       const current = await app.vault.read(file);
-      if (current !== e.content) throw new Error(`${e.path} was edited after creation; keep it and review manually.`);
+      if (current !== e.content) throw new Error(t().undoNoteEdited(e.path));
       // Always through the file manager so the user's trash preference is respected.
       await app.fileManager.trashFile(file);
-      return `Trashed ${e.path}.`;
+      return t().undoTrashed(e.path);
     }
     case "trashed-note": {
-      if (app.vault.getAbstractFileByPath(e.path)) throw new Error(`${e.path} already exists; cannot restore the duplicate.`);
+      if (app.vault.getAbstractFileByPath(e.path)) throw new Error(t().undoExistsCannotRestore(e.path));
       await app.vault.create(e.path, e.content);
-      return `Restored ${e.path} from the recorded content; the original remains in the trash.`;
+      return t().undoRestoredNote(e.path);
     }
     case "created-folder": {
       const folder = app.vault.getAbstractFileByPath(e.path);
-      if (!(folder instanceof TFolder)) return `${e.path} was already gone.`;
+      if (!(folder instanceof TFolder)) return t().undoAlreadyGone(e.path);
       const empty = folder.children.length === 0;
-      if (!empty) throw new Error(`${e.path} is not empty; keep its content and review manually.`);
+      if (!empty) throw new Error(t().undoFolderNotEmpty(e.path));
       await app.fileManager.trashFile(folder);
-      return `Trashed the empty folder ${e.path}.`;
+      return t().undoTrashedFolder(e.path);
     }
     case "moved": {
       const target = app.vault.getAbstractFileByPath(e.to);
-      if (!target) throw new Error(`${e.to} is not there any more; nothing to move back.`);
+      if (!target) throw new Error(t().undoNotThere(e.to));
       const identity = sameMovedItem(e, target);
-      if (identity === "different") throw new Error(`${e.to} is not the item that was moved there; review manually.`);
-      if (app.vault.getAbstractFileByPath(e.from)) throw new Error(`${e.from} exists again; cannot move ${e.to} back.`);
+      if (identity === "different") throw new Error(t().undoNotTheItem(e.to));
+      if (app.vault.getAbstractFileByPath(e.from)) throw new Error(t().undoExistsAgain(e.from, e.to));
       await app.fileManager.renameFile(target, e.from);
       return identity === "by-size"
-        ? `Moved ${e.to} back to ${e.from}. Its creation time changed after the move (as on Android); it was recognised by its path, name and size.`
-        : `Moved ${e.to} back to ${e.from}.`;
+        ? t().undoMovedBackBySize(e.to, e.from)
+        : t().undoMovedBack(e.to, e.from);
     }
     case "frontmatter": {
       const state = frontmatterUndoState(e);
-      if (state === "unknown-keys") throw new Error(`the frontmatter step of ${e.path} comes from an older version that did not keep which keys it added; review manually or discard the entry`);
-      if (state === "legacy" && !options.confirmedLegacy) throw new Error(`the frontmatter step of ${e.path} comes from an older version; confirm its undo explicitly`);
+      if (state === "unknown-keys") throw new Error(t().undoFmUnknownKeys(e.path));
+      if (state === "legacy" && !options.confirmedLegacy) throw new Error(t().undoFmLegacy(e.path));
       const file = app.vault.getAbstractFileByPath(e.path);
-      if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
+      if (!(file instanceof TFile)) throw new Error(t().undoNotANote(e.path));
       // Never `processFrontMatter`: it drops comments and turns `jd: 21.20` into `21.2`. Only the
       // lines of the recorded keys change, inside `process`, and every key is compared before
       // any is touched: a partial restore would leave the step unretryable.
       await app.vault.process(file, (current) => {
         const changed = e.written ? frontmatterConflicts(e.written, readFrontmatter(current) ?? {}) : [];
-        if (changed.length > 0) throw new Error(`${changed.join(", ")} in ${e.path} changed after the operation; nothing was restored, review manually`);
+        if (changed.length > 0) throw new Error(t().undoFmKeysChanged(changed.join(", "), e.path));
         let next: string | null = current;
         for (const [key, value] of Object.entries(e.previous)) {
           if (next === null) break;
@@ -151,26 +152,26 @@ async function undoEffect(app: App, e: Effect, options: UndoOptions): Promise<st
           else next = null;
         }
         for (const key of e.missingKeys ?? []) if (next !== null) next = removeFrontmatterProperty(next, key);
-        if (next === null) throw new Error(`the frontmatter of ${e.path} cannot be restored line by line (a repeated key, an unusual format or a value that is not text); nothing was restored, review manually`);
+        if (next === null) throw new Error(t().undoFmCannotLineByLine(e.path));
         return next;
       });
       return state === "legacy"
-        ? `Restored the frontmatter of ${e.path} from an older entry; check it for keys the old version did not record.`
-        : `Restored the frontmatter of ${e.path}.`;
+        ? t().undoRestoredFmLegacy(e.path)
+        : t().undoRestoredFrontmatter(e.path);
     }
     case "line": {
       const file = app.vault.getAbstractFileByPath(e.path);
-      if (!(file instanceof TFile)) throw new Error(`${e.path} is not a note any more.`);
+      if (!(file instanceof TFile)) throw new Error(t().undoNotANote(e.path));
       let outcome = "removed" as "removed" | "absent";
       // Inside `process`, so an edit that lands between reading and writing is not overwritten.
       await app.vault.process(file, (content) => {
         const next = removeInsertedLine(content, e.line);
         if ("content" in next) return next.content;
-        if (next.missing === "moved") throw new Error(`the line in ${e.path} is no longer where it was inserted; review manually`);
+        if (next.missing === "moved") throw new Error(t().undoLineMoved(e.path));
         outcome = "absent";
         return content;
       });
-      return outcome === "absent" ? `The line was already gone from ${e.path}.` : `Removed the line from ${e.path}.`;
+      return outcome === "absent" ? t().undoLineGone(e.path) : t().undoLineRemoved(e.path);
     }
   }
 }

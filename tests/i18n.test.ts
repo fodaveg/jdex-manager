@@ -153,11 +153,14 @@ describe("the settings tab", () => {
 describe("no loose interface text in the migrated files", () => {
   // vitest runs from the repository root (as tests/min-app-version.test.ts relies on).
   const root = cwd();
-  const files = ["src/main.ts", "src/vault/flows.ts", ...readdirSync(join(root, "src/ui")).filter((f) => f.endsWith(".ts") && f !== "i18n.ts").map((f) => `src/ui/${f}`)];
+  // Every file of src/vault except settings-paths.ts: it is pure (no i18n import) and its labels are
+  // never shown; the folder-rename dialog names settings with `folderSettingName`.
+  const vaultFiles = readdirSync(join(root, "src/vault")).filter((f) => f.endsWith(".ts") && f !== "settings-paths.ts").map((f) => `src/vault/${f}`);
+  const files = ["src/main.ts", ...vaultFiles,...readdirSync(join(root, "src/ui")).filter((f) => f.endsWith(".ts") && f !== "i18n.ts").map((f) => `src/ui/${f}`)];
   const SINKS = new Set(["setName", "setDesc", "setTitle", "setButtonText", "setPlaceholder", "setText", "addRibbonIcon", "addOption", "confirm", "notice", "setInstructions"]);
   const PROPS = new Set(["name", "desc", "purpose", "text", "title", "placeholder"]);
   /** Literals that are not prose: formats, CSS, markers, note content written into the vault. */
-  const ALLOWED = [/^YYYY-MM(-DD)?$/, /^\n## Padre\n\n- \[\[$/, /^\]\]\n$/];
+  const ALLOWED = [/^YYYY-MM(-DD)?$/, /^\n## Padre\n\n- \[\[$/, /^\]\]\n$/, /^ ?\n<!-- jdex:generado/, /^a, code, pre/, /^internal-link /];
 
   function loose(path: string, content = readFileSync(join(root, path), "utf8")): string[] {
     const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true);

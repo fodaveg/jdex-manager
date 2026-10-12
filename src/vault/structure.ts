@@ -1,6 +1,7 @@
 import { type App, Notice, TFile } from "obsidian";
 import { areaCode, sameSystem, findId, type JdIndex } from "../jd/index";
 import { jdexNoteName } from "../jd/parse";
+import { t } from "../ui/i18n";
 import { appendIndexMarkers, renderSystemIndex, replaceSystemIndex } from "../jd/system-index";
 import type { JdexManagerSettings } from "../settings";
 import { createJdexNote } from "./create";
@@ -56,7 +57,7 @@ export function systemIndexFile(app: App, settings: JdexManagerSettings, index: 
 export async function updateSystemIndex(app: App, settings: JdexManagerSettings, index: JdIndex, addMarkers: boolean, effects?: Effect[], warn: (message: string) => void = (message) => void new Notice(message)): Promise<boolean> {
   const file = systemIndexFile(app, settings, index);
   if (!file) {
-    warn("No note for the system index: set one in the settings or create the 00.00 note.");
+    warn(t().indexNoNote);
     return false;
   }
   const descriptions = new Map<string, string>();
@@ -72,7 +73,7 @@ export async function updateSystemIndex(app: App, settings: JdexManagerSettings,
   const content = await app.vault.read(file);
   const next = transform(content);
   if (next === null) {
-    warn(`${file.basename} has no <!-- jdex:indice --> markers.`);
+    warn(t().indexNoMarkers(file.basename));
     return false;
   }
   if (next === content) return false;

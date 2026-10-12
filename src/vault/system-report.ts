@@ -6,10 +6,11 @@ import { todayIso } from "../jd/template";
 import type { JdexManagerSettings } from "../settings";
 import { collectAudit } from "./audit";
 import { ensureFolder } from "./create";
+import { t } from "../ui/i18n";
 
 /** Writes a new note in the configured 00.02 folder; never replaces an older report. */
 export async function createSystemReport(app: App, settings: JdexManagerSettings, effects: Effect[], date = todayIso()): Promise<TFile> {
-  if (settings.reportsFolder === "") throw new Error("Set the reports folder first (00.02 by convention).");
+  if (settings.reportsFolder === "") throw new Error(t().setReportsFolderFirst);
   const candidates = app.vault.getMarkdownFiles().filter((file) =>
     file.parent?.path === settings.reportsFolder && /^Informe JD - \d{4}-\d{2}-\d{2}(?: \(\d+\))?$/u.test(file.basename)
   ).sort((a, b) => b.stat.ctime - a.stat.ctime || b.stat.mtime - a.stat.mtime || b.basename.localeCompare(a.basename, undefined, { numeric: true }));

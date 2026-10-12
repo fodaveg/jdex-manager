@@ -4,6 +4,8 @@
  * list, describes an undo, merges two copies of the list and trims it. No Obsidian imports.
  */
 
+import type { MessageLanguage } from "./pair";
+
 export type Effect =
   /** A managed block update, guarded against later body edits at undo time. */
   | { kind: "note-rewrite"; path: string; before: string; after: string }
@@ -185,52 +187,58 @@ export function frontmatterConflicts(written: Record<string, unknown>, current: 
 }
 
 /** Lines the undo preview must show before anything runs: old entries and steps this version cannot undo. */
-export function undoWarnings(op: Operation): string[] {
+export function undoWarnings(op: Operation, language: MessageLanguage = "en"): string[] {
+  const es = language === "es";
   const out: string[] = [];
   for (const e of op.effects) {
-    if (!isKnownEffect(e)) out.push(`A step of kind "${String((e as { kind?: unknown }).kind)}" comes from another version and cannot be undone here; the entry stays in the journal.`);
+    if (!isKnownEffect(e)) out.push(es ? `Un paso de tipo «${String((e as { kind?: unknown }).kind)}» viene de otra versión y no se puede deshacer aquí; la entrada sigue en el diario.` : `A step of kind "${String((e as { kind?: unknown }).kind)}" comes from another version and cannot be undone here; the entry stays in the journal.`);
     else if (e.kind === "frontmatter") {
       const state = frontmatterUndoState(e);
-      if (state === "unknown-keys") out.push(`The frontmatter step of ${e.path} comes from an older version that did not keep which keys it added; it cannot be undone and the entry stays in the journal.`);
-      else if (state === "legacy") out.push(`The frontmatter step of ${e.path} comes from an older version: later edits to those keys cannot be detected and keys it added may remain. Confirm only after checking the note.`);
-    } else if (e.kind === "moved" && !e.type) out.push(`The move of ${e.to} comes from an older version and cannot check that it is the same item.`);
+      if (state === "unknown-keys") out.push(es ? `El paso de frontmatter de ${e.path} viene de una versión anterior que no guardaba qué claves añadió; no se puede deshacer y la entrada sigue en el diario.` : `The frontmatter step of ${e.path} comes from an older version that did not keep which keys it added; it cannot be undone and the entry stays in the journal.`);
+      else if (state === "legacy") out.push(es ? `El paso de frontmatter de ${e.path} viene de una versión anterior: no se pueden detectar ediciones posteriores de esas claves y pueden quedar claves que añadió. Confirma solo después de revisar la nota.` : `The frontmatter step of ${e.path} comes from an older version: later edits to those keys cannot be detected and keys it added may remain. Confirm only after checking the note.`);
+    } else if (e.kind === "moved" && !e.type) out.push(es ? `El movimiento de ${e.to} viene de una versión anterior y no puede comprobar que sea el mismo elemento.` : `The move of ${e.to} comes from an older version and cannot check that it is the same item.`);
   }
   return out;
 }
 
 /** One line per effect, in the order the undo will run (last effect first). */
-export function describeUndo(op: Operation): string[] {
+export function describeUndo(op: Operation, language: MessageLanguage = "en"): string[] {
+  const es = language === "es";
   const lines: string[] = [];
   for (const e of [...op.effects].reverse()) {
     switch (e.kind) {
       case "note-rewrite":
-        lines.push(`Restore the managed blocks in ${e.path}.`);
+        lines.push(es ? `Restaurar los bloques gestionados de ${e.path}.` : `Restore the managed blocks in ${e.path}.`);
         break;
       case "frontmatter-block":
-        lines.push(`Restore the frontmatter of ${e.path}.`);
+        lines.push(es ? `Restaurar el frontmatter de ${e.path}.` : `Restore the frontmatter of ${e.path}.`);
         break;
       case "created-note":
-        lines.push(`Move ${e.path} to the trash.`);
+        lines.push(es ? `Mover ${e.path} a la papelera.` : `Move ${e.path} to the trash.`);
         break;
       case "trashed-note":
-        lines.push(`Restore the trashed note ${e.path}.`);
+        lines.push(es ? `Restaurar la nota de la papelera ${e.path}.` : `Restore the trashed note ${e.path}.`);
         break;
       case "created-folder":
-        lines.push(`Move the folder ${e.path} to the trash.`);
+        lines.push(es ? `Mover la carpeta ${e.path} a la papelera.` : `Move the folder ${e.path} to the trash.`);
         break;
       case "moved":
-        lines.push(`Move ${e.to} back to ${e.from}.`);
+        lines.push(es ? `Devolver ${e.to} a ${e.from}.` : `Move ${e.to} back to ${e.from}.`);
         break;
       case "frontmatter": {
         const keys = [...new Set([...Object.keys(e.previous ?? {}), ...(e.missingKeys ?? [])])];
-        lines.push(keys.length > 0 ? `Restore ${keys.join(", ")} in the frontmatter of ${e.path}.` : `Restore the frontmatter of ${e.path} (keys unknown).`);
+        lines.push(
+          es
+            ? keys.length > 0 ? `Restaurar ${keys.join(", ")} en el frontmatter de ${e.path}.` : `Restaurar el frontmatter de ${e.path} (claves desconocidas).`
+            : keys.length > 0 ? `Restore ${keys.join(", ")} in the frontmatter of ${e.path}.` : `Restore the frontmatter of ${e.path} (keys unknown).`,
+        );
         break;
       }
       case "line":
-        lines.push(`Remove the line "${e.line}" from ${e.path}.`);
+        lines.push(es ? `Quitar la línea «${e.line}» de ${e.path}.` : `Remove the line "${e.line}" from ${e.path}.`);
         break;
       default:
-        lines.push(`Unknown step "${String((e as { kind?: unknown }).kind)}": this version cannot undo it.`);
+        lines.push(es ? `Paso desconocido «${String((e as { kind?: unknown }).kind)}»: esta versión no puede deshacerlo.` : `Unknown step "${String((e as { kind?: unknown }).kind)}": this version cannot undo it.`);
     }
   }
   return lines;

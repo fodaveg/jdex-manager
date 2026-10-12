@@ -21,7 +21,7 @@ describe('Obsidian retirement', () => {
     const { v, app, index, entry, renameFile, path } = setup('tipo: archivado\narchivado: 2026-09-01\n');
     const before = v.bodies.get(path);
     const effects: Effect[] = [];
-    await expect(retireId(app, index, entry, undefined, effects)).rejects.toThrow('Ya retirado el 2026-09-01');
+    await expect(retireId(app, index, entry, undefined, effects)).rejects.toThrow('Already retired on 2026-09-01.');
     expect(v.bodies.get(path)).toBe(before);
     expect(renameFile).not.toHaveBeenCalled();
     expect(effects).toEqual([]);

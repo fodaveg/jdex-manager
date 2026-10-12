@@ -4,6 +4,7 @@
  */
 
 import { areaCode, type JdIndex } from "./index";
+import type { MessageLanguage } from "./pair";
 import { parseJdNumber } from "./parse";
 
 /** First area number (10, 20 …) not in use. 00-09 is the system area and is never proposed. Null when full. */
@@ -37,26 +38,28 @@ export function standardZeroNames(category: string): { inbox: { id: string; titl
   };
 }
 
-/** Validates a category number typed by the user against its area. */
-export function validateNewCategory(index: JdIndex, area: number, raw: string): string | null {
+/** Validates a category number typed by the user against its area. `language` defaults to English, the current text. */
+export function validateNewCategory(index: JdIndex, area: number, raw: string, language: MessageLanguage = "en"): string | null {
+  const es = language === "es";
   const n = parseJdNumber(raw.trim());
-  if (!n || n.kind !== "category") return "Type a two-digit category like 22.";
+  if (!n || n.kind !== "category") return es ? "Escribe una categoría de dos dígitos, como 22." : "Type a two-digit category like 22.";
   const value = Number(n.category);
-  if (value < area || value > area + 9) return `The category must be inside ${areaCode(area)}.`;
-  if (value === area) return `${n.category} is the management category of the area.`;
-  if (index.categories.some((c) => c.number === n.category && (c.system ?? "") === (n.system ?? index.system ?? ""))) return `${n.category} already exists.`;
+  if (value < area || value > area + 9) return es ? `La categoría debe estar dentro de ${areaCode(area)}.` : `The category must be inside ${areaCode(area)}.`;
+  if (value === area) return es ? `${n.category} es la categoría de gestión del área.` : `${n.category} is the management category of the area.`;
+  if (index.categories.some((c) => c.number === n.category && (c.system ?? "") === (n.system ?? index.system ?? ""))) return es ? `${n.category} ya existe.` : `${n.category} already exists.`;
   return null;
 }
 
 /** Validates an area typed by the user (`20-29` or `20`). Returns the area number or an error. */
-export function parseNewArea(index: JdIndex, raw: string): { area: number } | { error: string } {
+export function parseNewArea(index: JdIndex, raw: string, language: MessageLanguage = "en"): { area: number } | { error: string } {
+  const es = language === "es";
   const s = raw.trim();
   let area: number | null = null;
   const n = parseJdNumber(s);
   if (n?.kind === "area") area = n.area;
   else if (/^\d0$/.test(s)) area = Number(s);
-  if (area === null) return { error: "Type an area like 20-29." };
-  if (area === 0) return { error: "00-09 is the system area." };
-  if (index.areas.some((a) => a.number === area && (a.system ?? "") === (n?.system ?? index.system ?? ""))) return { error: `${areaCode(area)} already exists.` };
+  if (area === null) return { error: es ? "Escribe un área como 20-29." : "Type an area like 20-29." };
+  if (area === 0) return { error: es ? "00-09 es el área del sistema." : "00-09 is the system area." };
+  if (index.areas.some((a) => a.number === area && (a.system ?? "") === (n?.system ?? index.system ?? ""))) return { error: es ? `${areaCode(area)} ya existe.` : `${areaCode(area)} already exists.` };
   return { area };
 }

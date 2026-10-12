@@ -28,6 +28,7 @@ import {
 } from "../jd/journal";
 import { type JdexManagerSettings, mergeSettings } from "../settings";
 import { undoOperation } from "./journal";
+import { t, uiLanguage } from "../ui/i18n";
 
 /** An effects array that reports every `push`, so flows written for `Effect[]` record as they go. */
 export class RecordingEffects extends Array<Effect> {
@@ -171,14 +172,14 @@ export class JournalStore {
       this.future = { journal: stored.journal, journalRemoved: stored.journalRemoved, journalVersion: stored.journalVersion, journalUnreadable: stored.journalUnreadable };
       this.entries = [];
       this.removed = [];
-      notices.push("The undo journal was written by a newer version of JDex Manager. It is kept as it is; this version will not undo or record operations until you update.");
+      notices.push(t().jnlNewerVersionLoad);
       return notices;
     }
     this.future = null;
     const raw = Array.isArray(stored.journal) ? (stored.journal as unknown[]) : [];
     const valid = raw.filter(isOperation);
     this.unreadable = [...(Array.isArray(stored.journalUnreadable) ? (stored.journalUnreadable as unknown[]) : []), ...raw.filter((entry) => !isOperation(entry))];
-    if (raw.length > valid.length) notices.push(`${raw.length - valid.length} journal entr${raw.length - valid.length === 1 ? "y is" : "ies are"} unreadable; kept in data.json and not offered for undo.`);
+    if (raw.length > valid.length) notices.push(t().jnlUnreadable(raw.length - valid.length));
     this.entries = trimJournal(withJournalIds(valid.filter((op) => op.effects.length > 0))).entries;
     this.removed = Array.isArray(stored.journalRemoved) ? (stored.journalRemoved as unknown[]).filter((id): id is string => typeof id === "string") : [];
     return notices;
@@ -220,8 +221,8 @@ export class JournalStore {
 
   /** Why `op` cannot be undone here, or null. Entries from before 0.5 have no device and are allowed. */
   undoRefusal(op: Operation): string | null {
-    if (this.future) return "The undo journal was written by a newer version of JDex Manager; update the plugin to undo.";
-    if (op.device && op.device !== this.device) return `"${op.label}" was made on another device. Undo it there, or discard the entry from the journal.`;
+    if (this.future) return t().jnlNewerVersionUndo;
+    if (op.device && op.device !== this.device) return t().jnlOtherDevice(op.label);
     return null;
   }
 
@@ -257,7 +258,7 @@ export class JournalStore {
       () => { this.lastSaveError = null; },
       (error: unknown) => {
         this.lastSaveError = error;
-        this.report(`The undo journal could not be saved (${error instanceof Error ? error.message : String(error)}). It is kept in memory and saved with the next change.`);
+        this.report(t().jnlSaveFailed(error instanceof Error ? error.message : String(error)));
       },
     );
     return next;
@@ -282,7 +283,7 @@ export class JournalStore {
     }, async () => {
       await this.saves;
       if (this.lastSaveError instanceof Error) throw this.lastSaveError;
-      if (this.lastSaveError !== null) throw new Error("The undo journal could not be saved.");
+      if (this.lastSaveError !== null) throw new Error(t().jnlSaveFailedShort);
     });
   }
 }
@@ -424,7 +425,7 @@ export async function undoLastOperation(ctx: UndoContext): Promise<string[] | nu
   const journal = ctx.data.journal;
   const op = journal.last();
   if (!op) {
-    ctx.notice("Nothing to undo: the journal is empty.");
+    ctx.notice(t().jnlNothingToUndo);
     return null;
   }
   const refusal = journal.undoRefusal(op);
@@ -433,13 +434,14 @@ export async function undoLastOperation(ctx: UndoContext): Promise<string[] | nu
     return null;
   }
   const id = journalOperationId(op);
-  const warnings = undoWarnings(op);
-  const ok = await ctx.confirm(`Undo "${op.label}"?`, [...describeUndo(op), ...warnings, "Nothing is deleted outright: notes and folders go to the trash."], "Undo");
+  const language = uiLanguage();
+  const warnings = undoWarnings(op, language);
+  const ok = await ctx.confirm(t().jnlUndoTitle(op.label), [...describeUndo(op, language), ...warnings, t().jnlNothingDeletedOutright], t().jnlUndoAction);
   if (!ok) return null;
   return journal.exclusive(async () => {
     const current = journal.last();
     if (!current || journalOperationId(current) !== id) {
-      ctx.notice("The journal changed while you were confirming; nothing was undone. Run undo again to see the current last operation.");
+      ctx.notice(t().jnlChangedUndo);
       return null;
     }
     ctx.shield.start(effectPaths(current));
@@ -449,10 +451,10 @@ export async function undoLastOperation(ctx: UndoContext): Promise<string[] | nu
         if (current.effects.length === 0) journal.remove(id);
         await ctx.data.save();
       }, { confirmedLegacy: warnings.length > 0 });
-      ctx.notice(done.length > 0 ? done.join(" · ") : `"${current.label}" had nothing left to undo.`);
+      ctx.notice(done.length > 0 ? done.join(" · ") : t().jnlNothingLeft(current.label));
       return done;
     } catch (error) {
-      ctx.notice(`Undo stopped: ${error instanceof Error ? error.message : String(error)}. The operation stays in the journal.`);
+      ctx.notice(t().jnlUndoStopped(error instanceof Error ? error.message : String(error)));
       return null;
     } finally {
       ctx.setRenaming(false);
@@ -469,24 +471,21 @@ export async function discardLastOperation(ctx: Pick<UndoContext, "data" | "conf
   const journal = ctx.data.journal;
   const op = journal.last();
   if (!op || journal.readOnly) {
-    ctx.notice(journal.readOnly ? "The undo journal was written by a newer version of JDex Manager; update the plugin to change it." : "Nothing to discard: the journal is empty.");
+    ctx.notice(journal.readOnly ? t().jnlNewerVersionChange : t().jnlNothingToDiscard);
     return false;
   }
   const id = journalOperationId(op);
-  const ok = await ctx.confirm(`Discard "${op.label}" from the journal?`, [
-    "No file changes: the entry is only removed from the undo journal, so the previous operation becomes the last one.",
-    `${op.effects.length} step(s) of this operation will no longer be undoable.`,
-  ], "Discard");
+  const ok = await ctx.confirm(t().jnlDiscardTitle(op.label), [t().jnlDiscardNoFiles, t().jnlDiscardSteps(op.effects.length)], t().jnlDiscardAction);
   if (!ok) return false;
   return journal.exclusive(async () => {
     const current = journal.last();
     if (!current || journalOperationId(current) !== id) {
-      ctx.notice("The journal changed while you were confirming; nothing was discarded.");
+      ctx.notice(t().jnlChangedDiscard);
       return false;
     }
     journal.remove(id);
     await ctx.data.save();
-    ctx.notice(`Discarded "${current.label}" from the journal.`);
+    ctx.notice(t().jnlDiscarded(current.label));
     return true;
   });
 }

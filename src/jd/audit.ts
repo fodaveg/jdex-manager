@@ -6,7 +6,8 @@
  * Deliberately NOT a finding: sub-folders more than one level deep inside an ID. Projects use them.
  */
 
-import { areaCode, areaOfCategory, idIdentityKey, repeatedIdKeys, sameSystem, type IdEntry, type JdIndex } from "./index";
+import { areaCode, areaOfCategory, idIdentityKey, repeatedIdKeys, sameSystem, type IdEntry, type JdIndex, type MalformedEntry } from "./index";
+import type { MessageLanguage } from "./pair";
 import { firstSentence } from "./description";
 import { missingPatternFolders } from "./patterns";
 import { extractJdPrefix, isHeader, isReserved, jdexNoteName, parseJdNumber } from "./parse";
@@ -69,7 +70,7 @@ export interface Finding {
   number?: string;
   /** Vault paths involved; notes end in `.md`, the rest are folders. */
   paths: string[];
-  /** Spanish, one line, for the report. */
+  /** One line for the report. Spanish unless the audit input asks for `language: "en"`. */
   message: string;
   fix?: Fix;
   /** Informative findings do not count as problems. */
@@ -95,6 +96,8 @@ export interface AuditInput {
   folderPaths?: string[];
   /** Subfolder pattern expected inside the IDs of a category; empty = no check. */
   patternFor?: (category: string) => string[];
+  /** Language of the finding messages (the Repair dialog). Omitted = Spanish, the text Hebra shows. */
+  language?: MessageLanguage;
   options?: {
     /** Treat a JDex note without a folder as a problem instead of information. Default false. */
     noteWithoutFolderIsFinding?: boolean;
@@ -145,6 +148,7 @@ function expectedValues(frontmatter: Record<string, unknown>, keys: string[]): R
 export function auditSystem(input: AuditInput): Finding[] {
   const { index, notes, filePaths } = input;
   const findings: Finding[] = [];
+  const en = input.language === "en";
   const contentFolders = index.ids.filter((entry) => {
     if (!entry.folderPath) return false;
     if (isHeaderEntry(entry)) return true;
@@ -184,7 +188,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         kind: "folder-without-note",
         number: entry.id,
         paths: [entry.folderPath],
-        message: `La carpeta ${entry.label} no tiene nota en el JDex.`,
+        message: en ? `The folder ${entry.label} has no JDex note.` : `La carpeta ${entry.label} no tiene nota en el JDex.`,
         ...(input.jdexFolder && title ? { fix: { type: "create-note", path: `${input.jdexFolder}/${noteName}.md`, number: entry.id, ...(entry.system ? { system: entry.system } : {}), title, kind: isHeaderEntry(entry) ? "cabecera" : "id", category: entry.category } } : {}),
       });
     } else if (entry.notePath && !entry.folderPath && !isHeaderEntry(entry)) {
@@ -199,7 +203,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         kind: "note-without-folder",
         number: entry.id,
         paths: [entry.notePath],
-        message: `La nota ${entry.label} no tiene carpeta en el sistema.`,
+        message: en ? `The note ${entry.label} has no folder in the system.` : `La nota ${entry.label} no tiene carpeta en el sistema.`,
         informative: !input.options?.noteWithoutFolderIsFinding,
         ...(path ? { fix: { type: "create-folder", path, paths: [path, ...pattern.map((part) => `${path}/${part}`)] } } : {}),
       });
@@ -223,7 +227,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       kind: "name-mismatch",
       number: entry.id,
       paths: [entry.notePath, entry.folderPath],
-      message: `${entry.id}: la nota se llama «${noteTitle}» y la carpeta «${folderTitle}».`,
+      message: en ? `${entry.id}: the note is called «${noteTitle}» and the folder «${folderTitle}».` : `${entry.id}: la nota se llama «${noteTitle}» y la carpeta «${folderTitle}».`,
       fix: { type: "rename", from: entry.folderPath, to },
     });
   }
@@ -245,7 +249,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       number: expected.jd,
       paths: [note.path],
       message: `${noteName(note.path)}: ${Object.keys(wrong)
-        .map((k) => `${k} debería ser «${wrong[k]}» (es «${asString(fm[k]) ?? "vacío"}»)`)
+        .map((k) => (en ? `${k} should be «${wrong[k]}» (it is «${asString(fm[k]) ?? "empty"}»)` : `${k} debería ser «${wrong[k]}» (es «${asString(fm[k]) ?? "vacío"}»)`))
         .join("; ")}.`,
       fix: { type: "frontmatter", path: note.path, set: wrong, expected: expectedValues(fm, Object.keys(wrong)) },
     });
@@ -262,7 +266,9 @@ export function auditSystem(input: AuditInput): Finding[] {
       kind: "missing-description",
       number: parsed.number.kind === "id" ? parsed.number.id : undefined,
       paths: [note.path],
-      message: proposal ? `${noteName(note.path)}: sin descripción; propuesta «${proposal}».` : `${noteName(note.path)}: sin descripción y sin cuerpo del que sacarla.`,
+      message: en
+        ? proposal ? `${noteName(note.path)}: no description; proposed «${proposal}».` : `${noteName(note.path)}: no description and no body to take one from.`
+        : proposal ? `${noteName(note.path)}: sin descripción; propuesta «${proposal}».` : `${noteName(note.path)}: sin descripción y sin cuerpo del que sacarla.`,
       informative: input.options?.descriptionIsFinding === false,
       ...(proposal ? { fix: { type: "frontmatter", path: note.path, set: { descripcion: proposal }, expected: expectedValues(note.frontmatter ?? {}, ["descripcion"]) } } : {}),
     });
@@ -291,7 +297,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         kind: "duplicate-id",
         number: id,
         paths,
-        message: `${id} está repetido en ${paths.length} ${source}.`,
+        message: en ? `${id} is repeated in ${paths.length} ${source === "notas" ? "notes" : "folders"}.` : `${id} está repetido en ${paths.length} ${source}.`,
         ...(duplicate && original ? { fix: { type: "trash", path: duplicate, identicalTo: original } } : {}),
       });
     }
@@ -313,7 +319,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       kind: "reserved-used-as-content",
       number: entry.id,
       paths: [entry.folderPath, ...content.slice(0, 5)],
-      message: `${entry.label} es un número de gestión y contiene ${content.length} fichero(s) de contenido.`,
+      message: en ? `${entry.label} is a management number and holds ${content.length} content file(s).` : `${entry.label} es un número de gestión y contiene ${content.length} fichero(s) de contenido.`,
       ...(fix ? { fix } : {}),
     });
   }
@@ -328,7 +334,7 @@ export function auditSystem(input: AuditInput): Finding[] {
       kind: "header-with-files",
       number: entry.id,
       paths: [entry.folderPath, ...files.slice(0, 5)],
-      message: `La cabecera ${entry.label} contiene ${files.length} fichero(s); una cabecera solo agrupa.`,
+      message: en ? `The header ${entry.label} holds ${files.length} file(s); a header only groups.` : `La cabecera ${entry.label} contiene ${files.length} fichero(s); una cabecera solo agrupa.`,
       ...(fix ? { fix } : {}),
     });
   }
@@ -341,7 +347,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         kind: "structure-without-note",
         number: area.code,
         paths: [area.path],
-        message: `El área ${area.label} no tiene nota en el JDex.`,
+        message: en ? `The area ${area.label} has no JDex note.` : `El área ${area.label} no tiene nota en el JDex.`,
         ...(input.jdexFolder ? { fix: { type: "create-note", path: `${input.jdexFolder}/${area.label}.md`, number: area.code, ...(area.system ? { system: area.system } : {}), title: area.title, kind: "area", category: "" } } : {}),
       });
     }
@@ -351,7 +357,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         kind: "structure-without-note",
         number: category.number,
         paths: [category.path],
-        message: `La categoría ${category.label} no tiene nota en el JDex.`,
+        message: en ? `The category ${category.label} has no JDex note.` : `La categoría ${category.label} no tiene nota en el JDex.`,
         ...(input.jdexFolder ? { fix: { type: "create-note", path: `${input.jdexFolder}/${category.label}.md`, number: category.number, ...(category.system ? { system: category.system } : {}), title: category.title, kind: "categoria", category: category.number } } : {}),
       });
     }
@@ -371,7 +377,7 @@ export function auditSystem(input: AuditInput): Finding[] {
         kind: "pattern-missing",
         number: entry.id,
         paths: [entry.folderPath],
-        message: `${entry.label} no tiene ${missing.map((m) => m.slice(entry.folderPath!.length + 1)).join(", ")}.`,
+        message: en ? `${entry.label} lacks ${missing.map((m) => m.slice(entry.folderPath!.length + 1)).join(", ")}.` : `${entry.label} no tiene ${missing.map((m) => m.slice(entry.folderPath!.length + 1)).join(", ")}.`,
         informative: true,
         fix: { type: "folders", paths: missing },
       });
@@ -388,16 +394,22 @@ export function auditSystem(input: AuditInput): Finding[] {
       kind: m.wrongDepth ? "misplaced-number" : "out-of-parent",
       number: m.number,
       paths: [m.path],
-      message: `${m.label} está dentro de ${m.parent}, que no es su padre.`,
+      message: en ? `${m.label} sits inside ${m.parent}, which is not its parent.` : `${m.label} está dentro de ${m.parent}, que no es su padre.`,
       ...(target && !occupied && !input.folderPaths?.includes(target) ? { fix: { type: "move", items: [{ from: m.path, to: target }] } } : {}),
     });
   }
 
   for (const entry of index.malformed ?? []) {
-    findings.push({ kind: "malformed-number", paths: [entry.path], message: entry.message });
+    findings.push({ kind: "malformed-number", paths: [entry.path], message: en ? malformedMessageEn(entry) : entry.message });
   }
 
   return findings;
+}
+
+/** English wording of a malformed-number finding; the index stores the Spanish one. */
+function malformedMessageEn(entry: MalformedEntry): string {
+  if (entry.name === undefined) return entry.message;
+  return entry.problem === "square-on-non-zero" ? `${entry.name}: ■ on an ID that does not end in 0.` : `${entry.name}: the ID needs two digits after the dot.`;
 }
 
 function isHeaderEntry(entry: IdEntry): boolean {
@@ -440,6 +452,13 @@ export interface ConfiguredFolders {
   templatesFolder?: string;
 }
 
+const CONFIGURED_FOLDER_LABELS_EN: Record<keyof ConfiguredFolders, string> = {
+  jdexFolder: "The JDex folder",
+  systemRoot: "The system root",
+  reportsFolder: "The reports folder",
+  templatesFolder: "The templates folder",
+};
+
 const CONFIGURED_FOLDER_LABELS: Record<keyof ConfiguredFolders, string> = {
   jdexFolder: "La carpeta JDex",
   systemRoot: "La raíz del sistema",
@@ -449,7 +468,7 @@ const CONFIGURED_FOLDER_LABELS: Record<keyof ConfiguredFolders, string> = {
 
 /** A configured folder that no longer exists (renamed, moved or deleted outside the
  *  plugin): every number would silently drop out of the index. Empty settings are unset. */
-export function missingConfiguredFolders(settings: ConfiguredFolders, folderPaths: readonly string[]): Finding[] {
+export function missingConfiguredFolders(settings: ConfiguredFolders, folderPaths: readonly string[], language: MessageLanguage = "es"): Finding[] {
   const known = new Set(folderPaths);
   const findings: Finding[] = [];
   for (const key of Object.keys(CONFIGURED_FOLDER_LABELS) as (keyof ConfiguredFolders)[]) {
@@ -458,7 +477,7 @@ export function missingConfiguredFolders(settings: ConfiguredFolders, folderPath
     findings.push({
       kind: "missing-folder",
       paths: [path],
-      message: `${CONFIGURED_FOLDER_LABELS[key]} configurada («${path}») no existe: revisa los ajustes.`,
+      message: language === "en" ? `${CONFIGURED_FOLDER_LABELS_EN[key]} configured («${path}») does not exist: check the settings.` : `${CONFIGURED_FOLDER_LABELS[key]} configurada («${path}») no existe: revisa los ajustes.`,
     });
   }
   return findings;

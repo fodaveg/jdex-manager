@@ -39,7 +39,7 @@ import { createSystemReport } from "./vault/system-report";
 import { renamedFolderSettings } from "./vault/settings-paths";
 import { closeTrackedModals } from "./ui/modal-registry";
 import { pickFromModal } from "./ui/suggest-pick";
-import { folderSettingName, t } from "./ui/i18n";
+import { folderSettingName, t, uiLanguage } from "./ui/i18n";
 import { JdexManagerSettingTab } from "./ui/settings-tab";
 import { type FlowPorts, moveToId, sendToZero } from "./vault/flows";
 
@@ -574,7 +574,7 @@ export default class JdexManagerPlugin extends Plugin {
       return;
     }
     try {
-      const { findings, reportPath } = await runAudit(this.app, this.settings);
+      const { findings, reportPath } = await runAudit(this.app, this.settings, uiLanguage());
       this.lastFindings = findings;
       const problems = countProblems(findings);
       this.statusBar?.setText(t().statusFindings(problems));

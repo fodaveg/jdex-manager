@@ -1,6 +1,7 @@
 import { Notice, TFile, type Plugin } from "obsidian";
 import { systemKey, type IdEntry, type JdIndex } from "../jd/index";
 import { entriesByNumber, findJdNumbers } from "../jd/reading-links";
+import { t } from "../ui/i18n";
 
 /** Ancestors whose text is never touched: real links, code, embeds, math and the properties block. */
 const SKIP = "a, code, pre, .internal-embed, .frontmatter, .metadata-container, .math";
@@ -128,7 +129,7 @@ export function registerReadingLinks(plugin: Plugin, ctx: ReadingLinksContext): 
 async function openNumber(plugin: Plugin, ctx: ReadingLinksContext, key: string, newTab: boolean): Promise<void> {
   const entries = entriesByNumber(ctx.index().ids.filter((entry) => entry.notePath)).get(key) ?? [];
   if (entries.length === 0) {
-    new Notice(`${key} is no longer in the index.`);
+    new Notice(t().readingLinkGone(key));
     return;
   }
   let entry: IdEntry | null = entries[0];
@@ -136,7 +137,7 @@ async function openNumber(plugin: Plugin, ctx: ReadingLinksContext, key: string,
   if (!entry?.notePath) return;
   const file = plugin.app.vault.getAbstractFileByPath(entry.notePath);
   if (!(file instanceof TFile)) {
-    new Notice(`${entry.label}: the note is no longer there.`);
+    new Notice(t().readingLinkNoteGone(entry.label));
     return;
   }
   await plugin.app.workspace.getLeaf(newTab ? "tab" : false).openFile(file);
