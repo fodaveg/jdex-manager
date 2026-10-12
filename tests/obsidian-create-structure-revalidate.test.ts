@@ -5,7 +5,7 @@
  * vault at confirm time and reject a number taken under another title.
  */
 import { describe, expect, it, vi } from "vitest";
-import { type App, TFile } from "obsidian";
+import { type App, TFile, TFolder } from "obsidian";
 import { buildIndex, selectCreationSystem } from "../src/jd/index";
 import { DEFAULT_SETTINGS } from "../src/settings";
 import { CreateAreaModal, CreateCategoryModal } from "../src/ui/create-structure";
@@ -25,7 +25,7 @@ const settings = { ...DEFAULT_SETTINGS, jdexFolder: "JDex" };
 const file = (name: string) => Object.assign(new TFile(), { path: `JDex/${name}.md`, name: `${name}.md`, basename: name, extension: "md" });
 
 function fixture() {
-  const files = [file("20-29 Productos"), file("21 Software"), file("21.11 Algo")];
+  const files: (TFile | TFolder)[] = [Object.assign(new TFolder(), { path: "JDex", name: "JDex" }), file("20-29 Productos"), file("21 Software"), file("21.11 Algo")];
   const create = vi.fn(async (path: string, content: string) => {
     const created = Object.assign(new TFile(), { path, content, name: path.slice(path.lastIndexOf("/") + 1), extension: "md" });
     files.push(created);

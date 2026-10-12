@@ -1,5 +1,5 @@
 import { type App, normalizePath, Notice, TFile, TFolder } from "obsidian";
-import { auditSystem, isConflictCopyPath, type Finding, type Fix, type NoteMeta } from "../jd/audit";
+import { auditSystem, isConflictCopyPath, missingConfiguredFolders, type Finding, type Fix, type NoteMeta } from "../jd/audit";
 import { renderReport, reportFileName } from "../jd/audit-report";
 import { relativeTo } from "../jd/detect";
 import { renderTemplate, todayIso } from "../jd/template";
@@ -69,6 +69,7 @@ export async function collectAudit(app: App, settings: JdexManagerSettings): Pro
   findings.push(...staleInboxFindings(index, app.vault.getAllLoadedFiles().filter((file): file is TFile => file instanceof TFile).map((file) => ({
     path: file.path, folderPath: file.path.slice(0, file.path.lastIndexOf('/')), createdAt: file.stat.ctime,
   })), settings.inboxStaleDays, Date.now()));
+  findings.unshift(...missingConfiguredFolders(settings, allFolderPaths(app)));
   return { index, findings, filePaths };
 }
 

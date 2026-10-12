@@ -38,6 +38,7 @@ export {
   auditSystem,
   countProblems,
   isConflictCopyPath,
+  missingConfiguredFolders,
   FINDING_KINDS,
   expectedFrontmatter,
   // audit-report.ts — títulos legibles de cada tipo de hallazgo.

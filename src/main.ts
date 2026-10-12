@@ -34,6 +34,7 @@ import { scanVault } from "./vault/scan";
 import { writeBuiltinTemplates } from "./vault/templates";
 import { maintainSystem } from "./vault/maintenance";
 import { createSystemReport } from "./vault/system-report";
+import { renamedFolderSettings } from "./vault/settings-paths";
 
 export default class JdexManagerPlugin extends Plugin {
   settings: JdexManagerSettings = mergeSettings(null);
@@ -586,10 +587,35 @@ export default class JdexManagerPlugin extends Plugin {
   }
 
   private renaming = false;
+  private readonly followingSettingPaths = new Set<string>();
+
+  /** A renamed folder (or ancestor) that a folder setting points at: propose following it.
+   *  Declining keeps the old path, which the audit then reports as missing. */
+  private async followRenamedFolderSettings(oldPath: string, newPath: string): Promise<void> {
+    const renamed = renamedFolderSettings(this.settings, oldPath, newPath).filter((entry) => !this.followingSettingPaths.has(entry.from));
+    if (renamed.length === 0) return;
+    for (const entry of renamed) this.followingSettingPaths.add(entry.from);
+    try {
+      const ok = await confirm(this.app, "Update folder settings?", [
+        "A folder used by the plugin settings was renamed or moved:",
+        ...renamed.map((entry) => `${entry.label}: ${entry.from} → ${entry.to}`),
+      ], "Update");
+      if (!ok) return;
+      for (const entry of renamed) if (this.settings[entry.key] === entry.from) this.settings[entry.key] = entry.to;
+      this.invalidateIndex();
+      await this.saveSettings();
+      this.refreshInboxCount();
+      this.refreshWhere();
+    } finally {
+      for (const entry of renamed) this.followingSettingPaths.delete(entry.from);
+    }
+  }
 
   /** Rename in pairs, the "never renumber" warning and the moved-category warning. */
   async onRename(file: TAbstractFile, oldPath: string): Promise<void> {
-    if (this.renaming || this.settings.jdexFolder === "") return;
+    if (this.renaming) return;
+    if (file instanceof TFolder) await this.followRenamedFolderSettings(oldPath, file.path);
+    if (this.settings.jdexFolder === "") return;
     const index = scanVault(this.app, this.settings);
     const action = pairAction({ oldPath, newPath: file.path, isFolder: file instanceof TFolder }, index, this.settings);
     if (action.type === "unnumbered" || action.type === "renumbered") {

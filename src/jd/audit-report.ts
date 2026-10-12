@@ -6,6 +6,7 @@
 import { countProblems, FINDING_KINDS, type Finding, type FindingKind } from "./audit";
 
 export const KIND_TITLES: Record<FindingKind, string> = {
+  "missing-folder": "Carpetas configuradas que no existen",
   "folder-without-note": "Carpetas con ID sin nota en el JDex",
   "name-mismatch": "Nota y carpeta con nombre distinto",
   "frontmatter-mismatch": "Frontmatter que no coincide con el nombre o la posición",

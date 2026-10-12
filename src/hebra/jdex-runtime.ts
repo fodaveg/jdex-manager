@@ -59,6 +59,7 @@ import {
   countProblems,
   headerEntries,
   locate,
+  missingConfiguredFolders,
   todayIso,
   pairAction,
   extractJdPrefix,
@@ -89,6 +90,13 @@ import {
 import { mountJdexAuditView } from './jdex-audit-view';
 import { mountJdexSettingsPanel } from './jdex-settings-panel';
 import { autodetectJdexSettings, loadJdexSettings, persistJdexSettings } from './settings';
+import {
+  followedFolderNotice,
+  followTrackedFolders,
+  loadTrackedFolderIds,
+  persistTrackedFolderIds,
+  TRACKED_FOLDER_KEYS
+} from './jdex-folder-tracking';
 import {
   mountCreateAreaDialog,
   mountCreateCategoryDialog,
@@ -183,6 +191,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   const host = api.ui;
   await new Promise<void>((resolve) => host.onReady(resolve));
   let settings = await loadJdexSettings(api.storage.settings);
+  let folderIds = await loadTrackedFolderIds(api.storage.settings);
   const journal = await createJdexJournal(api.vault, api.storage.settings);
 
   let walk: JdexLibraryWalk | null = null;
@@ -321,6 +330,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     auditInput.patternFor = (category) => patternFor(settings, category);
     auditInput.jdexFolder = settings.jdexFolder;
     findings = auditSystem(auditInput);
+    findings.unshift(...missingConfiguredFolders(settings, [...walk.folderPaths.values()]));
     findings.push(...staleInboxFindings(index, walk.systemNotes.flatMap((note) => {
       const folderPath = walk!.folderPaths.get(note.folderId);
       return folderPath && note.createdAt !== undefined ? [{ path: note.path, folderPath, createdAt: note.createdAt }] : [];
@@ -354,6 +364,16 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     const folders = (await api.vault.foldersList()).filter((folder) => folder.id !== rootFolderId);
     if (disposed) return;
     const paths = jdexFolderPaths(folders, rootFolderId);
+    const followed = followTrackedFolders(settings, folderIds, paths);
+    if (followed.changed) {
+      settings = followed.settings;
+      folderIds = followed.ids;
+      for (const moved of followed.moved) host.notice(followedFolderNotice(moved));
+      if (followed.moved.length > 0) {
+        await persistJdexSettings(api.storage.settings, settings).catch((error: unknown) => report(error, 'guardar-ajustes'));
+      }
+      await persistTrackedFolderIds(api.storage.settings, folderIds).catch((error: unknown) => report(error, 'guardar-ajustes'));
+    }
     const { settings: autodetected, changed } = autodetectJdexSettings(settings, [
       ...paths.values()
     ]);
@@ -363,7 +383,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         report(error, 'guardar-ajustes')
       );
     }
-    const nextWalk = await walkJdexLibrary(api.vault, folders, settings.systemRoot, rootFolderId, paths);
+    const nextWalk = await walkJdexLibrary(api.vault, folders, settings.systemRoot, rootFolderId, paths, settings.jdexFolder);
     // Con el módulo apagado mientras leía, nada de escribir estado ni de pintar.
     if (disposed) return;
     if (gen !== generation) return latestRebuild;
@@ -1586,6 +1606,8 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     mountJdexSettingsPanel(el, {
       get: () => settings,
       save: (next) => {
+        // A path changed by hand stops following the folder it pointed at before.
+        for (const key of TRACKED_FOLDER_KEYS) if (next[key] !== settings[key]) delete folderIds[key];
         settings = next;
         void persistJdexSettings(api.storage.settings, settings).catch((error: unknown) =>
           report(error, 'guardar-ajustes')

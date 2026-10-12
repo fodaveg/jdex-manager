@@ -14,6 +14,7 @@ import { titleForCompare } from "./title";
 import { filesByFolder } from "./path-index";
 
 export type FindingKind =
+  | "missing-folder"
   | "folder-without-note"
   | "note-without-folder"
   | "name-mismatch"
@@ -30,6 +31,7 @@ export type FindingKind =
   | "inbox-stale";
 
 export const FINDING_KINDS: FindingKind[] = [
+  "missing-folder",
   "folder-without-note",
   "name-mismatch",
   "frontmatter-mismatch",
@@ -423,6 +425,38 @@ export function expectedFrontmatter(
   const category = index.categories.find((c) => c.number === number.category && sameSystem(c, number))?.label;
   if (category) out.categoria = category;
   return out;
+}
+
+/** Folder settings the hosts read by path. */
+export interface ConfiguredFolders {
+  jdexFolder?: string;
+  systemRoot?: string;
+  reportsFolder?: string;
+  templatesFolder?: string;
+}
+
+const CONFIGURED_FOLDER_LABELS: Record<keyof ConfiguredFolders, string> = {
+  jdexFolder: "La carpeta JDex",
+  systemRoot: "La raíz del sistema",
+  reportsFolder: "La carpeta de informes",
+  templatesFolder: "La carpeta de plantillas",
+};
+
+/** A configured folder that no longer exists (renamed, moved or deleted outside the
+ *  plugin): every number would silently drop out of the index. Empty settings are unset. */
+export function missingConfiguredFolders(settings: ConfiguredFolders, folderPaths: readonly string[]): Finding[] {
+  const known = new Set(folderPaths);
+  const findings: Finding[] = [];
+  for (const key of Object.keys(CONFIGURED_FOLDER_LABELS) as (keyof ConfiguredFolders)[]) {
+    const path = settings[key];
+    if (!path || known.has(path)) continue;
+    findings.push({
+      kind: "missing-folder",
+      paths: [path],
+      message: `${CONFIGURED_FOLDER_LABELS[key]} configurada («${path}») no existe: revisa los ajustes.`,
+    });
+  }
+  return findings;
 }
 
 /** Number of findings that count as problems (informative ones excluded). */

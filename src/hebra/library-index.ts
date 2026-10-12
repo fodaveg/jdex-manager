@@ -195,7 +195,10 @@ export async function walkJdexLibrary(
   allFolders: readonly PluginFolder[],
   systemRoot: string,
   rootFolderId: string,
-  knownFolderPaths?: ReadonlyMap<string, string>
+  knownFolderPaths?: ReadonlyMap<string, string>,
+  /** The JDex folder is walked even when it lies outside `systemRoot`: it is where the
+   *  index reads its notes from. */
+  jdexFolder = ''
 ): Promise<JdexLibraryWalk> {
   // La raíz de la biblioteca no es una carpeta más (Hebra no la lista; el host falso de
   // la API sí): se recorre aparte, así que nunca entra dos veces.
@@ -205,6 +208,9 @@ export async function walkJdexLibrary(
   const underRoot = folders.filter(
     (folder) => relativeTo(systemRoot, folderPaths.get(folder.id) ?? '') !== null
   );
+  const jdexOutside = jdexFolder === '' || relativeTo(systemRoot, jdexFolder) !== null
+    ? undefined
+    : folders.find((folder) => folderPaths.get(folder.id) === jdexFolder);
   const systemFolderPaths = underRoot.map((folder) => folderPaths.get(folder.id)!);
   const systemNotes: JdexNoteRef[] = [];
   // Solo si la raíz de la biblioteca cae bajo `systemRoot`.
@@ -214,6 +220,7 @@ export async function walkJdexLibrary(
   for (const folder of underRoot) {
     systemNotes.push(...(await directNotesOf(library, folder.id, folderPaths.get(folder.id)!)));
   }
+  if (jdexOutside) systemNotes.push(...(await directNotesOf(library, jdexOutside.id, jdexFolder)));
   const sortedNotes = sortJdexNotes(systemNotes);
   const noteIdByPath = indexNotePaths(sortedNotes);
   return { rootFolderId, folderPaths, folderIdByPath, noteIdByPath, systemFolderPaths, systemNotes: sortedNotes };
@@ -412,7 +419,8 @@ export async function applyJdexNoteChanges(
       const folderId = summary.folderId;
       const folderPath = folderId === walk.rootFolderId ? '' : walk.folderPaths.get(folderId);
       if (folderPath === undefined) return { kind: 'rebuild', reason: 'unknown-folder' };
-      if (relativeTo(settings.systemRoot, folderPath) !== null) {
+      // Same membership as the walk: under the system root, or directly in the JDex folder.
+      if (relativeTo(settings.systemRoot, folderPath) !== null || (jdexFolderId !== null && folderId === jdexFolderId)) {
         const title = summary.title.normalize('NFC');
         next = {
           id,
