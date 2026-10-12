@@ -3,6 +3,7 @@ import type { IdEntry, JdIndex } from "../jd/index";
 import { insertAfterH1, retirePlan } from "../jd/retire";
 import { todayIso } from "../jd/template";
 import type { Effect } from "../jd/journal";
+import { movedIdentity } from "./journal";
 
 /** Applies a retire plan: marks the live note, moves its folder, then writes the line. Records what it did in `effects`. */
 export async function retireId(app: App, index: JdIndex, entry: IdEntry, successor?: string, effects: Effect[] = []): Promise<string[]> {
@@ -20,13 +21,13 @@ export async function retireId(app: App, index: JdIndex, entry: IdEntry, success
       fm[key] = value;
     }
   });
-  effects.push({ kind: "frontmatter", path: plan.notePath, previous });
+  effects.push({ kind: "frontmatter", path: plan.notePath, previous, written: { ...plan.frontmatter } });
   if (plan.move) {
     const folder = app.vault.getAbstractFileByPath(plan.move.from);
     if (!folder) throw new Error(`${plan.move.from} no longer exists.`);
     if (app.vault.getAbstractFileByPath(plan.move.to)) throw new Error(`${plan.move.to} already exists.`);
     await app.fileManager.renameFile(folder, plan.move.to);
-    effects.push({ kind: "moved", from: plan.move.from, to: plan.move.to });
+    effects.push({ kind: "moved", from: plan.move.from, to: plan.move.to, ...movedIdentity(folder) });
     notes.push(`Folder moved to ${plan.move.to}`);
   } else if (plan.moveProblem) notes.push(plan.moveProblem);
   await app.vault.process(note, (content) => insertAfterH1(content, plan.line));

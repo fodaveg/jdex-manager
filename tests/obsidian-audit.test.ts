@@ -236,7 +236,7 @@ describe("Obsidian audit fixes", () => {
     expect(fm.jd).toBe("21.22");
     expect(fm.tipo).toBe("archivado");
     expect(effects).toHaveLength(1);
-    expect(effects[0]).toEqual({ kind: "frontmatter", path, previous: { jd: "wrong" } });
+    expect(effects[0]).toEqual({ kind: "frontmatter", path, previous: { jd: "wrong" }, written: { jd: "21.22" } });
     expect(ui.messages.join(" ")).toContain("descripcion porque cambió desde la auditoría");
   });
 

@@ -10,6 +10,7 @@ import { allFolderPaths, scanVault } from "./scan";
 import { ensureFolder } from "./create";
 import { resolveTemplate } from "./templates";
 import { durableEffect, type Effect } from "../jd/journal";
+import { movedIdentity } from "./journal";
 import { staleInboxFindings } from "../jd/inbox-stale";
 import type { JdIndex } from "../jd/index";
 
@@ -109,6 +110,7 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
     const file = app.vault.getAbstractFileByPath(fix.path);
     if (!(file instanceof TFile)) throw new Error(`${fix.path} no es una nota.`);
     const previous: Record<string, unknown> = {};
+    const written: Record<string, unknown> = {};
     const skipped: string[] = [];
     await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       for (const [key, value] of Object.entries(fix.set)) {
@@ -117,10 +119,11 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
           continue;
         }
         previous[key] = fm[key];
+        written[key] = value;
         fm[key] = value;
       }
     });
-    if (Object.keys(previous).length > 0) effects?.push(durableEffect({ kind: "frontmatter", path: fix.path, previous }));
+    if (Object.keys(previous).length > 0) effects?.push(durableEffect({ kind: "frontmatter", path: fix.path, previous, written }));
     if (skipped.length > 0) new Notice(`${fix.path}: se omitió ${skipped.join(", ")} porque cambió desde la auditoría.`);
     return;
   }
@@ -166,6 +169,6 @@ export async function applyFix(app: App, fix: Fix, effects?: Effect[], settings?
     if (!target) throw new Error(`${item.from} ya no existe.`);
     if (app.vault.getAbstractFileByPath(item.to)) throw new Error(`${item.to} ya existe.`);
     await app.fileManager.renameFile(target, item.to);
-    effects?.push({ kind: "moved", from: item.from, to: item.to });
+    effects?.push({ kind: "moved", from: item.from, to: item.to, ...movedIdentity(target) });
   }
 }
