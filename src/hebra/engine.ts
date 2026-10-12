@@ -42,6 +42,8 @@ export {
   expectedFrontmatter,
   // audit-report.ts — títulos legibles de cada tipo de hallazgo.
   KIND_TITLES,
+  describeFix,
+  describeFixSide,
   reportFileName,
   // settings.ts — ajustes del motor y sus valores por defecto.
   DEFAULT_SETTINGS,
