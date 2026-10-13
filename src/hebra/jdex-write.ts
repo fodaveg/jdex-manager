@@ -9,7 +9,7 @@
  * Hebra deriva el título dentro de `notesRewriteBatch` conservando el guardado cuando el
  * cuerpo nuevo no da ninguno (`deriveNoteKeepingTitle`): el plugin ya no lo calcula.
  */
-import type { PluginNote, PluginNoteRewrite, PluginVault } from 'hebra-plugin-api';
+import type { PluginNote, PluginNoteRewrite, PluginVault } from 'hebra-plugin-api/v2';
 import { JdexJournalSaveError } from './jdex-journal';
 
 /** Lo que usa este fichero del `vault` de la API. */

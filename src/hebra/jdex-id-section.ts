@@ -7,7 +7,7 @@
  * (JSDoc de `LibraryContextPanel.svelte`): `notesPage`/`filesPage` del folder del ID
  * son dos consultas nuevas, nunca proporcionales al tamaño de la biblioteca.
  */
-import type { PluginActiveNote, PluginVault } from 'hebra-plugin-api';
+import type { PluginActiveNote, PluginVault } from 'hebra-plugin-api/v2';
 import { childrenOf, childrenPlus, locate, sameSystem, type IdEntry, type JdIndex, type Location } from './engine';
 import {
   jdexFrontmatterString,

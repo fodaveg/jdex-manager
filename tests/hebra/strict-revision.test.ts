@@ -9,7 +9,7 @@
  *
  * The fake vault hashes the body (host `sha256HexOf`), so the first scenario is real.
  */
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIndex, type IndexInput } from '../../src/hebra/engine';
 import { createJdexFolderRenameGuard } from '../../src/hebra/jdex-folder-rename';
@@ -49,12 +49,13 @@ describe.each(Object.entries(races))('strictRevision, race «%s»', (_name, race
     const vault = new FakeJdexVault();
     vault.seedNote(fakeNote('n1', 'f1', '# Antes\n'));
     vault.seedFolder(fakeFolder('f1', null, '21.11 Antes'));
-    const journal = await createJdexJournal(vault, createFakePluginApi().api.storage.settings);
-    return { vault, journal };
+    const storage = createFakePluginApiV2().api.storage.settings;
+    const journal = await createJdexJournal(vault, storage);
+    return { vault, storage, journal };
   }
 
   it('journal.notesRewriteBatch: the write loses the race and nothing is journaled', async () => {
-    const { vault, journal } = await journalSetup();
+    const { vault, storage, journal } = await journalSetup();
     raceBeforeNextRewrite(vault, 'n1', race);
     await journal.run('fix', 'Editar', async (tracked) => {
       const note = (await tracked.noteRead('n1'))!;
@@ -64,6 +65,21 @@ describe.each(Object.entries(races))('strictRevision, race «%s»', (_name, race
     });
     expect((await vault.noteRead('n1'))?.body).not.toBe('# Mío\n');
     expect(journal.entries()).toHaveLength(0);
+    expect((await createJdexJournal(vault, storage)).entries()).toHaveLength(0);
+  });
+
+  it('a stale first step does not hide a later successful step in the same operation', async () => {
+    const { vault, storage, journal } = await journalSetup();
+    raceBeforeNextRewrite(vault, 'n1', race);
+    await journal.run('fix', 'Retry after stale', async (tracked) => {
+      const before = (await tracked.noteRead('n1'))!;
+      expect((await tracked.notesRewriteBatch([{ id: 'n1', body: '# Lost\n', expected: before.revision }])).stale).toEqual(['n1']);
+      const current = (await tracked.noteRead('n1'))!;
+      expect((await tracked.notesRewriteBatch([{ id: 'n1', body: '# Final\n', expected: current.revision }])).written).toEqual(['n1']);
+    });
+    expect(journal.entries()).toHaveLength(1);
+    expect(journal.entries()[0].effects).toMatchObject([{ kind: 'note-rewrite', after: '# Final\n' }]);
+    expect((await createJdexJournal(vault, storage)).entries()).toHaveLength(1);
   });
 
   it('journal.noteSave: refuses to save over the concurrent change', async () => {
@@ -110,7 +126,7 @@ describe.each(Object.entries(races))('strictRevision, race «%s»', (_name, race
     const notice = vi.fn();
     const guard = createJdexFolderRenameGuard({
       ui: { openModal: vi.fn(), notice },
-      markdown: createFakePluginApi().api.markdown,
+      markdown: createFakePluginApiV2().api.markdown,
       snapshot: () => ({ walk, index, settings: { jdexFolder: '00.00 JDex', systemRoot: '', renamePairsWithoutAsking: true } }),
       write: async (_label, action) => action(vault),
       report: (error) => { throw error; }
@@ -133,7 +149,7 @@ describe.each(Object.entries(races))('strictRevision, race «%s»', (_name, race
     vault.seedNote(fakeNote('n1', 'inbox', '# Suelta\n\nContenido.\n', { createdAt: new Date(2026, 8, 28).getTime() }));
     raceBeforeNextRewrite(vault, 'n1', race);
     const move = vi.spyOn(vault, 'noteMoveIfUnchanged');
-    await expect(archiveJdexInboxNote(vault, createFakePluginApi().api.markdown, ref, walk, index, 'YYYY-MM')).rejects.toThrow('cambió antes de fecharla');
+    await expect(archiveJdexInboxNote(vault, createFakePluginApiV2().api.markdown, ref, walk, index, 'YYYY-MM')).rejects.toThrow('cambió antes de fecharla');
     expect(move).not.toHaveBeenCalled();
     expect(vault.peek('n1').folderId).toBe('inbox');
   });

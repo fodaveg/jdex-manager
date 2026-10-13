@@ -2,11 +2,11 @@
 //
 // Lo que `activateJdex` hace SOLO porque ahora habla con `HebraPluginApi` (en Hebra lo hacía
 // `LibraryApp.svelte` por su cuenta y no se probaba aquí): la consulta de búsqueda que se
-// pasa a `workspace.openSearch`, la guardia de renombrado de `workspace`, la extensión del
-// editor (`editor.registerExtension`, que puede rechazarse), los ajustes por
+// pasa a `workspace.openSearch`, la guardia de renombrado de `workspace`, los proveedores
+// declarativos del editor (que pueden rechazarse), los ajustes por
 // `storage.settings`, el selector de carpeta de `ui.pickFolder`, el ajuste de fechas ISO de
 // `env` y la entrada `activate` de `main.ts`.
-import type { PluginFolder } from 'hebra-plugin-api';
+import type { PluginFolder } from 'hebra-plugin-api/v2';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activate } from '../../src/hebra/main';
 import {
@@ -125,21 +125,23 @@ describe('guardia de renombrado (workspace.onBeforeFolderRename)', () => {
   });
 });
 
-describe('extensión del editor (editor.registerExtension)', () => {
-  it('con la capacidad «editor» declarada, se registra una extensión', async () => {
+describe('proveedores declarativos del editor', () => {
+  it('con la capacidad «editor» declarada, registra decoración y completado', async () => {
     const { vault } = buildFixture();
     const { api, fake } = await createJdexTestApi({ vault });
     await activateJdex(api);
-    expect(fake.recorded.extensions).toHaveLength(1);
+    await fake.settle();
+    expect(fake.editor.providers()).toEqual({ decorations: ['jdex-numbers'], completions: ['jdex-ids'] });
   });
 
   it('si Hebra la rechaza, el plugin sigue activo, sin números clicables', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { vault } = buildFixture();
-    // Sin «editor» declarado, el host falso rechaza igual que `extension-rechazada`.
+    // Sin «editor» declarado, el host falso rechaza el registro.
     const { api, fake } = await createJdexTestApi({ vault, capabilities: ['vault.read', 'vault.write'] });
     const cleanup = await activateJdex(api);
-    expect(fake.recorded.extensions).toHaveLength(0);
+    await fake.settle();
+    expect(fake.editor.providers()).toEqual({ decorations: [], completions: [] });
     expect(fake.recorded.commands.length).toBeGreaterThan(0);
     expect(errors).toHaveBeenCalledWith('[jdex] extension-del-editor', expect.anything());
     await cleanup();
@@ -241,9 +243,9 @@ describe('fechas de la sección del ID (env.isoDates)', () => {
     const date = () => el.querySelector('.hebra-jdex-section-row small')?.textContent;
     await vi.waitFor(() => expect(date()).toBe('03/10/2026'));
 
-    fake.setIsoDates(true);
+    fake.host.setIsoDates(true);
     await vi.waitFor(() => expect(date()).toBe('2026-10-03'));
-    fake.setIsoDates(false);
+    fake.host.setIsoDates(false);
     await vi.waitFor(() => expect(date()).toBe('03/10/2026'));
   });
 });
@@ -257,7 +259,8 @@ describe('main.ts', () => {
     expect(fake.recorded.commands.length).toBeGreaterThanOrEqual(15);
     expect(fake.recorded.views).toHaveLength(2);
     expect(fake.recorded.settingsPanels).toHaveLength(1);
-    expect(fake.recorded.extensions).toHaveLength(1);
+    await fake.settle();
+    expect(fake.editor.providers()).toEqual({ decorations: ['jdex-numbers'], completions: ['jdex-ids'] });
     expect(fake.recorded.statusBarItems.map((item) => item.id).sort()).toEqual([
       'jdex-audit',
       'jdex-inbox'
@@ -267,7 +270,8 @@ describe('main.ts', () => {
     expect(fake.recorded.commands).toHaveLength(0);
     expect(fake.recorded.views).toHaveLength(0);
     expect(fake.recorded.settingsPanels).toHaveLength(0);
-    expect(fake.recorded.extensions).toHaveLength(0);
+    await fake.settle();
+    expect(fake.editor.providers()).toEqual({ decorations: [], completions: [] });
     expect(fake.recorded.statusBarItems).toHaveLength(0);
     expect(workspace.guardCount).toBe(0);
   });

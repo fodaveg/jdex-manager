@@ -1,4 +1,4 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import {
@@ -13,7 +13,7 @@ import {
  *  (`hebra.library-v1.module.jdex-manager.settings:<libraryId>`) y el aislamiento entre
  *  bibliotecas son de la fachada de Hebra (`createPluginStorage`), no del plugin. */
 function memoryStorage() {
-  return createFakePluginApi().api.storage.settings;
+  return createFakePluginApiV2().api.storage.settings;
 }
 
 describe('loadJdexSettings / persistJdexSettings', () => {

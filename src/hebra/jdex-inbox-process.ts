@@ -8,7 +8,7 @@
  * no tienen función propia aquí: la vista (`jdex-inbox-process-view.ts`) las resuelve
  * sola.
  */
-import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
+import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
 import { datedName, idFolderOfPath, sameSystem, zeroOf, type DateFormat, type IdEntry, type JdIndex } from './engine';
 import { ensureJdexFolder } from './jdex-create-write';
 import {

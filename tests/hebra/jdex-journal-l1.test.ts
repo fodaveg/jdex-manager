@@ -1,12 +1,12 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { createJdexJournal, JdexJournalSaveError, jdexDeviceId, type JdexJournalEffect } from '../../src/hebra/jdex-journal';
 import { persistJdexSettings } from '../../src/hebra/settings';
 import { DEFAULT_SETTINGS, JOURNAL_VERSION, type Operation } from '../../src/hebra/engine';
-import { FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
+import { FakeJdexVault, fakeDeviceExtension, fakeFolder, fakeNote } from './support/fakes';
 
 function storageOf() {
-  const base = createFakePluginApi().api.storage.settings;
+  const base = createFakePluginApiV2().api.storage.settings;
   // Like a real store: what is saved is a copy, not the live journal objects.
   const save = vi.fn((value: unknown) => base.save(JSON.parse(JSON.stringify(value)) as unknown));
   return { storage: { load: <T>() => base.load<T>(), save }, save };
@@ -115,7 +115,7 @@ describe('Hebra settings and journal changed elsewhere', () => {
   });
 
   it('keeps a stable device id in device storage', () => {
-    const device = createFakePluginApi().api.storage.device;
+    const device = createFakePluginApiV2({ extensions: fakeDeviceExtension() }).api.storage.device;
     expect(jdexDeviceId(device)).toBe(jdexDeviceId(device));
   });
 });

@@ -1,5 +1,5 @@
 /** Creates a fresh health note, using the same report engine and counting notes and files. */
-import type { PluginNote, PluginVault } from 'hebra-plugin-api';
+import type { PluginNote, PluginVault } from 'hebra-plugin-api/v2';
 import { healthFileName, renderHealthReport, type JdIndex, type JdexManagerSettings } from './engine';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
 

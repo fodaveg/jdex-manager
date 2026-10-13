@@ -1,4 +1,4 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it } from 'vitest';
 import { buildIndex, knownIds, selectCreationSystem, systemKey, DEFAULT_SETTINGS, type IndexInput, type JdexManagerSettings } from '../../src/hebra/engine';
 import { jdexCreationIndex, validateNewChildTitle } from '../../src/hebra/jdex-create';
@@ -14,7 +14,7 @@ import type { JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index
 import { FakeJdexVault, fakeNote } from './support/fakes';
 
 // `withTitle` del host falso del paquete (aproxima el de Hebra, que cubre su propio test).
-const markdown = createFakePluginApi().api.markdown;
+const markdown = createFakePluginApiV2().api.markdown;
 
 const JDEX_FOLDER_PATH = '00.00 JDex';
 

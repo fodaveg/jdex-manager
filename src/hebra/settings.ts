@@ -5,7 +5,7 @@
  * valor configurado nunca se sustituye por la autodetección, y una biblioteca nueva
  * empieza en los valores por defecto del motor (`DEFAULT_SETTINGS`).
  */
-import type { PluginSettingsStorage } from 'hebra-plugin-api';
+import type { PluginSettingsStorage } from 'hebra-plugin-api/v2';
 import { DEFAULT_SETTINGS, detectFolders, fillEmpty, normalizeSystemId, type JdexManagerSettings } from './engine';
 
 /** Lo único que este fichero pide a `api.storage.settings`. */

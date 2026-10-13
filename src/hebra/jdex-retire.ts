@@ -8,7 +8,7 @@
  * biblioteca (`api.vault`: `notesRewriteBatch` para el frontmatter y la línea «Retirado
  * el…», `folderRename`+`folderMove` para el traslado).
  */
-import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
+import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
 import { insertAfterH1, retirePlan, type IdEntry, type JdIndex, type RetirePlan } from './engine';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
 import { rewriteJdexNotes, type JdexRewriteLibrary } from './jdex-write';

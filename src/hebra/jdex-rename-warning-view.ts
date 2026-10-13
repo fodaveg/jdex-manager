@@ -21,19 +21,19 @@ export function mountJdexRenameWarningView(
   el: HTMLElement,
   options: JdexRenameWarningViewOptions
 ): void {
-  const message = document.createElement('p');
+  const message = el.ownerDocument.createElement('p');
   message.className = 'hebra-jdex-warning-message';
   message.textContent = options.message;
   el.append(message);
 
-  const actions = document.createElement('div');
+  const actions = el.ownerDocument.createElement('div');
   actions.className = 'hebra-jdex-warning-actions';
-  const cancel = document.createElement('button');
+  const cancel = el.ownerDocument.createElement('button');
   cancel.type = 'button';
   cancel.className = 'hebra-jdex-dialog-secondary';
   cancel.textContent = 'Cancelar';
   cancel.addEventListener('click', () => options.onCancel());
-  const proceed = primaryButton(options.confirmLabel ?? 'Continuar', () => options.onContinue());
+  const proceed = primaryButton(el.ownerDocument, options.confirmLabel ?? 'Continuar', () => options.onContinue());
   actions.append(cancel, proceed);
   el.append(actions);
 

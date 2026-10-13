@@ -5,7 +5,7 @@
 // del paquete (comandos y piezas registrados), diálogo montado de verdad en el DOM
 // (`support/fakes.ts`) y biblioteca en memoria (`FakeJdexVault`, con lectura Y escritura).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PluginFolder } from 'hebra-plugin-api';
+import type { PluginFolder } from 'hebra-plugin-api/v2';
 import {
   JDEX_COMMAND_CREATE_AREA,
   JDEX_COMMAND_CREATE_CATEGORY,

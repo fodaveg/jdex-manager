@@ -1,6 +1,6 @@
 import { parse as parseYaml } from 'yaml';
 import { describe, expect, it, vi } from 'vitest';
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { buildIndex, type IndexInput, type IdEntry, type JdIndex } from '../../src/hebra/engine';
 import { createJdexJournal } from '../../src/hebra/jdex-journal';
 import { retireJdexId } from '../../src/hebra/jdex-retire';
@@ -8,7 +8,7 @@ import type { JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index
 import { FakeJdexVault, fakeFolder, fakeNote, fakeSetProperty } from './support/fakes';
 
 const markdown = {
-  ...createFakePluginApi().api.markdown,
+  ...createFakePluginApiV2().api.markdown,
   setProperty: fakeSetProperty,
   frontmatter(body: string): Record<string, unknown> | null {
     const block = /^---\r?\n([\s\S]*?)\r?\n---/u.exec(body)?.[1];
@@ -202,7 +202,7 @@ describe('retireJdexId', () => {
   it('journals a failed retirement including compensation and undoes every completed step', async () => {
     const { index, walk, entry, library } = fixture();
     const before = (await library.noteRead('n-2111'))!.body;
-    const journal = await createJdexJournal(library, createFakePluginApi().api.storage.settings);
+    const journal = await createJdexJournal(library, createFakePluginApiV2().api.storage.settings);
     vi.spyOn(library, 'folderMoveIfUnchanged').mockRejectedValue(new Error('Move failed'));
     await expect(journal.run('retire', 'Retire', (tracked) => retireJdexId(tracked, markdown, walk, index, entry, '2026-09-28'))).rejects.toThrow('Falló el movimiento');
     expect(journal.entries()[0].effects.map((effect) => effect.kind)).toEqual(['note-rewrite', 'folder-change', 'folder-change']);

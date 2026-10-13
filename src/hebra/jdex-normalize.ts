@@ -11,7 +11,7 @@
  * propiedades que usa el editor de Hebra), conservando el resto de la nota byte a
  * byte: no es un `processFrontMatter` que reparsea y reserializa el YAML entero.
  */
-import type { PluginMarkdown } from 'hebra-plugin-api';
+import type { PluginMarkdown } from 'hebra-plugin-api/v2';
 import type { Finding } from './engine';
 import { rewriteJdexNotes, type JdexRewriteLibrary } from './jdex-write';
 import { readJdexFrontmatter } from './frontmatter';

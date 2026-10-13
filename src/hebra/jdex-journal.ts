@@ -16,7 +16,7 @@
  * No es una transacción entre la biblioteca y el diario: reduce la ventana, no la cierra. Una
  * nota o carpeta creada justo antes de un cierre puede quedar fuera del diario.
  */
-import type { PluginDeviceStorage, PluginNote, PluginNoteRevision, PluginVault } from 'hebra-plugin-api';
+import type { PluginDeviceStorage, PluginNote, PluginNoteRevision, PluginVault } from 'hebra-plugin-api/v2';
 import { appendOperation, JOURNAL_MAX, JOURNAL_REMOVED_MAX, JOURNAL_VERSION, journalOperationId, mergeJournals, newJournalId, withJournalIds, type Operation, type OperationKind } from './engine';
 import { updateJdexStoredSettings, type JdexSettingsStorage } from './settings';
 
@@ -261,6 +261,10 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
         } else if (operation.effects.length === 0 && listed) {
           listed = false;
           entries = entries.filter((entry) => entry !== operation);
+          // The write-ahead entry was stored already. Tombstone its identity so a
+          // merge cannot revive a stale write; a later step in this run gets a new id.
+          removed = [...removed, journalOperationId(operation)].slice(-JOURNAL_REMOVED_MAX);
+          operation.id = newJournalId();
         }
         await persist();
       };
@@ -395,11 +399,13 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
           return folder;
         }
       };
-      const tracked = new Proxy(vault, { get: (target, key) => {
+      // The frame API is frozen: proxying it as the target would forbid overrides of
+      // its non-configurable methods. The empty target keeps the public surface intact.
+      const tracked = new Proxy({} as JdexJournalVault, { get: (_target, key) => {
         const override = overrides[key as keyof PluginVault];
         if (override) return override;
-        const value: unknown = Reflect.get(target, key);
-        return typeof value === 'function' ? value.bind(target) as unknown : value;
+        const value: unknown = Reflect.get(vault, key);
+        return typeof value === 'function' ? value.bind(vault) as unknown : value;
       } });
       return action(tracked);
     }),

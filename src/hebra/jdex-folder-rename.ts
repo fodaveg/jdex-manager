@@ -22,7 +22,7 @@
  * the folder with the new name, so a rename that failed or was cancelled by another guard
  * never renames the note.
  */
-import type { PluginFolder, PluginFolderRenameEvent, PluginMarkdown, PluginModalHandle, PluginUi, PluginVault } from 'hebra-plugin-api';
+import type { PluginFolder, PluginFolderRenameEvent, PluginMarkdown, PluginModalHandle, PluginUi, PluginVault } from 'hebra-plugin-api/v2';
 import { extractJdPrefix, isRepeatedId, repeatedIdMessage, type JdIndex } from './engine';
 import { jdexFolderPairBlockedByRepeat, jdexFolderPairRename, jdexPairNoticeMessage, jdexRenameWarning, jdexRenameWarningMessage } from './jdex-rename-guard';
 import { mountJdexRenameWarningView } from './jdex-rename-warning-view';
@@ -108,7 +108,7 @@ export function createJdexFolderRenameGuard(deps: JdexFolderRenameDeps): JdexFol
       if (folder.name !== pair.newName) continue; // not renamed (yet)
       pending.delete(pair.folderId);
       const run = (): void => {
-        void renameNote(pair).catch((error: unknown) => deps.ui.notice(error instanceof Error ? error.message : String(error)));
+        void renameNote(pair).catch((error: unknown) => deps.ui.notice(pluginErrorMessage(error)));
       };
       if (deps.snapshot()?.settings.renamePairsWithoutAsking) run();
       else deps.ui.notice(jdexPairNoticeMessage('note', pair.oldTitle, pair.newTitle), run);
@@ -198,7 +198,7 @@ export function createJdexFolderRenameGuard(deps: JdexFolderRenameDeps): JdexFol
             onContinue: () => {
               handle?.close();
               void replay(event, snapshot, oldPath).catch((error: unknown) =>
-                deps.ui.notice(error instanceof Error ? error.message : String(error))
+                deps.ui.notice(pluginErrorMessage(error))
               );
             },
             onCancel: () => handle?.close()
@@ -215,3 +215,4 @@ export function createJdexFolderRenameGuard(deps: JdexFolderRenameDeps): JdexFol
 
   return { confirm, foldersChanged };
 }
+import { pluginErrorMessage } from './error-message';

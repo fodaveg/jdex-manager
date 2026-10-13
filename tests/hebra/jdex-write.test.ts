@@ -1,13 +1,13 @@
-import { isPluginApiError } from 'hebra-plugin-api';
-import { createFakePluginApi, type FakePluginApiOptions } from 'hebra-plugin-api/testing';
+import { isPluginApiError } from 'hebra-plugin-api/v2';
+import { createFakePluginApiV2, type FakePluginApiV2Options } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { createJdexJournal } from '../../src/hebra/jdex-journal';
 import { JdexPartialRewriteError, rewriteJdexNotes, type JdexRewriteLibrary } from '../../src/hebra/jdex-write';
 import { FakeJdexVault, HOST_REWRITE_BATCH_MAX, fakeNote, withHostRewriteBatchLimit } from './support/fakes';
 
 /** El `vault` del host falso del paquete, con notas en la raíz (solo para comparar su límite de lote). */
-function packageVault(notes: NonNullable<FakePluginApiOptions['notes']>) {
-  return withHostRewriteBatchLimit(createFakePluginApi({ capabilities: ['vault.read', 'vault.write'], notes }).api.vault);
+function packageVault(notes: NonNullable<FakePluginApiV2Options['notes']>) {
+  return withHostRewriteBatchLimit(createFakePluginApiV2({ capabilities: ['vault.read', 'vault.write'], notes }).api.vault);
 }
 
 /** El doble oficial con las notas dadas (`id -> cuerpo` o `{ body, title }`) en la carpeta `f1`. */
@@ -68,7 +68,7 @@ describe('rewriteJdexNotes in batches of 200', () => {
       if (calls === 2) throw new Error('Hebra se cerró');
       return original(entries, options);
     });
-    const storage = createFakePluginApi().api.storage.settings;
+    const storage = createFakePluginApiV2().api.storage.settings;
     const journal = await createJdexJournal(vault, storage);
     const failure = await journal
       .run('fix', 'Normalizar frontmatter JDex', (tracked) => rewriteJdexNotes(tracked, ids, (current) => `${current.body}Añadido\n`))

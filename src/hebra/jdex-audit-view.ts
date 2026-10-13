@@ -24,8 +24,8 @@ export interface JdexAuditViewOptions {
   repair?(findings: readonly Finding[]): void | Promise<void>;
 }
 
-function pathLink(path: string, onClick: () => void): HTMLButtonElement {
-  const button = document.createElement('button');
+function pathLink(doc: Document, path: string, onClick: () => void): HTMLButtonElement {
+  const button = doc.createElement('button');
   button.type = 'button';
   button.className = 'hebra-jdex-audit-link';
   button.textContent = path;
@@ -34,16 +34,17 @@ function pathLink(path: string, onClick: () => void): HTMLButtonElement {
 }
 
 function findingRow(
+  doc: Document,
   finding: Finding,
   openPath: (path: string) => void,
   applyFix: ((finding: Finding) => void) | null,
   onSelect?: (selected: boolean) => void
 ): HTMLLIElement {
-  const row = document.createElement('li');
+  const row = doc.createElement('li');
   row.className = 'hebra-jdex-audit-finding';
   if (finding.fix && onSelect) {
-    const label = document.createElement('label');
-    const checkbox = document.createElement('input');
+    const label = doc.createElement('label');
+    const checkbox = doc.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'hebra-jdex-repair-select';
     checkbox.setAttribute('aria-label', `Reparar: ${finding.message}`);
@@ -53,30 +54,30 @@ function findingRow(
     label.append(checkbox, ' Reparar');
     row.append(label);
   }
-  const message = document.createElement('p');
+  const message = doc.createElement('p');
   message.textContent = finding.message;
   row.append(message);
   if (finding.fix) {
-    const effect = document.createElement('p');
+    const effect = doc.createElement('p');
     effect.className = 'hebra-jdex-audit-effect';
     effect.textContent = finding.fix.type === 'frontmatter' ? finding.fix.path : describeFix(finding.fix);
     row.append(effect);
     const side = describeFixSide(finding.fix);
     if (side) {
-      const note = document.createElement('p');
+      const note = doc.createElement('p');
       note.className = 'hebra-jdex-audit-effect-side';
       note.textContent = side;
       row.append(note);
     }
   }
   if (finding.paths.length > 0) {
-    const links = document.createElement('div');
+    const links = doc.createElement('div');
     links.className = 'hebra-jdex-audit-links';
-    for (const path of finding.paths) links.append(pathLink(path, () => openPath(path)));
+    for (const path of finding.paths) links.append(pathLink(doc, path, () => openPath(path)));
     row.append(links);
   }
   if (applyFix && finding.fix?.type === 'frontmatter') {
-    const apply = document.createElement('button');
+    const apply = doc.createElement('button');
     apply.type = 'button';
     apply.className = 'hebra-jdex-audit-apply';
     apply.textContent = 'Aplicar';
@@ -89,11 +90,12 @@ function findingRow(
 /** Monta el contenido y devuelve la limpieza (`unmount`, `host-ui.ts`). Se puede volver
  *  a montar: `options.findings()` se relee cada vez, no se congela al construir. */
 export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOptions): () => void {
+  const doc = el.ownerDocument;
   const findings = options.findings();
   const problems = findings.filter((f) => !f.informative).length;
   el.classList.add('hebra-jdex-audit');
 
-  const summary = document.createElement('p');
+  const summary = doc.createElement('p');
   summary.className = 'hebra-jdex-audit-summary';
   summary.textContent =
     problems === 0
@@ -104,10 +106,10 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
     Object.keys(finding.fix.set).every((key) => ['jd', 'tipo', 'area', 'categoria'].includes(key))));
   let updateSelection: (() => void) | undefined;
   if (options.repair && findings.some((finding) => finding.fix)) {
-    const button = document.createElement('button');
+    const button = doc.createElement('button');
     button.type = 'button';
     button.className = 'hebra-jdex-repair-apply';
-    const selectionSummary = document.createElement('p');
+    const selectionSummary = doc.createElement('p');
     updateSelection = () => {
       button.textContent = `Reparar (${selected.size})`;
       button.disabled = selected.size === 0;
@@ -132,13 +134,13 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
     for (const kind of FINDING_KINDS) {
       const rows = groupedFindings.filter((f) => f.kind === kind);
       if (rows.length === 0) continue;
-      const section = document.createElement('section');
+      const section = doc.createElement('section');
       section.className = 'hebra-jdex-audit-section';
-      const heading = document.createElement('h3');
+      const heading = doc.createElement('h3');
       heading.textContent = `${KIND_TITLES[kind]} (${rows.length})`;
-      const list = document.createElement('ul');
+      const list = doc.createElement('ul');
       list.className = 'hebra-jdex-audit-list';
-      for (const finding of rows) list.append(findingRow(finding, (path) => options.openPath(path), applyFix,
+      for (const finding of rows) list.append(findingRow(doc, finding, (path) => options.openPath(path), applyFix,
         options.repair ? (chosen) => {
           if (chosen) selected.add(finding); else selected.delete(finding);
           updateSelection?.();
@@ -151,8 +153,8 @@ export function mountJdexAuditView(el: HTMLElement, options: JdexAuditViewOption
   appendSections(el, findings.filter((f) => !f.informative));
   const warnings = findings.filter((f) => f.informative);
   if (warnings.length > 0) {
-    const details = document.createElement('details');
-    const heading = document.createElement('summary');
+    const details = doc.createElement('details');
+    const heading = doc.createElement('summary');
     heading.textContent = `Avisos (${warnings.length})`;
     details.append(heading);
     appendSections(details, warnings);

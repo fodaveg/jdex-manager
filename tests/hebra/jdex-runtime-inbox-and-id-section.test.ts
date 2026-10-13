@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 //
 // «Procesar inbox» y la sección del ID en el panel de contexto, de extremo a extremo: `activateJdex(api)` sobre el host falso del paquete
-// (`createFakePluginApi`, que registra comandos, vistas y piezas de la barra), diálogo
+// (`createFakePluginApiV2`, que registra comandos, vistas y piezas de la barra), diálogo
 // montado de verdad en el DOM (`support/fakes.ts`) y biblioteca en memoria
 // (`FakeJdexVault`).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PluginFolder } from 'hebra-plugin-api';
+import type { PluginFolder } from 'hebra-plugin-api/v2';
 import {
   JDEX_COMMAND_PROCESS_INBOX,
   JDEX_ID_SECTION_VIEW_ID,

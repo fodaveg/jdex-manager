@@ -3,7 +3,7 @@
  * operations still queued when it is disposed do not run, and the dialogs it opened are
  * closed by the cleanup (the host does not track `openModal` for that).
  */
-import type { PluginModalHandle, PluginUi } from 'hebra-plugin-api';
+import type { PluginModalHandle, PluginUi } from 'hebra-plugin-api/v2';
 import type { JdexJournal } from './jdex-journal';
 
 export const JDEX_DISPOSED_MESSAGE = 'JDex Manager está apagado: no se ha escrito nada.';
@@ -48,11 +48,13 @@ export function trackJdexModals(ui: PluginUi): { ui: PluginUi; closeAll(): void 
     open.add(handle);
     return handle;
   };
-  const tracked = new Proxy(ui, {
-    get(target, key, receiver) {
+  // The v2 frame freezes its API: proxying it directly cannot replace a non-configurable
+  // method. A separate target lets this wrapper intercept openModal without that invariant.
+  const tracked = new Proxy({} as PluginUi, {
+    get(_target, key) {
       if (key === 'openModal') return openModal;
-      const value: unknown = Reflect.get(target, key, receiver);
-      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      const value: unknown = Reflect.get(ui, key);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(ui) : value;
     }
   });
   return {

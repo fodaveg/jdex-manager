@@ -9,33 +9,33 @@ export function mountJdexJournalView(el: HTMLElement, options: {
   onDiscard?(): Promise<void>;
   status?: { unsaved: boolean; readOnly: boolean };
 }): void {
-  const list = document.createElement('ol');
+  const list = el.ownerDocument.createElement('ol');
   for (const operation of [...options.entries].reverse()) {
-    const row = document.createElement('li');
+    const row = el.ownerDocument.createElement('li');
     row.textContent = `${operation.label} · ${operation.effects.length} paso(s) · ${new Date(operation.at).toLocaleString()}`;
     list.append(row);
   }
   if (options.status?.unsaved) {
-    const unsaved = document.createElement('p');
+    const unsaved = el.ownerDocument.createElement('p');
     unsaved.setAttribute('role', 'alert');
     unsaved.textContent = 'El diario no se pudo guardar: lo que muestra solo está en memoria hasta el próximo guardado.';
     el.append(unsaved);
   }
   if (options.entries.length === 0) {
-    const empty = document.createElement('p');
+    const empty = el.ownerDocument.createElement('p');
     empty.textContent = options.status?.readOnly
       ? 'El diario lo escribió una versión más nueva de JDex Manager; se conserva sin usarlo.'
       : 'No hay operaciones que deshacer.';
     el.append(empty);
     return;
   }
-  const info = document.createElement('p');
+  const info = el.ownerDocument.createElement('p');
   info.textContent = 'Deshacer comprueba el estado actual y se detiene si encuentra cambios posteriores. Si la última operación no se puede deshacer, descártala para llegar a las anteriores: descartar no toca ninguna nota.';
-  const undo = document.createElement('button');
+  const undo = el.ownerDocument.createElement('button');
   undo.type = 'button';
   undo.className = 'hebra-jdex-dialog-primary';
   undo.textContent = 'Deshacer la última operación';
-  const error = document.createElement('p');
+  const error = el.ownerDocument.createElement('p');
   error.setAttribute('role', 'alert');
   undo.addEventListener('click', () => {
     undo.disabled = true;
@@ -45,7 +45,7 @@ export function mountJdexJournalView(el: HTMLElement, options: {
   });
   el.append(list, info, error, undo);
   if (!options.onDiscard) return;
-  const discard = document.createElement('button');
+  const discard = el.ownerDocument.createElement('button');
   discard.type = 'button';
   discard.className = 'hebra-jdex-dialog-discard';
   discard.textContent = 'Descartar la última entrada';

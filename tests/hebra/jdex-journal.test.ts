@@ -1,4 +1,4 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { createJdexJournal, type JdexJournalVault } from '../../src/hebra/jdex-journal';
 import { persistJdexSettings } from '../../src/hebra/settings';
@@ -9,7 +9,7 @@ async function setup() {
   const vault = new FakeJdexVault();
   vault.seedNote(fakeNote('n1', 'f1', '# Antes\n'));
   vault.seedFolder(fakeFolder('f1', null, '21.11 Antes'));
-  const storage = createFakePluginApi().api.storage.settings;
+  const storage = createFakePluginApiV2().api.storage.settings;
   const journal = await createJdexJournal(vault, storage);
   return { vault, storage, journal };
 }
@@ -72,7 +72,7 @@ describe('Hebra journal', () => {
   });
 
   it('deshace dos guardados sucesivos de la misma nota sin confundir su propia revisión', async () => {
-    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
+    const { api } = createFakePluginApiV2({ capabilities: ['vault.read', 'vault.write'] });
     const vault = api.vault;
     const original = await vault.noteCreate({ folderId: vault.rootFolderId(), body: '# Antes\n' });
     const journal = await createJdexJournal(vault, api.storage.settings);
@@ -231,8 +231,8 @@ describe('Hebra journal', () => {
     expect((await vault.foldersList()).find((folder) => folder.id === 'f1')?.name).toBe('21.11 Manual');
   });
   it('refuses a same-body newer revision before capture and during the strict forward batch', async () => {
-    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
-    const vault = api.vault;
+    const { api } = createFakePluginApiV2({ capabilities: ['vault.read', 'vault.write'] });
+    const vault = { ...api.vault };
     const original = await vault.noteCreate({ folderId: vault.rootFolderId(), body: '# Original\n' });
     const journal = await createJdexJournal(vault, api.storage.settings);
     await vault.noteSave({ id: original.id, body: original.body!, expected: original.revision });
@@ -285,7 +285,7 @@ describe('Hebra journal', () => {
   });
 
   it('undoes nested folder creation in child-before-parent order', async () => {
-    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
+    const { api } = createFakePluginApiV2({ capabilities: ['vault.read', 'vault.write'] });
     const journal = await createJdexJournal(api.vault, api.storage.settings);
     await journal.run('fix', 'Nested', async (tracked) => {
       const parent = await tracked.folderCreate(api.vault.rootFolderId(), 'Parent');
@@ -296,8 +296,8 @@ describe('Hebra journal', () => {
   });
 
   it('journals the transformed committed save body and rejects stale saves without conflict copies', async () => {
-    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
-    const vault = api.vault;
+    const { api } = createFakePluginApiV2({ capabilities: ['vault.read', 'vault.write'] });
+    const vault = { ...api.vault };
     const note = await vault.noteCreate({ folderId: vault.rootFolderId(), body: '# Before\n' });
     const journal = await createJdexJournal(vault, api.storage.settings);
     const batch = vault.notesRewriteBatch.bind(vault);
@@ -311,8 +311,8 @@ describe('Hebra journal', () => {
   });
 
   it('preserves same-body external edits made after creation or between the undo read and trash', async () => {
-    const { api } = createFakePluginApi({ capabilities: ['vault.read', 'vault.write'] });
-    const vault = api.vault;
+    const { api } = createFakePluginApiV2({ capabilities: ['vault.read', 'vault.write'] });
+    const vault = { ...api.vault };
     const journal = await createJdexJournal(vault, api.storage.settings);
     const note = await journal.run('create-id', 'Create', (tracked) => tracked.noteCreate({ folderId: vault.rootFolderId(), body: '# New\n' }));
     const trash = vault.noteTrashIfUnchanged.bind(vault);

@@ -48,7 +48,7 @@ import type {
   PluginStatusBarItemHandle,
   PluginUnregister,
   PluginVault
-} from 'hebra-plugin-api';
+} from 'hebra-plugin-api/v2';
 import {
   auditSystem,
   buildIndex,
@@ -156,7 +156,7 @@ export {
   JDEX_COMMAND_SEARCH_CATEGORY,
   JDEX_COMMAND_SEND_TO_INBOX
 } from './jdex-active-note-commands';
-import { jdexEditorExtension } from './jdex-editor-extension';
+import { registerJdexEditor, type JdexEditorExtensionContext } from './jdex-editor-extension';
 import { createJdexJournal, jdexDeviceId } from './jdex-journal';
 import { guardJdexJournal, trackJdexModals } from './jdex-lifecycle';
 import { mountJdexJournalView } from './jdex-journal-view';
@@ -233,14 +233,13 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   let walk: JdexLibraryWalk | null = null;
   let index: JdIndex | null = null;
+  let refreshEditorProviders: (() => void) | undefined;
   let findings: Finding[] = [];
   let inboxSummary: JdexInboxSummary | null = null;
   let latestLocated: Location | null = null;
   let latestNote: PluginActiveNote | null = null;
   const debugLog = createJdexDebugLog(api.vault, () => ({ settings, walk }));
   debugSink = (error, where) => void debugLog.record(where, error);
-  /** Repaints registered by the open editors (`jdexEditorExtension`'s `subscribe`). */
-  const editorRepaints = new Set<() => void>();
   /** The audit view (`./jdex-audit-panel.ts`) and the ID section (`./jdex-id-section-panel.ts`).
    *  Created HERE, before the first `rebuild()`, because `derive()` refreshes them. */
   const auditPanel = createJdexAuditPanel({
@@ -379,7 +378,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     isOwn: (id) => debugLog.isOwn(id),
     report,
     derivedFailed: (error) => {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = pluginErrorMessage(error);
       host.notice(`JDex no pudo mantener las cabeceras, el índice o el frontmatter: ${reason} Lo reintentará con el próximo cambio.`);
     }
   });
@@ -412,9 +411,9 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     // activa: un `rebuild()` que crea un hijo o cambia el frontmatter no dispara
     // `onActiveNoteChange` (la nota activa no cambió), así que se refresca aquí.
     idSectionPanel.refresh();
-    // Open editors repaint their numbers, and an open audit view shows the new findings
-    // (not the ones captured when it was mounted). Not while Repair walks its selection.
-    for (const repaint of [...editorRepaints]) repaint();
+    // Re-registering asks Hebra to rebuild the editor compartment against the new index.
+    refreshEditorProviders?.();
+    // An open audit view shows the new findings, except while Repair walks its selection.
     auditPanel.refresh();
   }
 
@@ -833,7 +832,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         if (folders.some((entry) => entry.id !== folderId && entry.parentId === folder.parentId && entry.name === newName)) throw new Error(`Ya existe una carpeta «${newName}».`);
         await vault.folderRename(folderId, newName);
         await afterJdexWrite(true, vault);
-      }).catch((error: unknown) => host.notice(error instanceof Error ? error.message : String(error)));
+      }).catch((error: unknown) => host.notice(pluginErrorMessage(error)));
     };
     // The title is already saved here (this event comes after the save), so the folder
     // follows a rename that really happened. The setting skips the question.
@@ -875,7 +874,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   };
 
   function copyToClipboard(text: string, successMessage: string): Promise<void> {
-    return copyJdexText(actionPorts, (value) => navigator.clipboard.writeText(value), text, successMessage);
+    return copyJdexText(actionPorts, (value) => api.clipboard.writeText(value), text, successMessage);
   }
 
   /** «Ir a este ID»: la carpeta si la tiene (como `toggleNoteAndFolder`), si no la
@@ -1127,7 +1126,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           if (result.undone > 0) host.notice(`${result.undone} paso(s) deshecho(s).`);
           handle?.close();
           await rebuild();
-        } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+        } catch (error) { host.notice(pluginErrorMessage(error)); }
       }
     }), { title: 'Diario JDex' });
   }
@@ -1172,7 +1171,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         if (!walk || !index) return;
         const note = await journal.run('fix', 'Crear informe de salud', (vault) => createJdexHealthReport(vault, walk!, index!, settings, todayIso()));
         api.workspace.openNote(note.id);
-      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+      } catch (error) { host.notice(pluginErrorMessage(error)); }
     },
     systemReport: async () => {
       try {
@@ -1180,10 +1179,10 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         if (!walk || !index) return;
         const note = await journal.run('fix', 'Crear informe del sistema', (vault) => createJdexSystemReport(vault, walk!, index!, findings, settings, todayIso()));
         api.workspace.openNote(note.id);
-      } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+      } catch (error) { host.notice(pluginErrorMessage(error)); }
     },
     writeTemplates: async () => {
-      try { host.notice(await writeBuiltinTemplates()); } catch (error) { host.notice(error instanceof Error ? error.message : String(error)); }
+      try { host.notice(await writeBuiltinTemplates()); } catch (error) { host.notice(pluginErrorMessage(error)); }
     }
   };
   const offCommands = registerJdexCommands(host, commandHandlers, 'main');
@@ -1223,18 +1222,11 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   // «Los números JD son clicables… y autocompletado» (lote 4, tarea 2): `ids()`
   // lee `index` en el momento (nunca una copia), así que un ID creado después de
   // abrir la nota queda clicable sin remontar el editor.
-  // Hebra prueba la extensión antes de montarla y la rechaza (`extension-rechazada`) si
-  // no se construyó con SU `@codemirror/state`: sin ella el módulo sigue vivo, solo sin
-  // números clicables.
+  // Hebra pinta los rangos y las sugerencias en su editor, con el índice vivo.
   let offEditorExtension: PluginUnregister = () => {};
   try {
-    offEditorExtension = api.editor.registerExtension(
-      jdexEditorExtension({
+    const editorContext: JdexEditorExtensionContext = {
         ids: () => index?.ids ?? [],
-        subscribe: (repaint) => {
-          editorRepaints.add(repaint);
-          return () => void editorRepaints.delete(repaint);
-        },
         // Un número del texto lleva a su NOTA; la carpeta es la alternativa (⌘/Ctrl+Alt+clic).
         onNavigate: (entry, options) => {
           if (walk) gotoJdexEntry(entry, walk, !options?.folder);
@@ -1261,8 +1253,12 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
         },
         autocomplete: () => settings.autocomplete,
         autocompleteInsert: () => settings.autocompleteInsert
-      })
-    );
+    };
+    offEditorExtension = registerJdexEditor(api.editor, editorContext);
+    refreshEditorProviders = () => {
+      offEditorExtension();
+      offEditorExtension = registerJdexEditor(api.editor, editorContext);
+    };
   } catch (error) {
     report(error, 'extension-del-editor');
   }
@@ -1331,6 +1327,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     offAuditView();
     offIdSectionActiveNote();
     offIdSectionView();
+    refreshEditorProviders = undefined;
     offEditorExtension();
     offIsoDates();
     offSettingsPanel();
@@ -1341,3 +1338,4 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
   activationSettled.set(cleanup, initialRebuild);
   return cleanup;
 }
+import { pluginErrorMessage } from './error-message';

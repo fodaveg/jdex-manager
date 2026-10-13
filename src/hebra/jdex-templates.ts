@@ -5,7 +5,7 @@
  * name (`templateNames`), so `resolveJdexTemplate` finds them and the user can edit them.
  * A note that already has that name in the folder is never touched.
  */
-import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
+import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
 import { BUILTIN_TEMPLATES, TEMPLATE_TYPES, type JdexManagerSettings } from './engine';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
 

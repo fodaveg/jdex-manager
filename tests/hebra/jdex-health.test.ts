@@ -1,4 +1,4 @@
-import type { PluginFile } from 'hebra-plugin-api';
+import type { PluginFile } from 'hebra-plugin-api/v2';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIndex } from '../../src/hebra/engine';
 import { createJdexHealthReport } from '../../src/hebra/jdex-health';

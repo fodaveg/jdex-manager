@@ -7,7 +7,6 @@ import esbuild from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hebraShared } from 'hebra-plugin-api/build';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -70,7 +69,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     external: ['obsidian', 'electron', '@codemirror/*', '@lezer/*']
   });
   const hebra = await bundled('src/hebra/main.ts', {
-    format: 'esm', platform: 'browser', target: 'es2020', plugins: [hebraShared()]
+    format: 'esm', platform: 'browser', target: 'es2020'
   });
   const shipped = new Set([...obsidian, ...hebra]);
   console.log(`audit:bundled  main.js: ${[...obsidian].sort().join(', ') || '(none)'}`);

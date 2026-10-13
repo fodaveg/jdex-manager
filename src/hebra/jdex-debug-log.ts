@@ -8,7 +8,7 @@
  * the notes-change events about this note (`isOwnChange`) so a log line never starts an
  * index update or a maintenance pass.
  */
-import type { PluginVault } from 'hebra-plugin-api';
+import type { PluginVault } from 'hebra-plugin-api/v2';
 import { appendDebugEntry, DEBUG_LOG_TITLE, formatDebugEntry, type JdexManagerSettings } from './engine';
 import { rewriteJdexNotes } from './jdex-write';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';

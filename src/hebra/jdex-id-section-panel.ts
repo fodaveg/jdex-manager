@@ -4,7 +4,7 @@
  * open (the active note changes); a request number drops the answer of an older load that
  * arrives late. It reads the runtime state through `state()` at each render.
  */
-import type { PluginActiveNote, PluginMarkdown, PluginVault } from 'hebra-plugin-api';
+import type { PluginActiveNote, PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
 import type { IdEntry, JdIndex, JdexManagerSettings } from './engine';
 import { loadJdexIdSection } from './jdex-id-section';
 import { mountJdexIdSectionLoading, mountJdexIdSectionView } from './jdex-id-section-view';

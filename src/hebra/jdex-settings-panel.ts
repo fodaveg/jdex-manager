@@ -34,15 +34,16 @@ const FOLDER_FIELDS: readonly FieldSpec[] = [
 ];
 
 function folderField(
+  doc: Document,
   spec: FieldSpec,
   options: JdexSettingsPanelOptions,
   onChange: () => void
 ): HTMLElement {
-  const row = document.createElement('div');
+  const row = doc.createElement('div');
   row.className = 'hebra-jdex-settings-row';
-  const label = document.createElement('label');
+  const label = doc.createElement('label');
   label.textContent = spec.label;
-  const input = document.createElement('input');
+  const input = doc.createElement('input');
   input.type = 'text';
   input.id = fieldId(spec.key);
   label.htmlFor = input.id;
@@ -55,7 +56,7 @@ function folderField(
     onChange();
   };
   input.addEventListener('change', commit);
-  const pick = document.createElement('button');
+  const pick = doc.createElement('button');
   pick.type = 'button';
   pick.textContent = 'Elegir carpeta…';
   pick.setAttribute('aria-label', `Elegir carpeta: ${spec.label}`);
@@ -66,7 +67,7 @@ function folderField(
       commit();
     });
   });
-  const hint = document.createElement('small');
+  const hint = doc.createElement('small');
   hint.textContent = spec.hint;
   hint.id = `${input.id}-hint`;
   input.setAttribute('aria-describedby', hint.id);
@@ -83,10 +84,11 @@ function fieldId(name: string): string {
 
 /** A labelled control: the input nested in its `<label>`, so it has an accessible name. */
 function labelledRow(text: string, control: HTMLElement, controlFirst = false): HTMLLabelElement {
-  const row = document.createElement('label');
+  const doc = control.ownerDocument;
+  const row = doc.createElement('label');
   row.className = 'hebra-jdex-settings-row';
-  if (controlFirst) row.append(control, document.createTextNode(text));
-  else row.append(document.createTextNode(text), control);
+  if (controlFirst) row.append(control, doc.createTextNode(text));
+  else row.append(doc.createTextNode(text), control);
   return row;
 }
 
@@ -105,24 +107,25 @@ const EXTRA_TOGGLES: readonly [string, 'createFolderByDefault' | 'descriptionIsF
 ];
 
 export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPanelOptions): void {
-  const container = document.createElement('div');
+  const doc = el.ownerDocument;
+  const container = doc.createElement('div');
   container.className = 'hebra-jdex-settings';
 
   const refresh = (): void => {
     container.replaceChildren();
-    for (const spec of FOLDER_FIELDS) container.append(folderField(spec, options, refresh));
+    for (const spec of FOLDER_FIELDS) container.append(folderField(doc, spec, options, refresh));
 
-    const systemIdRow = document.createElement('div');
+    const systemIdRow = doc.createElement('div');
     systemIdRow.className = 'hebra-jdex-settings-row';
-    const systemIdLabel = document.createElement('label');
+    const systemIdLabel = doc.createElement('label');
     systemIdLabel.textContent = 'Id de sistema (opcional)';
-    const systemIdInput = document.createElement('input');
+    const systemIdInput = doc.createElement('input');
     systemIdInput.type = 'text';
     systemIdInput.value = options.get().systemId;
     systemIdInput.placeholder = 'D01, con varios sistemas en la misma biblioteca';
     systemIdInput.id = fieldId('systemId');
     systemIdLabel.htmlFor = systemIdInput.id;
-    const systemIdError = document.createElement('small');
+    const systemIdError = doc.createElement('small');
     systemIdError.className = 'hebra-jdex-settings-error';
     systemIdError.setAttribute('role', 'alert');
     systemIdError.id = `${systemIdInput.id}-error`;
@@ -146,13 +149,13 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     });
     systemIdRow.append(systemIdLabel, systemIdInput, systemIdError);
     container.append(systemIdRow);
-    const prefixRow = document.createElement('label');
+    const prefixRow = doc.createElement('label');
     prefixRow.className = 'hebra-jdex-settings-row';
-    const prefixInput = document.createElement('input');
+    const prefixInput = doc.createElement('input');
     prefixInput.type = 'checkbox';
     prefixInput.checked = options.get().prefixNamesWithSystem;
     prefixInput.addEventListener('change', () => options.save({ ...options.get(), prefixNamesWithSystem: prefixInput.checked }));
-    prefixRow.append(prefixInput, document.createTextNode('Poner el id de sistema delante de los nombres nuevos (D01.21.22 Título)'));
+    prefixRow.append(prefixInput, doc.createTextNode('Poner el id de sistema delante de los nombres nuevos (D01.21.22 Título)'));
     container.append(prefixRow);
 
     for (const [labelText, value, save] of [
@@ -160,34 +163,34 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       ['Patrones por categoría', formatCategoryPatterns(options.get().subfolderPatternsByCategory), (value: string) => options.save({ ...options.get(), subfolderPatternsByCategory: parseCategoryPatterns(value) })],
       ['Nota del índice del sistema', options.get().systemIndexNote, (value: string) => options.save({ ...options.get(), systemIndexNote: value })]
     ] as const) {
-      const row = document.createElement('label');
+      const row = doc.createElement('label');
       row.className = 'hebra-jdex-settings-row';
-      row.append(document.createTextNode(labelText));
-      const input = document.createElement('textarea');
+      row.append(doc.createTextNode(labelText));
+      const input = doc.createElement('textarea');
       input.value = value;
       input.addEventListener('change', () => save(input.value));
       row.append(input);
       container.append(row);
     }
     for (const [labelText, key] of [['Crear patrón por defecto', 'createPatternByDefault'], ['Cabeceras vivas', 'liveHeaders'], ['Mantenimiento automático', 'automaticMaintenance'], ['Avisar de áreas y categorías sin nota', 'structureNotesAreFindings'], ['Autocompletar IDs al teclear NN.', 'autocomplete'], ['Registro de depuración (nota en Informes)', 'debugLog']] as const) {
-      const row = document.createElement('label');
+      const row = doc.createElement('label');
       row.className = 'hebra-jdex-settings-row';
-      const input = document.createElement('input');
+      const input = doc.createElement('input');
       input.type = 'checkbox';
       input.checked = options.get()[key];
       input.addEventListener('change', () => options.save({ ...options.get(), [key]: input.checked }));
-      row.append(input, document.createTextNode(labelText));
+      row.append(input, doc.createTextNode(labelText));
       container.append(row);
     }
     for (const [labelText, key] of EXTRA_TOGGLES) {
-      const input = document.createElement('input');
+      const input = doc.createElement('input');
       input.type = 'checkbox';
       input.checked = options.get()[key];
       input.addEventListener('change', () => options.save({ ...options.get(), [key]: input.checked }));
       container.append(labelledRow(labelText, input, true));
     }
     for (const [type, labelText] of TEMPLATE_LABELS) {
-      const input = document.createElement('input');
+      const input = doc.createElement('input');
       input.type = 'text';
       input.value = options.get().templateNames[type];
       input.addEventListener('change', () => {
@@ -202,12 +205,12 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     }
     if (options.writeTemplates) {
       const writeTemplates = (): Promise<string> => options.writeTemplates!();
-      const templatesRow = document.createElement('div');
+      const templatesRow = doc.createElement('div');
       templatesRow.className = 'hebra-jdex-settings-row';
-      const button = document.createElement('button');
+      const button = doc.createElement('button');
       button.type = 'button';
       button.textContent = 'Escribir plantillas integradas';
-      const status = document.createElement('small');
+      const status = doc.createElement('small');
       status.setAttribute('role', 'status');
       status.id = fieldId('templates-status');
       button.setAttribute('aria-describedby', status.id);
@@ -215,13 +218,13 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
         button.disabled = true;
         void writeTemplates()
           .then((message) => { status.textContent = message; })
-          .catch((error: unknown) => { status.textContent = error instanceof Error ? error.message : String(error); })
+          .catch((error: unknown) => { status.textContent = pluginErrorMessage(error); })
           .finally(() => { button.disabled = false; });
       });
       templatesRow.append(button, status);
       container.append(templatesRow);
     }
-    const healthMax = document.createElement('input');
+    const healthMax = doc.createElement('input');
     healthMax.type = 'number';
     healthMax.min = '0';
     healthMax.step = '1';
@@ -232,12 +235,12 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
       options.save({ ...options.get(), healthMaxFiles: value });
     });
     container.append(labelledRow('Ficheros por ID a partir de los que el informe de salud avisa', healthMax));
-    const dateRow = document.createElement('label');
+    const dateRow = doc.createElement('label');
     dateRow.className = 'hebra-jdex-settings-row';
-    dateRow.append(document.createTextNode('Formato de fecha al archivar'));
-    const dateFormat = document.createElement('select');
+    dateRow.append(doc.createTextNode('Formato de fecha al archivar'));
+    const dateFormat = doc.createElement('select');
     for (const format of ['YYYY-MM-DD', 'YYYY-MM'] as const) {
-      const option = document.createElement('option');
+      const option = doc.createElement('option');
       option.value = format;
       option.textContent = format;
       dateFormat.append(option);
@@ -248,10 +251,10 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     });
     dateRow.append(dateFormat);
     container.append(dateRow);
-    const staleRow = document.createElement('label');
+    const staleRow = doc.createElement('label');
     staleRow.className = 'hebra-jdex-settings-row';
-    staleRow.append(document.createTextNode('Días para inbox antiguo'));
-    const staleDays = document.createElement('input');
+    staleRow.append(doc.createTextNode('Días para inbox antiguo'));
+    const staleDays = doc.createElement('input');
     staleDays.type = 'number';
     staleDays.min = '1';
     staleDays.step = '1';
@@ -263,12 +266,12 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     });
     staleRow.append(staleDays);
     container.append(staleRow);
-    const insertRow = document.createElement('label');
+    const insertRow = doc.createElement('label');
     insertRow.className = 'hebra-jdex-settings-row';
-    insertRow.append(document.createTextNode('El autocompletado inserta'));
-    const insertMode = document.createElement('select');
+    insertRow.append(doc.createTextNode('El autocompletado inserta'));
+    const insertMode = doc.createElement('select');
     for (const [value, text] of [['number', 'El número'], ['link', 'Un enlace [[nota]]']] as const) {
-      const option = document.createElement('option');
+      const option = doc.createElement('option');
       option.value = value;
       option.textContent = text;
       insertMode.append(option);
@@ -280,7 +283,7 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
     insertRow.append(insertMode);
     container.append(insertRow);
 
-    const auto = document.createElement('p');
+    const auto = doc.createElement('p');
     auto.className = 'hebra-jdex-settings-hint';
     auto.textContent =
       'Vacío = se detecta solo (busca 00.00, 00.02 y 00.03 bajo la raíz del sistema).';
@@ -289,3 +292,4 @@ export function mountJdexSettingsPanel(el: HTMLElement, options: JdexSettingsPan
   refresh();
   el.append(container);
 }
+import { pluginErrorMessage } from './error-message';

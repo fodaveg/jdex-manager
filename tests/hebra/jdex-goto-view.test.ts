@@ -32,6 +32,18 @@ function noop() {
 }
 
 describe('mountJdexGotoView', () => {
+  it('monta controles y recibe clics en el documento de una superficie', () => {
+    const surface = document.implementation.createHTMLDocument('JDex');
+    const el = surface.createElement('div');
+    surface.body.append(el);
+    const actions = noop();
+    mountJdexGotoView(el, { entries: [entry()], hasActiveNote: true, ...actions });
+    expect([...el.querySelectorAll('*')].every((node) => node.ownerDocument === surface)).toBe(true);
+    (el.querySelector('[role="option"]') as HTMLButtonElement).click();
+    (el.querySelector('.hebra-jdex-goto-action') as HTMLButtonElement).click();
+    expect(actions.onGoto).toHaveBeenCalledWith(entry());
+  });
+
   it('lista todos los IDs y filtra al buscar', () => {
     const el = document.createElement('div');
     mountJdexGotoView(el, {

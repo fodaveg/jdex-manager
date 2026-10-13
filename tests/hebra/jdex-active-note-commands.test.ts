@@ -3,7 +3,7 @@
 // Commands on the ACTIVE note (audit 12 oct 2026, finding 6): `activateJdex` over the fake
 // host, in-memory library, real journal. Origin is a CONTENT ID (21.11), not the `.01`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PluginFolder } from 'hebra-plugin-api';
+import type { PluginFolder } from 'hebra-plugin-api/v2';
 import {
   JDEX_COMMAND_ARCHIVE_NOTE,
   JDEX_COMMAND_COPY_JD_PATH,

@@ -16,7 +16,7 @@
  * (`jdexFolderPairRename`, que `jdex-folder-rename.ts` ofrece solo cuando el renombrado
  * de la carpeta se ha completado) y «none» no cambia nada del sistema JDex.
  */
-import type { PluginFolderRenameEvent } from 'hebra-plugin-api';
+import type { PluginFolderRenameEvent } from 'hebra-plugin-api/v2';
 import { pairAction, pairBlockedByRepeat, renumberMessage, type JdIndex, type PairAction } from './engine';
 import { jdexNoteFileStem, type JdexLibraryWalk } from './library-index';
 

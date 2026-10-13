@@ -6,7 +6,7 @@
  * real, así que aquí se usa el paquete `yaml` (empaquetado en `hebra-main.mjs`) sobre el
  * texto del bloque, cuyos límites da `api.markdown.frontmatterRange`.
  */
-import type { PluginMarkdown } from 'hebra-plugin-api';
+import type { PluginMarkdown } from 'hebra-plugin-api/v2';
 import { parse as parseYaml } from 'yaml';
 
 /** Lo único que este fichero pide a `api.markdown`. */

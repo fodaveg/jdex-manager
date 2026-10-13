@@ -18,7 +18,7 @@ import type {
   PluginNotesPage,
   PluginNotesScope,
   PluginVault
-} from 'hebra-plugin-api';
+} from 'hebra-plugin-api/v2';
 import {
   inboxFolders,
   buildIndex,

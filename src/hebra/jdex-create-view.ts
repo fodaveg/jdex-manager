@@ -62,7 +62,7 @@ export interface CreateIdDialogOptions {
 }
 
 export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOptions): void {
-  const heading = document.createElement('p');
+  const heading = el.ownerDocument.createElement('p');
   el.append(heading);
   let category = options.categories[0];
   let id = category ? (nextFreeId(category.number, knownIds(options.index, category?.system)) ?? '') : '';
@@ -70,7 +70,7 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
   let createFolder = options.createFolderDefault;
   let createPattern = options.createPatternDefault ?? false;
 
-  const categoryField = selectField(
+  const categoryField = selectField(el.ownerDocument,
     'Categoría',
     options.categories.map((c) => ({ value: systemKey(c.number, c.system), label: c.label })),
     category ? systemKey(category.number, category.system) : '',
@@ -83,28 +83,28 @@ export function mountCreateIdDialog(el: HTMLElement, options: CreateIdDialogOpti
       refresh();
     }
   );
-  const idField = textField('Número', id, (value) => {
+  const idField = textField(el.ownerDocument, 'Número', id, (value) => {
     id = value.trim();
     refresh();
   });
-  const titleField = textField('Título', title, (value) => {
+  const titleField = textField(el.ownerDocument, 'Título', title, (value) => {
     title = value;
     refresh();
   });
-  const { row: folderRow } = toggleField(
+  const { row: folderRow } = toggleField(el.ownerDocument,
     'Crear también la carpeta',
     'Dentro de la carpeta de la categoría en la raíz del sistema.',
     createFolder,
     (value) => (createFolder = value)
   );
-  const { row: patternRow } = toggleField(
+  const { row: patternRow } = toggleField(el.ownerDocument,
     'Crear también el patrón de subcarpetas',
     'Se aplica el patrón de la categoría o, si no tiene uno, el predeterminado.',
     createPattern,
     (value) => (createPattern = value)
   );
-  const error = errorBanner();
-  const submit = primaryButton('Crear', () => void trySubmit());
+  const error = errorBanner(el.ownerDocument, );
+  const submit = primaryButton(el.ownerDocument, 'Crear', () => void trySubmit());
 
   el.append(categoryField.row, idField.row, titleField.row, folderRow, patternRow, error, submit);
   focusFirst(el);
@@ -179,7 +179,7 @@ export function mountCreateCategoryDialog(
   let createInbox = true;
   let createArchive = true;
 
-  const areaField = selectField(
+  const areaField = selectField(el.ownerDocument,
     'Área',
     options.areas.map((a) => ({ value: systemKey(a.code, a.system), label: a.label })),
     area ? systemKey(area.code, area.system) : '',
@@ -192,34 +192,34 @@ export function mountCreateCategoryDialog(
       refresh();
     }
   );
-  const numberField = textField('Número', number, (value) => {
+  const numberField = textField(el.ownerDocument, 'Número', number, (value) => {
     number = value.trim();
     refresh();
   });
-  const titleField = textField('Título', title, (value) => {
+  const titleField = textField(el.ownerDocument, 'Título', title, (value) => {
     title = value;
     refresh();
   });
-  const { row: folderRow } = toggleField(
+  const { row: folderRow } = toggleField(el.ownerDocument,
     'Crear también la carpeta',
     'Dentro de la carpeta del área en la raíz del sistema.',
     createFolder,
     (value) => (createFolder = value)
   );
-  const { row: inboxRow } = toggleField(
+  const { row: inboxRow } = toggleField(el.ownerDocument,
     'Crear el inbox (.01)',
     '',
     createInbox,
     (v) => (createInbox = v)
   );
-  const { row: archiveRow } = toggleField(
+  const { row: archiveRow } = toggleField(el.ownerDocument,
     'Crear el archivo (.09)',
     '',
     createArchive,
     (v) => (createArchive = v)
   );
-  const error = errorBanner();
-  const submit = primaryButton('Crear', () => void trySubmit());
+  const error = errorBanner(el.ownerDocument, );
+  const submit = primaryButton(el.ownerDocument, 'Crear', () => void trySubmit());
 
   el.append(
     areaField.row,
@@ -312,28 +312,28 @@ export function mountCreateAreaDialog(el: HTMLElement, options: CreateAreaDialog
   let createFolder = options.createFolderDefault;
   let createManagement = true;
 
-  const numberField = textField('Área', numberText, (value) => {
+  const numberField = textField(el.ownerDocument, 'Área', numberText, (value) => {
     numberText = value.trim();
     refresh();
   });
-  const titleField = textField('Título', title, (value) => {
+  const titleField = textField(el.ownerDocument, 'Título', title, (value) => {
     title = value;
     refresh();
   });
-  const { row: folderRow } = toggleField(
+  const { row: folderRow } = toggleField(el.ownerDocument,
     'Crear también la carpeta',
     'En la raíz del sistema.',
     createFolder,
     (v) => (createFolder = v)
   );
-  const { row: managementRow } = toggleField(
+  const { row: managementRow } = toggleField(el.ownerDocument,
     'Crear la categoría de gestión (A0)',
     'Gestión del área.',
     createManagement,
     (v) => (createManagement = v)
   );
-  const error = errorBanner();
-  const submit = primaryButton('Crear', () => void trySubmit());
+  const error = errorBanner(el.ownerDocument, );
+  const submit = primaryButton(el.ownerDocument, 'Crear', () => void trySubmit());
 
   el.append(numberField.row, titleField.row, folderRow, managementRow, error, submit);
   focusFirst(el);
@@ -412,7 +412,7 @@ export function mountCreateHeaderDialog(el: HTMLElement, options: CreateHeaderDi
   let title = '';
   let emoji = '';
 
-  const categoryField = selectField(
+  const categoryField = selectField(el.ownerDocument,
     'Categoría',
     options.categories.map((c) => ({ value: systemKey(c.number, c.system), label: c.label })),
     category ? systemKey(category.number, category.system) : '',
@@ -425,19 +425,19 @@ export function mountCreateHeaderDialog(el: HTMLElement, options: CreateHeaderDi
       refresh();
     }
   );
-  const idField = textField('Número', id, (value) => {
+  const idField = textField(el.ownerDocument, 'Número', id, (value) => {
     id = value.trim();
     refresh();
   });
-  const emojiField = textField('Emoji (opcional)', emoji, (value) => {
+  const emojiField = textField(el.ownerDocument, 'Emoji (opcional)', emoji, (value) => {
     emoji = value.trim();
   });
-  const titleField = textField('Título', title, (value) => {
+  const titleField = textField(el.ownerDocument, 'Título', title, (value) => {
     title = value;
     refresh();
   });
-  const error = errorBanner();
-  const submit = primaryButton('Crear', () => void trySubmit());
+  const error = errorBanner(el.ownerDocument, );
+  const submit = primaryButton(el.ownerDocument, 'Crear', () => void trySubmit());
 
   el.append(categoryField.row, idField.row, emojiField.row, titleField.row, error, submit);
   focusFirst(el);
@@ -500,21 +500,21 @@ export function mountCreateChildDialog(el: HTMLElement, options: CreateChildDial
   let title = '';
   let createFolder = options.createFolderDefault;
 
-  const parentLabel = document.createElement('p');
+  const parentLabel = el.ownerDocument.createElement('p');
   parentLabel.className = 'hebra-jdex-dialog-hint';
   parentLabel.textContent = `Hijo de ${options.parent.label} (${options.parent.id}+).`;
-  const titleField = textField('Título', title, (value) => {
+  const titleField = textField(el.ownerDocument, 'Título', title, (value) => {
     title = value;
     refresh();
   });
-  const { row: folderRow } = toggleField(
+  const { row: folderRow } = toggleField(el.ownerDocument,
     'Crear también la carpeta',
     'Una carpeta «+ Título» dentro de la carpeta del padre.',
     createFolder,
     (v) => (createFolder = v)
   );
-  const error = errorBanner();
-  const submit = primaryButton('Crear', () => void trySubmit());
+  const error = errorBanner(el.ownerDocument, );
+  const submit = primaryButton(el.ownerDocument, 'Crear', () => void trySubmit());
 
   el.append(parentLabel, titleField.row, folderRow, error, submit);
   focusFirst(el);

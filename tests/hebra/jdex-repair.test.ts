@@ -1,4 +1,4 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIndex, DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import { applyJdexRepair } from '../../src/hebra/jdex-repair';
@@ -32,7 +32,7 @@ function setup(notePaths: string[] = []) {
   const walk: JdexLibraryWalk = { rootFolderId: vault.rootFolderId(), folderPaths, systemFolderPaths: [...folderPaths.values()], systemNotes: [] };
   const index = buildIndex({ systemRoot: '', jdexFolder: jdex, folderPaths: [...folderPaths.values()], notePaths });
   const settings = { ...DEFAULT_SETTINGS, jdexFolder: jdex, systemRoot: '' };
-  const markdown = createFakePluginApi().api.markdown;
+  const markdown = createFakePluginApiV2().api.markdown;
   return { vault, walk, index, settings, markdown };
 }
 

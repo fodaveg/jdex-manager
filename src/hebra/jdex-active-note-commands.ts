@@ -5,7 +5,7 @@
  * `search-in-category` in Obsidian. Hebra's `PluginCommandDefinition` has no
  * enabled/disabled flag, so "disabled outside an ID" is a notice, never a silent no-op.
  */
-import type { HebraPluginApi, PluginActiveNote } from 'hebra-plugin-api';
+import type { HebraPluginApi, PluginActiveNote } from 'hebra-plugin-api/v2';
 import { isRepeatedId, locate, repeatedIdMessage, sameSystem, systemKey, type DateFormat, type IdEntry, type JdIndex } from './engine';
 import { archiveJdexInboxNote, sendJdexNoteToInbox } from './jdex-inbox-process';
 import type { JdexJournal } from './jdex-journal';
@@ -69,7 +69,7 @@ export interface JdexActiveNoteCommandsDeps {
 export function registerJdexActiveNoteCommands(deps: JdexActiveNoteCommandsDeps): () => void {
   const { api, journal } = deps;
   const notice = (text: string) => api.ui.notice(text);
-  const fail = (error: unknown) => notice(error instanceof Error ? error.message : String(error));
+  const fail = (error: unknown) => notice(pluginErrorMessage(error));
 
   /** The active note inside an ID (or its JDex note when `allowJdexNote`); else a notice. */
   function resolve(allowJdexNote: boolean, pickNoteOrFolder = true) {
@@ -168,3 +168,4 @@ export function registerJdexActiveNoteCommands(deps: JdexActiveNoteCommandsDeps)
     for (const off of offs) off();
   };
 }
+import { pluginErrorMessage } from './error-message';

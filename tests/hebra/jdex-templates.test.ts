@@ -1,4 +1,4 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_TEMPLATES, DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import { resolveJdexTemplate } from '../../src/hebra/jdex-create-write';
@@ -6,7 +6,7 @@ import { jdexTemplatesOutcomeMessage, writeJdexBuiltinTemplates } from '../../sr
 import type { JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
 import { FakeJdexVault } from './support/fakes';
 
-const markdown = createFakePluginApi().api.markdown;
+const markdown = createFakePluginApiV2().api.markdown;
 const TEMPLATES = '00-09 Sistema/00 Sistema/00.03 Plantillas';
 
 function walkWith(notes: JdexNoteRef[] = []): JdexLibraryWalk {

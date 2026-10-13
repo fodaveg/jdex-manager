@@ -61,7 +61,7 @@ function actionsFor(entry: IdEntry, hasActiveNote: boolean, retiredAt: string | 
 export function mountJdexGotoView(el: HTMLElement, options: JdexGotoViewOptions): void {
   let panel: 'list' | 'actions' = 'list';
 
-  const actions = document.createElement('div');
+  const actions = el.ownerDocument.createElement('div');
   actions.className = 'hebra-jdex-goto-actions';
   actions.hidden = true;
 
@@ -84,7 +84,7 @@ export function mountJdexGotoView(el: HTMLElement, options: JdexGotoViewOptions)
     action: JdexGotoAction,
     onClick: () => void
   ): HTMLButtonElement {
-    const button = document.createElement('button');
+    const button = el.ownerDocument.createElement('button');
     button.type = 'button';
     button.className = 'hebra-jdex-dialog-secondary hebra-jdex-goto-action';
     button.textContent = label;
@@ -101,10 +101,10 @@ export function mountJdexGotoView(el: HTMLElement, options: JdexGotoViewOptions)
     actions.hidden = false;
     actions.replaceChildren();
 
-    const heading = document.createElement('p');
+    const heading = el.ownerDocument.createElement('p');
     heading.className = 'hebra-jdex-goto-heading';
     heading.textContent = entry.label;
-    const back = document.createElement('button');
+    const back = el.ownerDocument.createElement('button');
     back.type = 'button';
     back.className = 'hebra-jdex-goto-back';
     back.textContent = '‹ Volver a buscar';

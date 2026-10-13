@@ -1,5 +1,5 @@
 /** Manual system report in the configured 00.02 folder. No scheduler is installed. */
-import type { PluginNote, PluginVault } from 'hebra-plugin-api';
+import type { PluginNote, PluginVault } from 'hebra-plugin-api/v2';
 import { previousSystemSnapshot, renderSystemReport, systemReportName, type Finding, type JdIndex, type JdexManagerSettings } from './engine';
 import { jdexHealthPaths } from './jdex-health';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';

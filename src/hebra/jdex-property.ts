@@ -6,7 +6,7 @@
  * that there was nothing to do: after each key, the written frontmatter is read back
  * and compared with the value that was asked for.
  */
-import type { PluginMarkdown } from 'hebra-plugin-api';
+import type { PluginMarkdown } from 'hebra-plugin-api/v2';
 
 export type JdexPropertyValue = string | readonly string[] | null;
 

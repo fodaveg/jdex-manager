@@ -9,7 +9,7 @@
  * revalidated right before writing (`live()`: pending notices applied, then the current
  * walk and index). A submit that arrives after the module was turned off writes nothing.
  */
-import type { PluginModalHandle, PluginUi, PluginVault } from 'hebra-plugin-api';
+import type { PluginModalHandle, PluginUi, PluginVault } from 'hebra-plugin-api/v2';
 import type { JdIndex } from './engine';
 import type { JdexCreateOutcome } from './jdex-create-write';
 import type { JdexJournal } from './jdex-journal';
@@ -64,9 +64,10 @@ export function openJdexCreateDialog<Request>(
       if (outcome.folderNotice) ports.ui.notice(outcome.folderNotice);
       ports.openNote(outcome.note.id);
     } catch (error) {
-      ports.ui.notice(error instanceof Error ? error.message : String(error));
+      ports.ui.notice(pluginErrorMessage(error));
     }
   };
   handle = ports.ui.openModal((el) => spec.mount(el, submit), { title: spec.title });
   return handle;
 }
+import { pluginErrorMessage } from './error-message';

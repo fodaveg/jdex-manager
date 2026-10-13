@@ -1,11 +1,11 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it } from 'vitest';
 import { buildIndex, type IndexInput } from '../../src/hebra/engine';
 import { loadJdexIdSection } from '../../src/hebra/jdex-id-section';
 import type { JdexLibraryWalk } from '../../src/hebra/library-index';
 import { FakeJdexVault, fakeNote } from './support/fakes';
 
-const markdown = createFakePluginApi().api.markdown;
+const markdown = createFakePluginApiV2().api.markdown;
 
 const INDEX_INPUT: IndexInput = {
   systemRoot: '',

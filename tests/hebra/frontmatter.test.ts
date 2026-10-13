@@ -1,10 +1,10 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it } from 'vitest';
 import { jdexFrontmatterString, readJdexFrontmatter } from '../../src/hebra/frontmatter';
 
 // `frontmatterRange` del host falso del paquete: el de Hebra (`findFrontmatterAtStart`) lo
 // cubre su propio test de contrato; aquí se prueba el parseo YAML sobre el rango que da.
-const markdown = createFakePluginApi().api.markdown;
+const markdown = createFakePluginApiV2().api.markdown;
 
 describe('readJdexFrontmatter', () => {
   it('parsea el YAML de verdad: «jd: 21.20» sin comillas es el número 21.2', () => {

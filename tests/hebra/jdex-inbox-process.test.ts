@@ -1,4 +1,4 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIndex } from '../../src/hebra/engine';
 import {
@@ -13,7 +13,7 @@ import {
 import type { JdexInboxSummary, JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
 import { FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 
-const markdown = createFakePluginApi().api.markdown;
+const markdown = createFakePluginApiV2().api.markdown;
 
 function note(id: string, folderId: string, title: string): JdexNoteRef {
   return { id, folderId, title, path: `${title}.md` };

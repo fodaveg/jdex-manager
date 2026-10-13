@@ -4,7 +4,7 @@
  * each step, never a copy, and remounts when the index changes (`refresh`), except while
  * «Reparar» walks its selection (it rebuilds between steps and remounts once at its end).
  */
-import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
+import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
 import type { Finding, JdIndex, JdexManagerSettings } from './engine';
 import { mountJdexAuditView } from './jdex-audit-view';
 import type { JdexJournal } from './jdex-journal';
@@ -40,7 +40,7 @@ export interface JdexAuditPanel {
   refresh(): void;
 }
 
-const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const errorMessage = (error: unknown): string => (pluginErrorMessage(error));
 
 /** Creation first, then frontmatter and renames, then moves. */
 function repairOrder(finding: Finding): number {
@@ -154,3 +154,4 @@ export function createJdexAuditPanel(deps: JdexAuditPanelDeps): JdexAuditPanel {
     }
   };
 }
+import { pluginErrorMessage } from './error-message';

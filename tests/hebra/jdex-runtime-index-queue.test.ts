@@ -5,7 +5,7 @@
  * the initial rebuild must not block activation, and the notice batch has a max wait.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PluginNoteSummary } from 'hebra-plugin-api';
+import type { PluginNoteSummary } from 'hebra-plugin-api/v2';
 import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import {
   activateJdex,

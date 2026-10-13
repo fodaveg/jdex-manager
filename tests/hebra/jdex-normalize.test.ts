@@ -9,9 +9,9 @@ import {
 import { applyJdexFrontmatterFixes, frontmatterFindingsFor } from '../../src/hebra/jdex-normalize';
 import { FakeJdexVault, fakeNote, fakeSetProperty } from './support/fakes';
 import { parse as parseYaml } from 'yaml';
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 
-const markdown = { ...createFakePluginApi().api.markdown, setProperty: fakeSetProperty };
+const markdown = { ...createFakePluginApiV2().api.markdown, setProperty: fakeSetProperty };
 
 const JDEX_FOLDER = '00.00 JDex';
 

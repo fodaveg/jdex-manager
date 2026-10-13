@@ -1,7 +1,7 @@
 /**
  * Copy, move and retire with fake ports (audit 12 Oct 2026, 5.1 cut 5): no runtime, no DOM.
  */
-import type { PluginVault } from 'hebra-plugin-api';
+import type { PluginVault } from 'hebra-plugin-api/v2';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIndex, type IdEntry } from '../../src/hebra/engine';
 import { copyJdexText, jdexRetireQuestion, moveJdexNoteToEntry, retireJdexEntry, type JdexActionPorts } from '../../src/hebra/jdex-actions';

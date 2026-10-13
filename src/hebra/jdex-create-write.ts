@@ -9,7 +9,7 @@
  * Nada se sobrescribe NUNCA: cada función rechaza si el número o el nombre ya están en
  * uso (nota o carpeta), antes de escribir nada.
  */
-import type { PluginFolder, PluginMarkdown, PluginNote, PluginVault } from 'hebra-plugin-api';
+import type { PluginFolder, PluginMarkdown, PluginNote, PluginVault } from 'hebra-plugin-api/v2';
 import {
   areaCode,
   selectCreationSystem,

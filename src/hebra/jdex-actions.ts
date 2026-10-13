@@ -4,7 +4,7 @@
  * journal and the index, so each one runs without activating the runtime. The runtime
  * passes the real ports; `tests/hebra/jdex-actions.test.ts` passes fakes.
  */
-import type { PluginVault } from 'hebra-plugin-api';
+import type { PluginVault } from 'hebra-plugin-api/v2';
 import { isRepeatedId, planMoveToId, repeatedIdMessage, type IdEntry, type JdIndex, type MoveToIdHost } from './engine';
 import type { JdexJournal } from './jdex-journal';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
@@ -24,7 +24,7 @@ export interface JdexActionPorts {
 /** What Hebra allows when moving a note into an ID: no folder creation, no dated name. */
 const HEBRA_MOVE_HOST: MoveToIdHost = { createMissingFolder: false, dateOnMove: false };
 
-const errorMessage =(error: unknown): string => (error instanceof Error ? error.message : String(error));
+const errorMessage =(error: unknown): string => (pluginErrorMessage(error));
 
 /** «Copiar ID / ruta / ruta JD». */
 export async function copyJdexText(
@@ -107,3 +107,4 @@ export async function retireJdexEntry(
     await ports.rebuild().catch((cause: unknown) => ports.report(cause, 'rebuild-tras-retirada-parcial'));
   }
 }
+import { pluginErrorMessage } from './error-message';

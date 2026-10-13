@@ -7,16 +7,17 @@
  */
 
 export function textField(
+  doc: Document,
   label: string,
   initial: string,
   onChange: (value: string) => void,
   placeholder = ''
 ): { row: HTMLElement; input: HTMLInputElement } {
-  const row = document.createElement('div');
+  const row = doc.createElement('div');
   row.className = 'hebra-jdex-field';
-  const labelEl = document.createElement('label');
+  const labelEl = doc.createElement('label');
   labelEl.textContent = label;
-  const input = document.createElement('input');
+  const input = doc.createElement('input');
   input.type = 'text';
   input.value = initial;
   input.placeholder = placeholder;
@@ -27,18 +28,19 @@ export function textField(
 }
 
 export function selectField(
+  doc: Document,
   label: string,
   options: readonly { value: string; label: string }[],
   initial: string,
   onChange: (value: string) => void
 ): { row: HTMLElement; select: HTMLSelectElement } {
-  const row = document.createElement('div');
+  const row = doc.createElement('div');
   row.className = 'hebra-jdex-field';
-  const labelEl = document.createElement('label');
+  const labelEl = doc.createElement('label');
   labelEl.textContent = label;
-  const select = document.createElement('select');
+  const select = doc.createElement('select');
   for (const option of options) {
-    const optionEl = document.createElement('option');
+    const optionEl = doc.createElement('option');
     optionEl.value = option.value;
     optionEl.textContent = option.label;
     select.append(optionEl);
@@ -51,22 +53,23 @@ export function selectField(
 }
 
 export function toggleField(
+  doc: Document,
   label: string,
   hint: string,
   initial: boolean,
   onChange: (value: boolean) => void
 ): { row: HTMLElement; checkbox: HTMLInputElement } {
-  const row = document.createElement('div');
+  const row = doc.createElement('div');
   row.className = 'hebra-jdex-field hebra-jdex-field-toggle';
-  const labelEl = document.createElement('label');
-  const checkbox = document.createElement('input');
+  const labelEl = doc.createElement('label');
+  const checkbox = doc.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.checked = initial;
   checkbox.addEventListener('change', () => onChange(checkbox.checked));
-  labelEl.append(checkbox, document.createTextNode(label));
+  labelEl.append(checkbox, doc.createTextNode(label));
   row.append(labelEl);
   if (hint !== '') {
-    const hintEl = document.createElement('small');
+    const hintEl = doc.createElement('small');
     hintEl.textContent = hint;
     row.append(hintEl);
   }
@@ -75,15 +78,15 @@ export function toggleField(
 
 /** Mensaje de validación en vivo (`refreshValidation` del plugin de Obsidian): vacío
  *  cuando no hay error. */
-export function errorBanner(): HTMLElement {
-  const el = document.createElement('p');
+export function errorBanner(doc: Document): HTMLElement {
+  const el = doc.createElement('p');
   el.className = 'hebra-jdex-dialog-error';
   el.setAttribute('role', 'alert');
   return el;
 }
 
-export function primaryButton(text: string, onClick: () => void): HTMLButtonElement {
-  const button = document.createElement('button');
+export function primaryButton(doc: Document, text: string, onClick: () => void): HTMLButtonElement {
+  const button = doc.createElement('button');
   button.type = 'button';
   button.className = 'hebra-jdex-dialog-primary';
   button.textContent = text;

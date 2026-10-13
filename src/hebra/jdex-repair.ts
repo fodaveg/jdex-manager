@@ -1,6 +1,6 @@
 /** Applies an audited repair through Hebra's vault API. Every write may be wrapped by
  * the durable journal; this module never relies on paths as stable note identities. */
-import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api';
+import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
 import { areaCode, isConflictCopyPath, renderTemplate, selectSystem, todayIso, type Fix, type JdIndex, type JdexManagerSettings } from './engine';
 import { applyJdexFrontmatterFixes } from './jdex-normalize';
 import { resolveJdexTemplate } from './jdex-create-write';

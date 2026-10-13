@@ -5,8 +5,8 @@
  * - `FakeJdexVault`: un `PluginVault` en memoria CON jerarquía de carpetas, `noteMove`,
  *   `folderRename`/`folderMove`, `noteSummary` y paginado por carpeta. Sustituye a
  *   `fake-jdex-write-library.ts` de Hebra (que doblaba el `LibraryStorePort`); el host
- *   falso del paquete (`createFakePluginApi`) solo tiene notas en la raíz y no modela nada
- *   de esto. Donde la prueba solo necesita notas en la raíz se usa `createFakePluginApi`
+ *   falso del paquete (`createFakePluginApiV2`) solo tiene notas en la raíz y no modela nada
+ *   de esto. Donde la prueba solo necesita notas en la raíz se usa `createFakePluginApiV2`
  *   a secas (`jdex-write.test.ts`).
  * - `createJdexTestApi`: un `HebraPluginApi` completo = el host falso del paquete + el
  *   vault de arriba + un `workspace` que se puede disparar a mano + un `ui` que monta de
@@ -24,6 +24,7 @@ import type {
   HebraPluginApi,
   PluginActiveNote,
   PluginCapability,
+  PluginDeviceStorage,
   PluginFile,
   PluginFilesPage,
   PluginFolder,
@@ -44,8 +45,9 @@ import type {
   PluginUnregister,
   PluginVault,
   PluginWorkspace
-} from 'hebra-plugin-api';
-import { createFakePluginApi, FAKE_ROOT_FOLDER_ID, type FakePluginApi } from 'hebra-plugin-api/testing';
+} from 'hebra-plugin-api/v2';
+import { createFakePluginApiV2, type FakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
+import { FAKE_ROOT_FOLDER_ID } from 'hebra-plugin-api/testing';
 import { setFrontmatterProperty } from '../../../src/vault/frontmatter-lines';
 
 export { FAKE_ROOT_FOLDER_ID };
@@ -157,14 +159,30 @@ export function assertHostRewriteBatchSize(count: number): void {
   }
 }
 
-/** The package fake vault (`createFakePluginApi`) has no batch limit: this adds the host one. */
+/** The package fake vault (`createFakePluginApiV2`) has no batch limit: this adds the host one. */
 export function withHostRewriteBatchLimit<T extends Pick<PluginVault, 'notesRewriteBatch'>>(vault: T): T {
   const original = vault.notesRewriteBatch.bind(vault);
-  vault.notesRewriteBatch = async (entries, options) => {
+  const limited: T['notesRewriteBatch'] = async (entries, options) => {
     assertHostRewriteBatchSize(entries.length);
     return original(entries, options);
   };
-  return vault;
+  // The published v2 API is frozen, so the host limit lives in a facade.
+  return new Proxy({} as T, { get: (_target, key) => key === 'notesRewriteBatch' ? limited : Reflect.get(vault, key) });
+}
+
+/** L14 device mirror for the published v2 fake, which leaves extensions unplugged by default. */
+export function fakeDeviceExtension() {
+  return {
+    device: ({ snapshot }: { snapshot: { device: Readonly<Record<string, unknown>> } }): PluginDeviceStorage => {
+      const values = new Map(Object.entries(snapshot.device));
+      return {
+        get: <T>(key: string) => (values.get(key) ?? null) as T | null,
+        set: (key, value) => { values.set(key, value); },
+        remove: (key) => { values.delete(key); },
+        flush: async () => {}
+      };
+    }
+  };
 }
 
 /**
@@ -622,6 +640,7 @@ export const FOLDER_RENAME_GUARD_TIMEOUT_MS = 5_000;
 export class FakeWorkspace {
   active: PluginActiveNote | null = null;
   readonly openNote = vi.fn<(id: string) => void>();
+  readonly openView = vi.fn<(id: string) => void>();
   readonly selectFolder = vi.fn<(id: string) => void>();
   readonly openSearch = vi.fn<(query: string) => void>();
   readonly #activeListeners = new Set<(note: PluginActiveNote | null) => void>();
@@ -634,6 +653,7 @@ export class FakeWorkspace {
     activeNote: () => this.active,
     onActiveNoteChange: (listener) => this.#subscribe(this.#activeListeners, listener),
     openNote: (id) => this.openNote(id),
+    openView: (id) => this.openView(id),
     selectFolder: (id) => this.selectFolder(id),
     openSearch: (query) => this.openSearch(query),
     onFoldersChange: (listener) => this.#subscribe(this.#foldersListeners, listener),
@@ -781,7 +801,7 @@ export interface JdexTestApiOptions {
 
 export interface JdexTestApi {
   api: HebraPluginApi;
-  fake: FakePluginApi;
+  fake: FakePluginApiV2;
   vault: PluginVault;
   workspace: FakeWorkspace;
   /** Settings written by another tab or device (`applySyncedPluginSettings` in Hebra):
@@ -826,8 +846,9 @@ export function hostLikeSettingsStorage(base: HebraPluginApi['storage']['setting
 }
 
 export async function createJdexTestApi(options: JdexTestApiOptions = {}): Promise<JdexTestApi> {
-  const fake = createFakePluginApi({
+  const fake = createFakePluginApiV2({
     capabilities: options.capabilities ?? ['vault.read', 'vault.write', 'editor'],
+    extensions: fakeDeviceExtension(),
     ...(options.isoDates !== undefined ? { isoDates: options.isoDates } : {})
   });
   const workspace = new FakeWorkspace();
@@ -835,10 +856,22 @@ export async function createJdexTestApi(options: JdexTestApiOptions = {}): Promi
   const markdown: PluginMarkdown = { ...fake.api.markdown, setProperty: fakeSetProperty, frontmatter: fakeFrontmatter };
   // The host's `onChange` also fires after the plugin's own saves.
   const settings = hostLikeSettingsStorage(fake.api.storage.settings);
+  // The v2 fake leaves IndexedDB unplugged; JDex uses settings and the L14 device mirror.
+  const storage = new Proxy({} as HebraPluginApi['storage'], {
+    get(_target, key) {
+      if (key === 'settings') return settings.settings;
+      return Reflect.get(fake.api.storage, key) as unknown;
+    }
+  });
   const api: HebraPluginApi = {
     ...fake.api,
-    storage: { ...fake.api.storage, settings: settings.settings },
-    ui: domUi(fake.api.ui),
+    storage,
+    // The published v2 fake provides the editor and RPC but has no L5 surface manager.
+    // Its underlying v1 UI records views for these DOM-focused adapter tests.
+    ui: domUi(fake.host.api.ui as unknown as PluginUi),
+    // The published fake has no L5 surface clipboard. Keep a gesture-compatible
+    // test port so existing command tests can observe the text they request.
+    clipboard: { writeText: (text) => navigator.clipboard.writeText(text) },
     vault,
     workspace: workspace.api,
     markdown

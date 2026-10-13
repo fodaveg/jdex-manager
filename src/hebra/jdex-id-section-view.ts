@@ -42,8 +42,9 @@ function formatDate(ms: number, iso: boolean): string {
 /** Mientras `loadJdexIdSection` está en vuelo (la pestaña acaba de montarse o la nota
  *  activa acaba de cambiar). */
 export function mountJdexIdSectionLoading(el: HTMLElement): void {
+  const doc = el.ownerDocument;
   el.replaceChildren();
-  const loading = document.createElement('p');
+  const loading = doc.createElement('p');
   loading.className = 'hebra-jdex-section-empty';
   loading.setAttribute('role', 'status');
   loading.textContent = 'Cargando…';
@@ -51,14 +52,15 @@ export function mountJdexIdSectionLoading(el: HTMLElement): void {
 }
 
 function fileRow(
+  doc: Document,
   file: JdexIdSectionFile,
   onOpenNote: (id: string) => void,
   iso: boolean
 ): HTMLLIElement {
-  const row = document.createElement('li');
+  const row = doc.createElement('li');
   row.className = 'hebra-jdex-section-row';
   if (file.kind === 'note' && file.id !== undefined) {
-    const button = document.createElement('button');
+    const button = doc.createElement('button');
     button.type = 'button';
     button.className = 'hebra-jdex-section-link';
     button.textContent = file.name;
@@ -66,42 +68,43 @@ function fileRow(
     button.addEventListener('click', () => onOpenNote(id));
     row.append(button);
   } else {
-    const span = document.createElement('span');
+    const span = doc.createElement('span');
     span.textContent = file.name;
     row.append(span);
   }
-  const date = document.createElement('small');
+  const date = doc.createElement('small');
   date.textContent = formatDate(file.date, iso);
   row.append(date);
   return row;
 }
 
 function entriesSection(
+  doc: Document,
   title: string,
   entries: readonly IdEntry[],
   emptyText: string,
   onGoto: (entry: IdEntry) => void,
   extra?: HTMLElement
 ): HTMLElement {
-  const section = document.createElement('section');
+  const section = doc.createElement('section');
   section.className = 'hebra-jdex-section-block';
-  const heading = document.createElement('h3');
+  const heading = doc.createElement('h3');
   heading.textContent = `${title} (${entries.length})`;
   section.append(heading);
   if (extra) section.append(extra);
   if (entries.length === 0) {
-    const empty = document.createElement('p');
+    const empty = doc.createElement('p');
     empty.className = 'hebra-jdex-section-empty';
     empty.textContent = emptyText;
     section.append(empty);
     return section;
   }
-  const list = document.createElement('ul');
+  const list = doc.createElement('ul');
   list.className = 'hebra-jdex-section-list';
   for (const entry of entries) {
-    const row = document.createElement('li');
+    const row = doc.createElement('li');
     row.className = 'hebra-jdex-section-row';
-    const button = document.createElement('button');
+    const button = doc.createElement('button');
     button.type = 'button';
     button.className = 'hebra-jdex-section-link';
     button.textContent = entry.label;
@@ -119,10 +122,11 @@ export function mountJdexIdSectionView(
   el: HTMLElement,
   options: JdexIdSectionViewOptions
 ): () => void {
+  const doc = el.ownerDocument;
   el.replaceChildren();
   const { data } = options;
   if (!data.entry) {
-    const empty = document.createElement('p');
+    const empty = doc.createElement('p');
     empty.className = 'hebra-jdex-section-empty';
     empty.textContent = 'Esta nota no vive en ningún ID del sistema JDex.';
     el.append(empty);
@@ -130,35 +134,35 @@ export function mountJdexIdSectionView(
   }
   const entry = data.entry;
 
-  const heading = document.createElement('p');
+  const heading = doc.createElement('p');
   heading.className = 'hebra-jdex-section-heading';
   heading.textContent = `${data.categoryLabel} › ${entry.label}`;
   el.append(heading);
 
   if (data.description !== '') {
-    const description = document.createElement('p');
+    const description = doc.createElement('p');
     description.className = 'hebra-jdex-section-description';
     description.textContent = data.description;
     el.append(description);
   }
 
-  const filesSection = document.createElement('section');
+  const filesSection = doc.createElement('section');
   filesSection.className = 'hebra-jdex-section-block';
-  const filesHeading = document.createElement('h3');
+  const filesHeading = doc.createElement('h3');
   filesHeading.textContent = `Ficheros de la carpeta (${data.files.length})`;
   filesSection.append(filesHeading);
   if (data.files.length === 0) {
-    const empty = document.createElement('p');
+    const empty = doc.createElement('p');
     empty.className = 'hebra-jdex-section-empty';
     empty.textContent = entry.folderPath ? 'La carpeta está vacía.' : 'Este ID no tiene carpeta.';
     filesSection.append(empty);
   } else {
-    const list = document.createElement('ul');
+    const list = doc.createElement('ul');
     list.className = 'hebra-jdex-section-list';
     const iso = options.isoDates();
-    for (const file of data.files) list.append(fileRow(file, (id) => options.onOpenNote(id), iso));
+    for (const file of data.files) list.append(fileRow(doc, file, (id) => options.onOpenNote(id), iso));
     filesSection.append(list);
-    const order = document.createElement('p');
+    const order = doc.createElement('p');
     order.className = 'hebra-jdex-section-hint';
     order.textContent = 'Las más recientes primero.';
     filesSection.append(order);
@@ -169,7 +173,7 @@ export function mountJdexIdSectionView(
     data.truncated?.files ? `${limit} ficheros` : ''
   ].filter((part) => part !== '');
   if (cut.length > 0) {
-    const notice = document.createElement('p');
+    const notice = doc.createElement('p');
     notice.className = 'hebra-jdex-section-hint hebra-jdex-section-truncated';
     notice.setAttribute('role', 'status');
     notice.textContent = `Se muestran solo ${cut.join(' y ')}: hay más en la carpeta.`;
@@ -177,15 +181,16 @@ export function mountJdexIdSectionView(
   }
   el.append(filesSection);
 
-  const addChild = document.createElement('button');
+  const addChild = doc.createElement('button');
   addChild.type = 'button';
   addChild.className = 'hebra-jdex-dialog-secondary hebra-jdex-section-add';
   addChild.textContent = '+ Crear hijo';
   addChild.addEventListener('click', () => options.onCreateChild());
 
   el.append(
-    entriesSection('Hijos', data.children, 'Sin hijos.', (entry) => options.onGoto(entry), addChild),
+    entriesSection(doc, 'Hijos', data.children, 'Sin hijos.', (entry) => options.onGoto(entry), addChild),
     entriesSection(
+      doc,
       data.siblingsTitle ? `Hermanos (${data.siblingsTitle})` : 'Hermanos',
       data.siblings,
       data.siblingsTitle === ''

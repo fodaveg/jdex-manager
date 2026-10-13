@@ -4,11 +4,8 @@
  * open audit view follow the index (e615938a); turning the module off closes its dialogs
  * and stops an in-flight «Reparar» (0ebb2751).
  */
-import { EditorState, type Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SETTINGS, type IdEntry } from '../../src/hebra/engine';
-import { jdexEditorExtension } from '../../src/hebra/jdex-editor-extension';
+import { DEFAULT_SETTINGS } from '../../src/hebra/engine';
 import { JDEX_AUDIT_VIEW_ID, JDEX_COMMAND_CREATE_ID } from '../../src/hebra/jdex-runtime';
 import { activateJdex } from './support/activate';
 import { createJdexTestApi, FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
@@ -28,61 +25,12 @@ function seed(vault: FakeJdexVault): void {
   vault.seedNote(fakeNote('n-id', 'jdex', '---\ndescripcion: "Algo."\n---\n# 21.11 Algo\n'));
 }
 
-function editor(doc: string, extension: Extension): EditorView {
-  const parent = document.createElement('div');
-  document.body.append(parent);
-  return new EditorView({ parent, state: EditorState.create({ doc, extensions: [extension] }) });
-}
-
-const marks = (view: EditorView) => view.dom.querySelectorAll('.cm-hebra-jdex-number').length;
-
 afterEach(() => {
   document.body.replaceChildren();
   vi.useRealTimers();
 });
 
 describe('Hebra: views follow the index (e615938a)', () => {
-  it('the editor repaints numbers when the index changes, without editing the document', () => {
-    let ids: IdEntry[] = [];
-    let repaint: () => void = () => {};
-    const unsubscribe = vi.fn();
-    const view = editor('Ver 21.11.', jdexEditorExtension({
-      ids: () => ids,
-      onNavigate: vi.fn(),
-      subscribe: (callback) => {
-        repaint = callback;
-        return unsubscribe;
-      }
-    }));
-    expect(marks(view)).toBe(0);
-    ids = [{ id: '21.11', category: '21', title: 'Algo', label: '21.11 Algo', notePath: 'J/21.11 Algo.md' }];
-    const before = view.state.doc.toString();
-    repaint();
-    expect(marks(view)).toBe(1);
-    expect(view.state.doc.toString()).toBe(before);
-    ids = [];
-    repaint();
-    expect(marks(view)).toBe(0);
-    view.destroy();
-    expect(unsubscribe).toHaveBeenCalled();
-  });
-
-  it('an open editor marks an ID that arrives by sync, through the runtime', async () => {
-    const vault = new FakeJdexVault();
-    seed(vault);
-    const { api, fake, workspace } = await createJdexTestApi({ vault, settings: { ...DEFAULT_SETTINGS, jdexFolder: JDEX } });
-    const cleanup = await activateJdex(api);
-    const view = editor('Ver 21.15.', fake.recorded.extensions[0]);
-    expect(marks(view)).toBe(0);
-    vi.useFakeTimers();
-    vault.seedNote(fakeNote('n-new', 'jdex', '---\ndescripcion: "Nuevo."\n---\n# 21.15 Nuevo\n'));
-    workspace.emitNotes({ ids: ['n-new'], reason: 'sync' });
-    await vi.advanceTimersByTimeAsync(800);
-    expect(marks(view)).toBe(1);
-    view.destroy();
-    await cleanup();
-  });
-
   it('the open audit view shows the findings after an external change, not the mounted ones', async () => {
     const vault = new FakeJdexVault();
     seed(vault);

@@ -1,7 +1,7 @@
 /**
  * The one create dialog flow (audit 12 Oct 2026, 5.2) with fake ports: no runtime, no DOM.
  */
-import type { PluginVault } from 'hebra-plugin-api';
+import type { PluginVault } from 'hebra-plugin-api/v2';
 import { describe, expect, it, vi } from 'vitest';
 import type { JdIndex } from '../../src/hebra/engine';
 import { openJdexCreateDialog, type JdexCreateDialogPorts, type JdexLiveState } from '../../src/hebra/jdex-create-dialog';

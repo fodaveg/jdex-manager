@@ -8,17 +8,13 @@
 //                     package.json and the sha256 of the two files above
 //
 // and then runs the guard over `hebra-main.mjs`. Hebra loads the module from a `blob:`
-// URL, where a relative or dynamic import has no base, and lends it its own CodeMirror
-// (`hebraShared()` swaps each shared import for a read from Hebra's registry): a second
-// copy of `@codemirror/state` would break `EditorState` in the editor. So the guard fails
-// (exit 1, with the reason) on anything that would only break once loaded inside Hebra.
+// URL, where a relative or dynamic import has no base. API 2.0 runs in a separate frame;
+// its editor is declarative and the bundle must not import CodeMirror from Hebra or inline it.
 import esbuild from 'esbuild';
 import { createHash } from 'node:crypto';
 import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { hebraShared } from 'hebra-plugin-api/build';
-import { PLUGIN_SHARED_MODULES } from 'hebra-plugin-api/shared';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ENTRY = 'src/hebra/main.ts';
@@ -26,21 +22,6 @@ const STYLES_SOURCE = 'src/hebra/hebra-styles.css';
 const MAIN_FILE = 'hebra-main.mjs';
 const STYLES_FILE = 'hebra-styles.css';
 const MANIFEST_FILE = 'hebra.json';
-
-/**
- * Ranges declared in `hebra.json` for the shared modules the bundle actually imports
- * (spec section 3.2). They are the MINIMUM the plugin needs, not the version installed
- * here: Hebra checks them against its own copy at load time and turns the plugin off if
- * one is not satisfied. `assertInstalledSatisfies` keeps them honest at build time, and
- * tests/hebra/shared-minimums.test.ts justifies them: every symbol the plugin uses must exist
- * in the declared minimum (devDependencies `codemirror-*-min`, pinned to these lower bounds;
- * change both together). The symbols used exist since 6.0, so these floors are conservative,
- * not required by the code; do not raise them without a symbol that needs it.
- */
-export const SHARED_RANGES = {
-  '@codemirror/state': '^6.5.0',
-  '@codemirror/view': '^6.30.0'
-};
 
 /** Source text that only exists inside the real package: finding it in the bundle means a
  *  copy of that package was inlined instead of borrowed from Hebra. */
@@ -50,8 +31,7 @@ const INLINE_COPY_MARKERS = [
   ['@codemirror/view', 'Calls to EditorView.update are not allowed while an update is in progress']
 ];
 
-/** Packages that must never be bundled: they are lent by Hebra (`PLUGIN_SHARED_MODULES`) or
- *  are type-only for the plugin (`@codemirror/autocomplete`). */
+/** CodeMirror is only used by the independent Obsidian bundle. */
 const NEVER_BUNDLED_INPUT = /^node_modules\/(@codemirror|@lezer|style-mod|w3c-keyname|crelt)\//;
 
 function sha256(file) {
@@ -135,11 +115,7 @@ export function guardBundle(text, metafile, mainFile = MAIN_FILE) {
   const output = Object.values(metafile.outputs)[0];
 
   for (const imported of output.imports) {
-    if (!PLUGIN_SHARED_MODULES.includes(imported.path)) {
-      problems.push(
-        `${mainFile}: import sin resolver «${imported.path}» (${imported.kind}); solo se admiten los módulos que presta Hebra`
-      );
-    }
+    problems.push(`${mainFile}: import sin resolver «${imported.path}» (${imported.kind})`);
   }
   if (/(^|[^.\w$])import\s*\(/.test(code)) {
     problems.push(`${mainFile}: contiene un import() dinámico; una URL blob: no resuelve imports`);
@@ -173,13 +149,13 @@ export function guardBundle(text, metafile, mainFile = MAIN_FILE) {
   for (const [pkg, marker] of INLINE_COPY_MARKERS) {
     if (text.includes(marker)) {
       problems.push(
-        `${mainFile}: copia en línea de ${pkg} (contiene «${marker}»); tiene que venir de hebraShared()`
+        `${mainFile}: copia en línea de ${pkg} (contiene «${marker}»)`
       );
     }
   }
   for (const input of Object.keys(output.inputs)) {
     if (NEVER_BUNDLED_INPUT.test(input)) {
-      problems.push(`${mainFile}: empaqueta «${input}», que presta Hebra o es solo de tipos`);
+      problems.push(`${mainFile}: empaqueta «${input}», que no pertenece al marco del plugin`);
     }
     if (/(^|\/)obsidian(\/|$)/.test(input.replace(/^node_modules\//, ''))) {
       problems.push(`${mainFile}: empaqueta «${input}»`);
@@ -189,20 +165,6 @@ export function guardBundle(text, metafile, mainFile = MAIN_FILE) {
     problems.push(`${mainFile}: no exporta «activate»`);
   }
   return problems;
-}
-
-/** `^M.m.p` is satisfied by an installed `M.m'.p'` with the same major and a version >= it. */
-function assertInstalledSatisfies(name, range) {
-  const installed = JSON.parse(
-    readFileSync(join(ROOT, 'node_modules', name, 'package.json'), 'utf8')
-  ).version;
-  const [major, minor, patch] = range.slice(1).split('.').map(Number);
-  const [iMajor, iMinor, iPatch] = installed.split('.').map(Number);
-  const ok =
-    iMajor === major && (iMinor > minor || (iMinor === minor && iPatch >= patch));
-  if (!ok) {
-    throw new Error(`${name}@${installed} instalado no satisface el rango declarado ${range}`);
-  }
 }
 
 export async function buildHebra() {
@@ -215,7 +177,6 @@ export async function buildHebra() {
     format: 'esm',
     platform: 'browser',
     target: 'es2020',
-    plugins: [hebraShared()],
     metafile: true,
     legalComments: 'none',
     logLevel: 'warning',
@@ -231,27 +192,12 @@ export async function buildHebra() {
     throw new Error(`el guardarraíl de ${MAIN_FILE} falló (${problems.length})`);
   }
 
-  // The shared modules the bundle really imports: `hebraShared()` turns each into a
-  // virtual input in the `hebra-shared` namespace.
-  const output = Object.values(result.metafile.outputs)[0];
-  const used = Object.keys(output.inputs)
-    .filter((input) => input.startsWith('hebra-shared:'))
-    .map((input) => input.slice('hebra-shared:'.length))
-    .sort();
-  const shared = {};
-  for (const name of used) {
-    const range = SHARED_RANGES[name];
-    if (!range) throw new Error(`el bundle importa ${name} pero scripts/build-hebra.mjs no declara su rango`);
-    assertInstalledSatisfies(name, range);
-    shared[name] = range;
-  }
-
   const manifest = {
     schema: 1,
     id: 'jdex-manager',
     name: 'JDex Manager',
     version: pkg.version,
-    apiVersion: '^1.2.0',
+    apiVersion: '^2.0.0',
     description:
       'La ruta de una nota en tu sistema Johnny.Decimal, su auditoría y la bandeja de entrada.',
     author: 'fodaveg',
@@ -262,7 +208,7 @@ export async function buildHebra() {
     icon: 'folder-tree',
     capabilities: { required: ['vault.read', 'vault.write', 'editor'], optional: [] },
     network: { hosts: [] },
-    shared,
+    shared: {},
     files: { [MAIN_FILE]: sha256(MAIN_FILE), [STYLES_FILE]: sha256(STYLES_FILE) },
     ageRating: '4+'
   };

@@ -3,7 +3,7 @@
  * slow activation). Tests that read the index right after activating use this wrapper,
  * which also waits for that first rebuild.
  */
-import type { HebraPluginApi, PluginCleanup } from 'hebra-plugin-api';
+import type { HebraPluginApi, PluginCleanup } from 'hebra-plugin-api/v2';
 import { activateJdex as activateWithoutWaiting, jdexActivationSettled } from '../../../src/hebra/jdex-runtime';
 
 export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> {

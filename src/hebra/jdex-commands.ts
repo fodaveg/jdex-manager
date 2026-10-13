@@ -5,7 +5,7 @@
  * active note live in `./jdex-active-note-commands.ts` and are registered between the two
  * groups, in the order the palette has always had.
  */
-import type { PluginUi, PluginUnregister } from 'hebra-plugin-api';
+import type { PluginUi, PluginUnregister } from 'hebra-plugin-api/v2';
 
 export const JDEX_COMMAND_LOCATE = 'jdex-donde-vive-esta-nota';
 export const JDEX_COMMAND_TOGGLE = 'jdex-alternar-nota-y-carpeta';

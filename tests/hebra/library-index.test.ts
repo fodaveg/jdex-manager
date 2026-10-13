@@ -1,5 +1,5 @@
-import { createFakePluginApi } from 'hebra-plugin-api/testing';
-import type { PluginFolder, PluginNote } from 'hebra-plugin-api';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
+import type { PluginFolder, PluginNote } from 'hebra-plugin-api/v2';
 import { describe, expect, it, vi } from 'vitest';
 import { auditSystem, buildIndex, countProblems, locate } from '../../src/hebra/engine';
 import {
@@ -27,7 +27,7 @@ import {
 } from './support/fakes';
 
 /** `api.markdown` del host falso: `frontmatterRange` es lo único que usa el adaptador. */
-const markdown = createFakePluginApi().api.markdown;
+const markdown = createFakePluginApiV2().api.markdown;
 
 // ---- Biblioteca falsa con la FORMA real de un vault de David (áreas, categorías,
 // ids con y sin carpeta, cabeceras `AC.X0 ■`, hijos `+`, ceros `.01`/`.09`) ----

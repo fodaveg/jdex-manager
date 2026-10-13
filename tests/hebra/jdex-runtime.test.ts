@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
 // `activateJdex(api)` de JDex Manager sobre el host falso del paquete
-// (`createFakePluginApi`, que registra comandos, vistas, paneles y piezas de la barra),
+// (`createFakePluginApiV2`, que registra comandos, vistas, paneles y piezas de la barra),
 // con diálogos y avisos montados de verdad en el DOM (`support/fakes.ts`): lo que se
 // registra tiene que verse con la forma de `HebraPluginApi` y deshacerse con la limpieza
 // que devuelve `activate`.
@@ -13,7 +13,7 @@ import type {
   PluginNote,
   PluginNoteTitleRenamedEvent,
   PluginNotesChange
-} from 'hebra-plugin-api';
+} from 'hebra-plugin-api/v2';
 import {
   JDEX_AUDIT_VIEW_ID,
   JDEX_COMMAND_AUDIT,

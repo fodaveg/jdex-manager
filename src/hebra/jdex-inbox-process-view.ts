@@ -54,14 +54,14 @@ export function mountJdexInboxProcessView(
 ): void {
   const queue = [...options.queue];
 
-  const status = errorBanner();
-  const noteView = document.createElement('div');
-  const movePanel = document.createElement('div');
+  const status = errorBanner(el.ownerDocument, );
+  const noteView = el.ownerDocument.createElement('div');
+  const movePanel = el.ownerDocument.createElement('div');
   movePanel.hidden = true;
   el.append(status, noteView, movePanel);
 
   function actionButton(label: string, onClick: () => void): HTMLButtonElement {
-    const button = document.createElement('button');
+    const button = el.ownerDocument.createElement('button');
     button.type = 'button';
     button.className = 'hebra-jdex-dialog-secondary hebra-jdex-goto-action';
     button.textContent = label;
@@ -81,20 +81,20 @@ export function mountJdexInboxProcessView(
     noteView.replaceChildren();
     noteView.hidden = false;
     if (queue.length === 0) {
-      const done = document.createElement('p');
+      const done = el.ownerDocument.createElement('p');
       done.textContent = 'Bandeja de entrada procesada: no queda ninguna nota.';
       noteView.append(done);
       return;
     }
     const note = queue[0];
-    const heading = document.createElement('p');
+    const heading = el.ownerDocument.createElement('p');
     heading.className = 'hebra-jdex-goto-heading';
     heading.textContent = note.title;
-    const origin = document.createElement('p');
+    const origin = el.ownerDocument.createElement('p');
     origin.className = 'hebra-jdex-dialog-hint';
     origin.textContent = `${options.folderLabel(note)} — ${queue.length} nota(s) por procesar.`;
 
-    const actions = document.createElement('div');
+    const actions = el.ownerDocument.createElement('div');
     actions.className = 'hebra-jdex-goto-actions';
     const target = options.archiveTarget ? options.archiveTarget(note) : '';
     const archive = actionButton(target ? `Archivar en ${target}` : 'Archivar', () => void runArchive(note));
@@ -112,7 +112,7 @@ export function mountJdexInboxProcessView(
     if (options.onTrash) actions.append(actionButton('Papelera…', () => confirmTrash(note)));
     noteView.append(heading, origin);
     if (options.readPreview) {
-      const preview = document.createElement('pre');
+      const preview = el.ownerDocument.createElement('pre');
       preview.className = 'hebra-jdex-inbox-preview';
       preview.setAttribute('aria-label', 'Vista previa de la nota');
       preview.textContent = 'Cargando…';
@@ -140,11 +140,11 @@ export function mountJdexInboxProcessView(
   /** Inline confirmation: nothing is trashed by a single click. */
   function confirmTrash(note: JdexNoteRef): void {
     noteView.replaceChildren();
-    const message = document.createElement('p');
+    const message = el.ownerDocument.createElement('p');
     message.textContent = `«${note.title}» irá a la papelera de Hebra. Podrás recuperarla desde ella o con «deshacer».`;
-    const actions = document.createElement('div');
+    const actions = el.ownerDocument.createElement('div');
     actions.className = 'hebra-jdex-goto-actions';
-    const confirm = document.createElement('button');
+    const confirm = el.ownerDocument.createElement('button');
     confirm.type = 'button';
     confirm.className = 'hebra-jdex-dialog-primary';
     confirm.textContent = 'Mandar a la papelera';
@@ -161,7 +161,7 @@ export function mountJdexInboxProcessView(
       advance();
     } catch (error) {
       render();
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = pluginErrorMessage(error);
     }
   }
 
@@ -169,7 +169,7 @@ export function mountJdexInboxProcessView(
     noteView.hidden = true;
     movePanel.hidden = false;
     movePanel.replaceChildren();
-    const back = document.createElement('button');
+    const back = el.ownerDocument.createElement('button');
     back.type = 'button';
     back.className = 'hebra-jdex-goto-back';
     back.textContent = '‹ Cancelar mover';
@@ -179,7 +179,7 @@ export function mountJdexInboxProcessView(
       render();
     });
     movePanel.append(back);
-    const pickerHost = document.createElement('div');
+    const pickerHost = el.ownerDocument.createElement('div');
     let includeWithoutFolder = false;
     const mountPicker = (): void => {
       pickerHost.replaceChildren();
@@ -192,9 +192,9 @@ export function mountJdexInboxProcessView(
       });
     };
     if (options.onMoveCreatingFolder) {
-      const label = document.createElement('label');
+      const label = el.ownerDocument.createElement('label');
       label.className = 'hebra-jdex-inbox-optional';
-      const toggle = document.createElement('input');
+      const toggle = el.ownerDocument.createElement('input');
       toggle.type = 'checkbox';
       toggle.addEventListener('change', () => {
         includeWithoutFolder = toggle.checked;
@@ -210,11 +210,11 @@ export function mountJdexInboxProcessView(
   /** A destination ID without a folder: ask before creating it. */
   function confirmCreateFolder(note: JdexNoteRef, entry: IdEntry): void {
     movePanel.replaceChildren();
-    const message = document.createElement('p');
+    const message = el.ownerDocument.createElement('p');
     message.textContent = `«${entry.label}» no tiene carpeta. ¿Crearla y mover «${note.title}» ahí?`;
-    const actions = document.createElement('div');
+    const actions = el.ownerDocument.createElement('div');
     actions.className = 'hebra-jdex-goto-actions';
-    const confirm = document.createElement('button');
+    const confirm = el.ownerDocument.createElement('button');
     confirm.type = 'button';
     confirm.className = 'hebra-jdex-dialog-primary';
     confirm.textContent = 'Crear carpeta y mover';
@@ -230,7 +230,7 @@ export function mountJdexInboxProcessView(
       await options.onMoveCreatingFolder?.(note, entry);
       advance();
     } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = pluginErrorMessage(error);
       openMove(note);
     }
   }
@@ -241,7 +241,7 @@ export function mountJdexInboxProcessView(
       await options.onMove(note, entry);
       advance();
     } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = pluginErrorMessage(error);
     }
   }
 
@@ -251,9 +251,10 @@ export function mountJdexInboxProcessView(
       await options.onArchive(note);
       advance();
     } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = pluginErrorMessage(error);
     }
   }
 
   render();
 }
+import { pluginErrorMessage } from './error-message';

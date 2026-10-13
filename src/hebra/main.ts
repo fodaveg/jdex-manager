@@ -4,7 +4,7 @@
  * la limpieza que corre al apagar el plugin. La entrada de Obsidian (`src/main.ts`) no
  * importa nada de `src/hebra/`, y esta no importa nada de Obsidian.
  */
-import type { HebraPluginApi, PluginCleanup } from 'hebra-plugin-api';
+import type { HebraPluginApi, PluginCleanup } from 'hebra-plugin-api/v2';
 import { activateJdex } from './jdex-runtime';
 
 export function activate(api: HebraPluginApi): Promise<PluginCleanup> {

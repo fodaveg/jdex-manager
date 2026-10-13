@@ -5,6 +5,7 @@
  * defecto, y «Aplicar» que solo escribe las marcadas.
  */
 import type { JdexWrapCandidate } from './jdex-wrap-headers';
+import { pluginErrorMessage } from './error-message';
 import { errorBanner, primaryButton } from './jdex-dialog-fields';
 
 export interface JdexWrapHeadersViewOptions {
@@ -12,8 +13,8 @@ export interface JdexWrapHeadersViewOptions {
   onApply(chosenIds: ReadonlySet<string>): Promise<void>;
 }
 
-function diffPreview(candidate: JdexWrapCandidate): HTMLElement {
-  const pre = document.createElement('pre');
+function diffPreview(doc: Document, candidate: JdexWrapCandidate): HTMLElement {
+  const pre = doc.createElement('pre');
   pre.className = 'hebra-jdex-wrap-preview';
   const addedLines = candidate.after
     .split('\n')
@@ -28,20 +29,20 @@ export function mountJdexWrapHeadersView(
   options: JdexWrapHeadersViewOptions
 ): void {
   if (options.candidates.length === 0) {
-    const empty = document.createElement('p');
+    const empty = el.ownerDocument.createElement('p');
     empty.textContent = 'Ninguna cabecera necesita marcadores nuevos.';
     el.append(empty);
     return;
   }
 
   const chosen = new Set(options.candidates.map((c) => c.noteId));
-  const list = document.createElement('ul');
+  const list = el.ownerDocument.createElement('ul');
   list.className = 'hebra-jdex-normalize-list';
   for (const candidate of options.candidates) {
-    const row = document.createElement('li');
+    const row = el.ownerDocument.createElement('li');
     row.className = 'hebra-jdex-normalize-row';
-    const label = document.createElement('label');
-    const checkbox = document.createElement('input');
+    const label = el.ownerDocument.createElement('label');
+    const checkbox = el.ownerDocument.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = true;
     checkbox.addEventListener('change', () => {
@@ -49,16 +50,16 @@ export function mountJdexWrapHeadersView(
       else chosen.delete(candidate.noteId);
       refreshApplyLabel();
     });
-    const text = document.createElement('span');
+    const text = el.ownerDocument.createElement('span');
     text.textContent = candidate.label;
     label.append(checkbox, text);
-    row.append(label, diffPreview(candidate));
+    row.append(label, diffPreview(el.ownerDocument, candidate));
     list.append(row);
   }
   el.append(list);
 
-  const status = errorBanner();
-  const apply = primaryButton('', () => void trySubmit());
+  const status = errorBanner(el.ownerDocument, );
+  const apply = primaryButton(el.ownerDocument, '', () => void trySubmit());
   el.append(status, apply);
 
   function refreshApplyLabel(): void {
@@ -75,7 +76,7 @@ export function mountJdexWrapHeadersView(
     try {
       await options.onApply(chosen);
     } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = pluginErrorMessage(error);
     } finally {
       apply.disabled = false;
     }

@@ -15,7 +15,7 @@ export interface JdexNormalizeViewOptions {
 
 export function mountJdexNormalizeView(el: HTMLElement, options: JdexNormalizeViewOptions): void {
   if (options.findings.length === 0) {
-    const empty = document.createElement('p');
+    const empty = el.ownerDocument.createElement('p');
     empty.textContent = 'El frontmatter ya coincide con el índice: nada que normalizar.';
     el.append(empty);
     return;
@@ -25,15 +25,15 @@ export function mountJdexNormalizeView(el: HTMLElement, options: JdexNormalizeVi
     .map((f) => (f.fix?.type === 'frontmatter' ? f.fix.path : null))
     .filter((path): path is string => path !== null);
   const chosen = new Set(paths);
-  const list = document.createElement('ul');
+  const list = el.ownerDocument.createElement('ul');
   list.className = 'hebra-jdex-normalize-list';
   for (const finding of options.findings) {
     if (finding.fix?.type !== 'frontmatter') continue;
     const path = finding.fix.path;
-    const row = document.createElement('li');
+    const row = el.ownerDocument.createElement('li');
     row.className = 'hebra-jdex-normalize-row';
-    const label = document.createElement('label');
-    const checkbox = document.createElement('input');
+    const label = el.ownerDocument.createElement('label');
+    const checkbox = el.ownerDocument.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = true;
     checkbox.addEventListener('change', () => {
@@ -41,7 +41,7 @@ export function mountJdexNormalizeView(el: HTMLElement, options: JdexNormalizeVi
       else chosen.delete(path);
       refreshApplyLabel();
     });
-    const text = document.createElement('span');
+    const text = el.ownerDocument.createElement('span');
     text.textContent = finding.message;
     label.append(checkbox, text);
     row.append(label);
@@ -49,8 +49,8 @@ export function mountJdexNormalizeView(el: HTMLElement, options: JdexNormalizeVi
   }
   el.append(list);
 
-  const status = errorBanner();
-  const apply = primaryButton('', () => void trySubmit());
+  const status = errorBanner(el.ownerDocument, );
+  const apply = primaryButton(el.ownerDocument, '', () => void trySubmit());
   el.append(status, apply);
 
   function refreshApplyLabel(): void {
@@ -67,9 +67,10 @@ export function mountJdexNormalizeView(el: HTMLElement, options: JdexNormalizeVi
     try {
       await options.onApply(chosen);
     } catch (error) {
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = pluginErrorMessage(error);
     } finally {
       apply.disabled = false;
     }
   }
 }
+import { pluginErrorMessage } from './error-message';
