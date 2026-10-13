@@ -197,7 +197,7 @@ export async function buildHebra() {
     id: 'jdex-manager',
     name: 'JDex Manager',
     version: pkg.version,
-    apiVersion: '^2.0.0',
+    apiVersion: '^2.1.0',
     description:
       'La ruta de una nota en tu sistema Johnny.Decimal, su auditoría y la bandeja de entrada.',
     author: 'fodaveg',

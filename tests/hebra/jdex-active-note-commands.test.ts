@@ -108,18 +108,37 @@ describe('commands on the active note', () => {
     expect(fake.recorded.notices.some((n) => n.includes('nota JDex del ID'))).toBe(true);
   });
 
-  it('copies the ID and the JD text (not a physical path) and searches the category', async () => {
-    const { fixture, workspace, run } = await setup();
+  it('copies the ID and JD text only after a gesture in its own surface', async () => {
+    const { fixture, fake, workspace, run } = await setup();
     workspace.setActiveNote({ id: 'n-content', folderId: fixture.ids.hebraId.id, title: 'Idea' });
     await run(JDEX_COMMAND_COPY_NOTE_ID);
+    const copyButton = () => document.querySelector<HTMLButtonElement>('dialog.hebra-module-modal .hebra-jdex-dialog-primary')!;
+    expect(document.querySelector<HTMLTextAreaElement>('dialog.hebra-module-modal textarea')?.value).toBe('21.11');
+    expect(writeText).not.toHaveBeenCalled();
+    copyButton().click();
+    await vi.waitFor(() => expect(fake.recorded.notices).toContain('ID copiado.'));
     expect(writeText).toHaveBeenLastCalledWith('21.11');
+    expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
     await run(JDEX_COMMAND_COPY_JD_PATH);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    copyButton().click();
+    await vi.waitFor(() => expect(fake.recorded.notices).toContain('Ruta JD copiada.'));
     const copied = (writeText.mock.calls.at(-1) as unknown as [string])[0];
     expect(copied).toContain('›');
     expect(copied).toContain('21.11 Hebra');
     expect(copied).not.toContain('20-29');
     await run(JDEX_COMMAND_SEARCH_CATEGORY);
     expect(workspace.openSearch).toHaveBeenCalledWith('path:"20-29 Productos y servicios/21 Productos de software propios"');
+  });
+
+  it('keeps command copy text selectable when the browser refuses the write', async () => {
+    const { fixture, fake, workspace, run } = await setup();
+    workspace.setActiveNote({ id: 'n-content', folderId: fixture.ids.hebraId.id, title: 'Idea' });
+    writeText.mockRejectedValueOnce(new Error('denegado'));
+    await run(JDEX_COMMAND_COPY_NOTE_ID);
+    document.querySelector<HTMLButtonElement>('dialog.hebra-module-modal .hebra-jdex-dialog-primary')!.click();
+    await vi.waitFor(() => expect(fake.recorded.notices).toContain('No se pudo copiar.'));
+    expect(document.querySelector<HTMLTextAreaElement>('dialog.hebra-module-modal textarea')?.value).toBe('21.11');
   });
 
   it('a note already in .09 is not archived again', async () => {

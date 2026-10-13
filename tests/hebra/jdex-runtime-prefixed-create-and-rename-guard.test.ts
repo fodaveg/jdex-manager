@@ -304,11 +304,12 @@ describe('retirar con verbo propio y copiar la ruta JD (a03f9648)', () => {
     action('Copiar ruta JD').click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('21 Software › 21.11 Hebra'));
     expect(fake.recorded.notices).toContain('Ruta JD copiada.');
-    expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector('dialog.hebra-module-modal')).toBeNull());
     const second = await openActions();
     second.action('Copiar ruta de carpeta').click();
     await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith('20-29 Productos/21 Software/21.11 Hebra'));
     expect(second.fake.recorded.notices).toContain('Ruta de la carpeta copiada.');
+    await vi.waitFor(() => expect(document.querySelector('dialog.hebra-module-modal')).toBeNull());
   });
 });
 

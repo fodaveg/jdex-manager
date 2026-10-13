@@ -873,8 +873,51 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
       })
   };
 
-  function copyToClipboard(text: string, successMessage: string): Promise<void> {
-    return copyJdexText(actionPorts, (value) => api.clipboard.writeText(value), text, successMessage);
+  /** Leave the exact text selectable when the browser refuses a clipboard write. */
+  function manualCopyText(root: HTMLElement, text: string): HTMLTextAreaElement {
+    let field = root.querySelector<HTMLTextAreaElement>('.hebra-jdex-manual-copy');
+    if (!field) {
+      const hint = root.ownerDocument.createElement('p');
+      hint.textContent = 'Texto para copiar (también puedes seleccionarlo manualmente):';
+      field = root.ownerDocument.createElement('textarea');
+      field.className = 'hebra-jdex-manual-copy';
+      field.setAttribute('aria-label', 'Texto para copiar manualmente');
+      field.readOnly = true;
+      field.rows = 3;
+      root.append(hint, field);
+    }
+    field.value = text;
+    field.focus();
+    field.select();
+    return field;
+  }
+
+  /** Keep the plugin surface focused until Hebra has finished the clipboard write. */
+  async function copyInDialog(root: HTMLElement, handle: PluginModalHandle | undefined, text: string, successMessage: string): Promise<void> {
+    const copied = await copyJdexText(actionPorts, (value) => api.clipboard.writeText(value), text, successMessage);
+    if (copied) handle?.close();
+    else manualCopyText(root, text);
+  }
+
+  /** Palette commands originate outside the plugin surface, so ask for a click inside one. */
+  async function copyFromCommand(text: string, successMessage: string): Promise<void> {
+    let handle: PluginModalHandle | undefined;
+    handle = host.openModal((el) => {
+      const intro = el.ownerDocument.createElement('p');
+      intro.textContent = 'Pulsa Copiar para escribir en el portapapeles.';
+      const field = manualCopyText(el, text);
+      const button = el.ownerDocument.createElement('button');
+      button.type = 'button';
+      button.className = 'hebra-jdex-dialog-primary';
+      button.textContent = 'Copiar';
+      button.addEventListener('click', () => {
+        button.disabled = true;
+        void copyInDialog(el, handle, text, successMessage).finally(() => { button.disabled = false; });
+      });
+      el.prepend(intro);
+      el.append(button);
+      field.focus();
+    }, { title: 'JDex: copiar texto' });
   }
 
   /** «Ir a este ID»: la carpeta si la tiene (como `toggleNoteAndFolder`), si no la
@@ -955,20 +998,17 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             if (entry.folderPath) api.workspace.openSearch(`path:"${entry.folderPath}"`);
           },
           onCopyId: (entry) => {
-            handle?.close();
-            void copyToClipboard(systemKey(entry.id, entry.system), 'ID copiado.');
+            void copyInDialog(el, handle, systemKey(entry.id, entry.system), 'ID copiado.');
           },
           onCopyPath: (entry) => {
-            handle?.close();
             const path = entry.folderPath ?? entry.notePath;
-            if (path !== undefined) void copyToClipboard(path, entry.folderPath ? 'Ruta de la carpeta copiada.' : 'Ruta de la nota copiada.');
+            if (path !== undefined) void copyInDialog(el, handle, path, entry.folderPath ? 'Ruta de la carpeta copiada.' : 'Ruta de la nota copiada.');
           },
           onCopyJdPath: (entry) => {
-            handle?.close();
             // Same text as the «copiar la ruta JD de esta nota» command (`jdexEntryJdPath`).
             const text = jdexEntryJdPath(currentIndex, settings.jdexFolder, entry);
             if (text === null) host.notice(`${entry.label} no tiene nota ni carpeta.`);
-            else void copyToClipboard(text, 'Ruta JD copiada.');
+            else void copyInDialog(el, handle, text, 'Ruta JD copiada.');
           },
           onRetire: (entry) => {
             handle?.close();
@@ -1191,7 +1231,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
     state: () => (walk && index ? { walk, index, jdexFolder: settings.jdexFolder, dateFormat: settings.dateFormat } : null),
     journal,
     rebuild,
-    copy: copyToClipboard
+    copy: copyFromCommand
   });
   const offLateCommands = registerJdexCommands(host, commandHandlers, 'late');
 

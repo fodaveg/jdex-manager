@@ -407,13 +407,17 @@ describe('built-in actions of «ir a un ID»', () => {
     await cleanup();
   });
 
-  it('«Copiar ID» copies the ID of the entry and closes the dialog', async () => {
-    const writeText = vi.fn(async (_text: string) => {});
+  it('«Copiar ID» keeps its surface open until Hebra finishes the write', async () => {
+    let finishWrite: (() => void) | undefined;
+    const writeText = vi.fn((_text: string) => new Promise<void>((resolve) => { finishWrite = resolve; }));
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const { action, notices, cleanup } = await openActions();
     action('Copiar ID').click();
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('21.11'));
-    expect(notices()).toContain('ID copiado.');
+    expect(dialog().isConnected).toBe(true);
+    expect(notices()).not.toContain('ID copiado.');
+    finishWrite?.();
+    await vi.waitFor(() => expect(notices()).toContain('ID copiado.'));
     expect(document.querySelector('dialog.hebra-module-modal')).toBeNull();
     await cleanup();
   });
@@ -423,6 +427,7 @@ describe('built-in actions of «ir a un ID»', () => {
     const { action, notices, cleanup } = await openActions();
     action('Copiar ID').click();
     await vi.waitFor(() => expect(notices()).toContain('No se pudo copiar.'));
+    expect(dialog().querySelector<HTMLTextAreaElement>('[aria-label="Texto para copiar manualmente"]')?.value).toBe('21.11');
     await cleanup();
   });
 

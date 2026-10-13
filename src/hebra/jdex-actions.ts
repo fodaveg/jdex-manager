@@ -32,12 +32,14 @@ export async function copyJdexText(
   writeText: (text: string) => Promise<void>,
   text: string,
   successMessage: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     await writeText(text);
     ports.notice(successMessage);
+    return true;
   } catch {
     ports.notice('No se pudo copiar.');
+    return false;
   }
 }
 

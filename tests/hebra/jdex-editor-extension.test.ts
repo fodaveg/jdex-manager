@@ -18,7 +18,7 @@ describe('editor declarativo de JDex (host falso publicado de API 2.0)', () => {
     await fake.settle();
     expect(fake.editor.providers()).toEqual({ decorations: ['jdex-numbers'], completions: ['jdex-ids'] });
     expect(await fake.editor.decorate({ text: 'Ver 21.11 y 99.99', offset: 100, length: 500 })).toEqual([
-      { from: 104, to: 109, style: 'link', clickable: true, data: '21.11' }
+      { from: 104, to: 109, style: 'link', clickable: true, clickModifier: 'mod', data: '21.11' }
     ]);
     expect(await fake.editor.decorate({ text: 'Ver `21.11` y [[21.11 Hebra]]' })).toEqual([]);
     expect(await fake.editor.decorate({ text: '21.11', protectedNote: true })).toEqual([]);
@@ -34,7 +34,7 @@ describe('editor declarativo de JDex (host falso publicado de API 2.0)', () => {
     const provider = jdexDecorationProvider({ ids: () => ids, onNavigate });
     expect(provider.provide({ noteId: 'n', text: '21.11', offset: 0, length: 5 })).toEqual([]);
     ids = [entry()];
-    expect(provider.provide({ noteId: 'n', text: '21.11', offset: 0, length: 5 })).toHaveLength(1);
+    expect(provider.provide({ noteId: 'n', text: '21.11', offset: 0, length: 5 })).toMatchObject([{ clickable: true, clickModifier: 'mod' }]);
     const click = (ctrl: boolean, alt: boolean) => provider.onClick?.({
       noteId: 'n', from: 0, to: 5, data: '21.11',
       pointer: { x: 0, y: 0, button: 0, alt, ctrl, meta: false, shift: false }

@@ -88,7 +88,7 @@ Both hosts share the engine defaults. Hebra stores its settings per library and 
 
 **Manual**: download `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/jdex-manager/` and enable the plugin.
 
-**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list. Version 0.6.0 requires Hebra plugin API 2.0, which runs plugins in isolated frames. Hebra hosts that still implement API 1.x should keep JDex Manager 0.5.1; the manifest checks compatibility before loading.
+**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list. Version 0.6.0 requires Hebra plugin API 2.1, which runs plugins in isolated frames and preserves ordinary cursor clicks on decorated ID numbers. Hebra hosts that still implement API 1.x should keep JDex Manager 0.5.1; the manifest checks compatibility before loading.
 
 ## Develop
 

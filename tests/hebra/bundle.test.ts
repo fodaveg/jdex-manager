@@ -70,7 +70,7 @@ describe('hebra-main.mjs (hay que construirlo: npm run build:hebra)', () => {
     };
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string };
     expect(manifest.version).toBe(pkg.version);
-    expect(manifest.apiVersion).toBe('^2.0.0');
+    expect(manifest.apiVersion).toBe('^2.1.0');
     for (const [name, hash] of Object.entries(manifest.files)) {
       const digest = createHash('sha256').update(readFileSync(join(ROOT, name))).digest('hex');
       expect(hash).toBe(`sha256:${digest}`);

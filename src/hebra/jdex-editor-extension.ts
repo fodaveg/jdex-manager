@@ -32,6 +32,7 @@ export function jdexDecorationProvider(ctx: JdexEditorExtensionContext): PluginD
         to: offset + match.end,
         style: 'link' as const,
         clickable: true,
+        clickModifier: 'mod' as const,
         data: systemKey(match.id, match.system)
       }));
     },

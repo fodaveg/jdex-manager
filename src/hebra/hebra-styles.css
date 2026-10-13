@@ -216,6 +216,14 @@
   opacity: 0.5;
 }
 
+.hebra-jdex-manual-copy {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+}
+
 .hebra-jdex-normalize-list {
   display: flex;
   flex-direction: column;
