@@ -1,6 +1,12 @@
 // Verifies a DRAFT release against a reference computed BEFORE anything was uploaded.
 //
-//   node scripts/verify-release.mjs <SHA256SUMS> <downloaded-dir> <assets.json> <tag>
+//   node scripts/verify-release.mjs <SHA256SUMS> <downloaded-dir> <assets.json> <tag> [draft|published]
+//
+// Two stages. `draft` (the default, what the workflow checks) expects exactly the six assets the
+// workflow built. `published` (what `scripts/sign-publish.mjs` checks after publishing) expects
+// those six plus `hebra.json.minisig`, the signature Hebra requires to install or update the
+// plugin. The signature is made locally after the workflow, so it has no reference hash: it must
+// be there and not empty, and `sign-publish.mjs` verifies it before uploading it.
 //
 // `SHA256SUMS` is `sha256sum` output over the six files the workflow built; `downloaded-dir`
 // holds what was downloaded back from the draft; `assets.json` is the GitHub API asset list
@@ -22,6 +28,11 @@ export const RELEASE_ASSETS = [
   'styles.css'
 ];
 
+/** Detached minisign signature of `hebra.json`, uploaded by `scripts/sign-publish.mjs`. */
+export const SIGNATURE_ASSET = 'hebra.json.minisig';
+
+export const PUBLISHED_ASSETS = [...RELEASE_ASSETS, SIGNATURE_ASSET].sort();
+
 export function parseSums(text) {
   const sums = new Map();
   for (const line of text.split('\n')) {
@@ -35,15 +46,21 @@ const sha256 = (buffer) => createHash('sha256').update(buffer).digest('hex');
 
 /**
  * @param {{ reference: Map<string,string>, assets: {name:string, digest?:string|null}[],
- *           files: Map<string, Buffer>, tag: string }} input
+ *           files: Map<string, Buffer>, tag: string, stage?: 'draft'|'published' }} input
  * @returns {{ problems: string[], warnings: string[] }}
  */
-export function verifyRelease({ reference, assets, files, tag }) {
+export function verifyRelease({ reference, assets, files, tag, stage = 'draft' }) {
   const problems = [];
   const warnings = [];
   const names = assets.map((a) => a.name).sort();
-  if (JSON.stringify(names) !== JSON.stringify(RELEASE_ASSETS)) {
-    problems.push(`unexpected assets: ${names.join(', ')}`);
+  const expectedNames = stage === 'published' ? PUBLISHED_ASSETS : [...RELEASE_ASSETS].sort();
+  if (JSON.stringify(names) !== JSON.stringify(expectedNames)) {
+    problems.push(`unexpected assets for a ${stage} release: ${names.join(', ')} (expected ${expectedNames.join(', ')})`);
+  }
+  if (stage === 'published') {
+    const signature = assets.find((a) => a.name === SIGNATURE_ASSET);
+    if (!signature) problems.push(`${SIGNATURE_ASSET}: missing, Hebra will not install this release`);
+    else if (!(signature.size > 0)) problems.push(`${SIGNATURE_ASSET}: empty`);
   }
   for (const name of RELEASE_ASSETS) {
     const expected = reference.get(name);
@@ -84,9 +101,9 @@ export function verifyRelease({ reference, assets, files, tag }) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const [sumsPath, dir, assetsPath, tag] = process.argv.slice(2);
-  if (!sumsPath || !dir || !assetsPath || !tag) {
-    console.error('usage: verify-release.mjs <SHA256SUMS> <downloaded-dir> <assets.json> <tag>');
+  const [sumsPath, dir, assetsPath, tag, stage = 'draft'] = process.argv.slice(2);
+  if (!sumsPath || !dir || !assetsPath || !tag || !['draft', 'published'].includes(stage)) {
+    console.error('usage: verify-release.mjs <SHA256SUMS> <downloaded-dir> <assets.json> <tag> [draft|published]');
     process.exit(2);
   }
   const reference = parseSums(readFileSync(sumsPath, 'utf8'));
@@ -99,11 +116,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       // reported by verifyRelease as «not downloaded»
     }
   }
-  const { problems, warnings } = verifyRelease({ reference, assets, files, tag });
+  const { problems, warnings } = verifyRelease({ reference, assets, files, tag, stage });
   for (const warning of warnings) console.warn(`verify-release warning: ${warning}`);
   if (problems.length > 0) {
     for (const problem of problems) console.error(`verify-release FAIL: ${problem}`);
     process.exit(1);
   }
-  console.log(`verify-release ok: ${RELEASE_ASSETS.join(' ')} match the reference built before upload`);
+  console.log(`verify-release ok: ${RELEASE_ASSETS.join(' ')} match the reference built before upload${stage === 'published' ? ` and ${SIGNATURE_ASSET} is present` : ''}`);
 }

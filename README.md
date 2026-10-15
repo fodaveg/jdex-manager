@@ -10,7 +10,7 @@ An Obsidian plugin for vaults organised with [Johnny.Decimal](https://johnnydeci
 
 ## Status
 
-What works today (0.6.0):
+What works today (0.6.1):
 
 - **Create ID** (command and ribbon icon): pick a category, get the next free number (zeros and headers skipped), type a title, optionally tick "also create the folder". The JDex note is created from the template and opened. Nothing is ever overwritten: a number already used by a note or a folder is rejected with the name that uses it.
 - **Settings with auto-detection**: JDex folder, system root, templates folder and reports folder. Empty fields are filled on startup from `00-09*/00*/00.00`, `00.02` and `00.03`; a button and a command run the detection again. A configured value is never replaced.
@@ -88,7 +88,7 @@ Both hosts share the engine defaults. Hebra stores its settings per library and 
 
 **Manual**: download `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/jdex-manager/` and enable the plugin.
 
-**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`). Install it from Hebra's plugin list. Version 0.6.0 requires Hebra plugin API 2.1, which runs plugins in isolated frames and preserves ordinary cursor clicks on decorated ID numbers. Hebra hosts that still implement API 1.x should keep JDex Manager 0.5.1; the manifest checks compatibility before loading.
+**Hebra**: the same release also carries JDex Manager as an external plugin for [Hebra](https://github.com/fodaveg/hebra) (`hebra.json`, `hebra-main.mjs`, `hebra-styles.css`, plus `hebra.json.minisig`, the signature Hebra requires). Install it from Hebra's plugin list. Version 0.6.1 requires Hebra plugin API 2.1, which runs plugins in isolated frames and preserves ordinary cursor clicks on decorated ID numbers. Hebra hosts that still implement API 1.x should keep JDex Manager 0.5.1 (0.5.1 and 0.6.0 were published unsigned and, being immutable, cannot be signed afterwards); the manifest checks compatibility before loading.
 
 ## Develop
 
@@ -111,7 +111,16 @@ The Hebra plugin lives in `src/hebra/` (entry `main.ts`, written against `hebra-
 
 ## Release
 
-A release is a tag equal to the version in `manifest.json`, `package.json` and `hebra.json`, on a commit that is already in `main`, with the notes written in `release-notes/<tag>.md` in that same commit (the workflow fails without them). The workflow hashes the six assets from the build, attests their provenance, creates a draft, downloads it back and compares it with those hashes and with GitHub's own digests, and only then publishes. It also requires the repository to have immutable releases enabled (Settings, Releases): that setting is not something the workflow can turn on. `minAppVersion`, `versions.json` and the version fields are changed by hand, on purpose; `npm run check:min-app` fails if the code starts to need newer Obsidian API than `minAppVersion`.
+A release is a tag equal to the version in `manifest.json`, `package.json` and `hebra.json`, on a commit that is already in `main`, with the notes written in `release-notes/<tag>.md` in that same commit (the workflow fails without them). The workflow hashes the six assets from the build, attests their provenance, creates a draft, downloads it back and compares it with those hashes and with GitHub's own digests, and then stops: it does not publish. It also requires the repository to have immutable releases enabled (Settings, Releases): that setting is not something the workflow can turn on. `minAppVersion`, `versions.json` and the version fields are changed by hand, on purpose; `npm run check:min-app` fails if the code starts to need newer Obsidian API than `minAppVersion`.
+
+Signing and publishing is the last step and runs on the maintainer's machine, because Hebra only installs a plugin whose release has `hebra.json.minisig` (a minisign signature of the exact bytes of `hebra.json`) and the private key (`~/.config/hebra-plugin-signing/jdex-manager.key`) must never go to GitHub, as a secret or to CI. A published release is immutable, so the signature must be in the draft before it is published. After pushing the tag:
+
+```
+npm run release:sign-publish -- <tag>             # e.g. 0.6.1
+npm run release:sign-publish -- <tag> --dry-run   # sign and verify, upload and publish nothing
+```
+
+It waits for the workflow of the tag to finish green, checks that the draft has the six assets with the attestation and digests the workflow produced, signs `hebra.json` and uploads `hebra.json.minisig` with `scripts/firmar-release-plugin.mjs` from the Hebra repository (`$HEBRA_REPO`, default `~/code/hebra`; it verifies the signature before uploading), publishes, and checks that the release is immutable and has seven assets (`scripts/verify-release.mjs`, stage `published`). It needs `gh` authenticated and the public key registered as `signingKey` in the `hebra-plugins` index. If the workflow fails it deletes its draft and nothing is signed; do not publish a draft by hand.
 
 Dependencies are reviewed through Dependabot (`.github/dependabot.yml`, npm and GitHub Actions). `obsidian` is held to `~1.14.4`, a minor, so a new minor arrives as a pull request that CI judges with `check:min-app`.
 

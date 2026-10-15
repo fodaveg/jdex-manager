@@ -1,12 +1,13 @@
 {
   "name": "jdex-manager",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Obsidian plugin: create and audit Johnny.Decimal IDs from your JDex.",
   "main": "main.js",
   "license": "MIT",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "release:sign-publish": "node scripts/sign-publish.mjs",
     "check:min-app": "node scripts/check-min-app-version.mjs",
     "audit:bundled": "node scripts/audit-bundled.mjs",
     "build:hebra": "node scripts/build-hebra.mjs",

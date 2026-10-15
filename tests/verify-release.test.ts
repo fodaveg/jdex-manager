@@ -7,16 +7,19 @@ import * as script from '../scripts/verify-release.mjs';
 interface Asset {
   name: string;
   digest?: string | null;
+  size?: number;
 }
-const { verifyRelease, parseSums, RELEASE_ASSETS } = script as {
+const { verifyRelease, parseSums, RELEASE_ASSETS, PUBLISHED_ASSETS } = script as {
   verifyRelease: (input: {
     reference: Map<string, string>;
     assets: Asset[];
     files: Map<string, Buffer>;
     tag: string;
+    stage?: 'draft' | 'published';
   }) => { problems: string[]; warnings: string[] };
   parseSums: (text: string) => Map<string, string>;
   RELEASE_ASSETS: string[];
+  PUBLISHED_ASSETS: string[];
 };
 
 const sha = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex');
@@ -78,10 +81,25 @@ describe('verify-release', () => {
     expect(verifyRelease({ reference, assets, files, tag: '1.0.0' }).problems.join('\n')).toContain('!= tag 1.0.0');
   });
 
+  it('rejects the signature in a draft and requires it once published', () => {
+    const { files, reference, assets } = scenario();
+    const signed = [...assets, { name: 'hebra.json.minisig', digest: null, size: 120 }];
+    expect(verifyRelease({ reference, assets: signed, files, tag: TAG }).problems.join('\n')).toContain('unexpected assets for a draft');
+    expect(verifyRelease({ reference, assets, files, tag: TAG, stage: 'published' }).problems.join('\n')).toContain(
+      'hebra.json.minisig: missing'
+    );
+    expect(verifyRelease({ reference, assets: signed, files, tag: TAG, stage: 'published' }).problems).toEqual([]);
+    const empty = [...assets, { name: 'hebra.json.minisig', digest: null, size: 0 }];
+    expect(verifyRelease({ reference, assets: empty, files, tag: TAG, stage: 'published' }).problems.join('\n')).toContain(
+      'hebra.json.minisig: empty'
+    );
+  });
+
   it('parses sha256sum output', () => {
     const sums = parseSums(`${'a'.repeat(64)}  main.js\n${'b'.repeat(64)} *styles.css\n`);
     expect(sums.get('main.js')).toBe('a'.repeat(64));
     expect(sums.get('styles.css')).toBe('b'.repeat(64));
     expect(RELEASE_ASSETS).toHaveLength(6);
+    expect(PUBLISHED_ASSETS).toHaveLength(7);
   });
 });

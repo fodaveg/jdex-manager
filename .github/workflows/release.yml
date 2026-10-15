@@ -1,6 +1,7 @@
 name: Release
 
-# Owns the tag path. Order matters, and nothing is public until everything is proven:
+# Owns the tag path up to a verified DRAFT. Order matters, and nothing is public until everything
+# is proven and signed:
 #
 #   1. the tag's commit must be on origin/main, and release-notes/<tag>.md must exist
 #      (both checked before any build is spent);
@@ -13,10 +14,18 @@ name: Release
 #      by name, never a zip, plus the three Hebra downloads) and the notes from the versioned
 #      file, then every asset is downloaded back and compared with the reference, with the
 #      digest GitHub itself computed and with its attestation;
-#   6. only then is the draft published. If anything before that fails, the draft is deleted;
-#   7. the published release must be immutable. That is a repository setting (Settings >
-#      Releases, "Immutable releases") that this workflow cannot turn on: it is checked
-#      before the draft is created, and again after publishing.
+#   6. the workflow STOPS there and leaves the verified draft. If anything before that fails,
+#      the draft is deleted;
+#   7. the draft is signed and published from the maintainer's machine: `npm run
+#      release:sign-publish -- <tag>` (scripts/sign-publish.mjs). Hebra only installs a plugin
+#      whose release carries `hebra.json.minisig`, a minisign signature of the exact bytes of
+#      `hebra.json` made with a private key that must never reach GitHub, so CI cannot sign.
+#      Releases are immutable once published and an asset cannot be added afterwards: the
+#      signature has to be in the draft BEFORE publishing. That script waits for this run,
+#      re-checks the draft, signs, uploads the signature, publishes and checks the release is
+#      immutable and has seven assets. The immutable setting (Settings > Releases, "Immutable
+#      releases") is not something this workflow can turn on: it is checked here before the
+#      draft is created, and by that script after publishing.
 #
 # Hashes prove correspondence; the attestation is what proves provenance.
 #
@@ -24,7 +33,7 @@ name: Release
 # every branch and pull request and stays read-only. Actions are pinned by commit SHA; the
 # comment names the release, and Dependabot (.github/dependabot.yml) proposes the updates.
 #
-# This file cannot be run outside a tag push: its first real run is the next release.
+# This file cannot be run outside a tag push.
 
 on:
   push:
@@ -139,18 +148,11 @@ jobs:
             gh attestation verify "$FILE" --repo "$REPO" --signer-workflow "$REPO/.github/workflows/release.yml"
           done
 
-      - name: Publish the verified draft
+      - name: Leave the verified draft for signing
         run: |
-          set -euo pipefail
-          gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F draft=false > "$RUNNER_TEMP/published-release.json"
-          node -e "
-            const r = require(process.env.RUNNER_TEMP + '/published-release.json');
-            if (r.draft || r.tag_name !== process.env.TAG) { console.error('release not published as expected', r.draft, r.tag_name); process.exit(1); }
-            if (r.immutable !== true) { console.error('release ' + r.tag_name + ' was published but is NOT immutable: enable immutable releases in the repository settings'); process.exit(1); }
-            console.log('ok published', r.tag_name, 'immutable');
-          "
+          echo "::notice::draft $TAG verified and left unpublished: sign and publish it with 'npm run release:sign-publish -- $TAG'"
 
-      # A failure before publishing must not leave a half-built draft behind, also when the failure
+      # A failure before the draft is verified must not leave a half-built draft behind, also when the failure
       # came between `gh release create` and RELEASE_ID being recorded. It looks the release up by
       # tag, and only deletes it if it exists and is still a draft: never a published release.
       - name: Remove the draft if the run failed before publishing
@@ -167,5 +169,5 @@ jobs:
           fi
           if [ "$(gh api "repos/$REPO/releases/$ID" --jq .draft)" = "true" ]; then
             gh api -X DELETE "repos/$REPO/releases/$ID"
-            echo "::warning::the draft for $TAG was deleted because the run failed before publishing"
+            echo "::warning::the draft for $TAG was deleted because the run failed"
           fi
