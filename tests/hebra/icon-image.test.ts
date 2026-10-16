@@ -1,10 +1,11 @@
+import { Buffer } from 'node:buffer';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs build script
 import * as build from '../../scripts/build-hebra.mjs';
 
 const { validateIconImage, ICON_IMAGE_PREFIX } = build as {
-  validateIconImage(bytes: Buffer): string | null;
+  validateIconImage: (bytes: Buffer) => string | null;
   ICON_IMAGE_PREFIX: string;
 };
 
