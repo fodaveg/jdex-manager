@@ -107,7 +107,7 @@ Coverage (`npm run test:coverage`, part of `check`) enforces the floor in `vites
 
 `npm run audit:bundled` fails if `npm audit` reports an advisory in a package that ships inside `main.js` or `hebra-main.mjs` (today only `yaml`, in the Hebra bundle). It needs the network, so it runs in CI and not in `check`. `npm audit --omit=dev` does not describe what ships, because `yaml` is a dev dependency that gets bundled.
 
-The Hebra plugin lives in `src/hebra/` (entry `main.ts`, written against `hebra-plugin-api/v2`, never against Obsidian or Hebra internals) and shares only the pure engine in `src/jd/` with the Obsidian plugin. `scripts/build-hebra.mjs` bundles it into one ES module, generates `hebra.json` (never by hand) and fails if the bundle imports anything it should not or inlines CodeMirror; `esbuild.config.mjs` fails if `main.js` bundles anything from `src/hebra/`.
+The Hebra plugin lives in `src/hebra/` (entry `main.ts`, written against `hebra-plugin-api/v2`, never against Obsidian or Hebra internals) and shares only the pure engine in `src/jd/` with the Obsidian plugin. `scripts/build-hebra.mjs` bundles it into one ES module, generates `hebra.json` (never by hand; its `iconImage` comes from `assets/hebra-icon.png`, checked by bytes, see `assets/README.md`) and fails if the bundle imports anything it should not or inlines CodeMirror; `esbuild.config.mjs` fails if `main.js` bundles anything from `src/hebra/`.
 
 ## Release
 

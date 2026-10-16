@@ -5,7 +5,8 @@
 //   hebra-main.mjs    ONE ES module (entry `src/hebra/main.ts`) that exports `activate`
 //   hebra-styles.css  the plugin stylesheet (`src/hebra/hebra-styles.css`)
 //   hebra.json        the manifest, GENERATED here (never by hand): version from
-//                     package.json and the sha256 of the two files above
+//                     package.json, the sha256 of the two files above and `iconImage`
+//                     (assets/hebra-icon.png, validated by bytes)
 //
 // and then runs the guard over `hebra-main.mjs`. Hebra loads the module from a `blob:`
 // URL, where a relative or dynamic import has no base. API 2.0 runs in a separate frame;
@@ -22,6 +23,53 @@ const STYLES_SOURCE = 'src/hebra/hebra-styles.css';
 const MAIN_FILE = 'hebra-main.mjs';
 const STYLES_FILE = 'hebra-styles.css';
 const MANIFEST_FILE = 'hebra.json';
+const ICON_IMAGE_FILE = 'assets/hebra-icon.png';
+
+/** Fallback glyph of the plugin row: it must be one Hebra draws (`obsidianIconShapes` in
+ *  Hebra's `src/lib/bases/obsidian-icons.ts`); `folder-tree` is not, and painted the
+ *  dotted «missing icon» marker. `list` is the closest one to an index. */
+const FALLBACK_ICON = 'list';
+
+export const ICON_IMAGE_PREFIX = 'data:image/png;base64,';
+const ICON_MIN_SIDE = 32;
+const ICON_MAX_SIDE = 128;
+const ICON_MAX_BYTES = 32 * 1024;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const PNG_IEND = [0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
+
+const startsWith = (bytes, offset, expected) => expected.every((v, i) => bytes[offset + i] === v);
+
+/**
+ * Hebra's `iconImage` rules (SPEC-PLUGINS-EXTERNOS.md 3.2) applied to the BYTES of the PNG:
+ * signature, IHDR, IEND, square, 32 to 128 px, at most 32 KiB. Hebra rejects the WHOLE
+ * manifest on an invalid one, so the build must fail first. Returns the unmet limit, or
+ * null when Hebra would accept it.
+ */
+export function validateIconImage(bytes) {
+  if (bytes.length > ICON_MAX_BYTES) {
+    return `pesa ${bytes.length} bytes (máximo ${ICON_MAX_BYTES}, 32 KiB)`;
+  }
+  if (bytes.length < 24 || !startsWith(bytes, 0, PNG_SIGNATURE)) return 'no es un PNG (solo PNG)';
+  if (!startsWith(bytes, 12, [0x49, 0x48, 0x44, 0x52])) return 'el PNG no tiene cabecera IHDR';
+  if (bytes.length < PNG_IEND.length + 24 || !startsWith(bytes, bytes.length - 12, PNG_IEND)) {
+    return 'el PNG está truncado (sin IEND)';
+  }
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  if (width !== height) return `debe ser cuadrado (es de ${width}x${height} px)`;
+  if (width < ICON_MIN_SIDE || width > ICON_MAX_SIDE) {
+    return `el lado debe medir de ${ICON_MIN_SIDE} a ${ICON_MAX_SIDE} px (mide ${width} px)`;
+  }
+  return null;
+}
+
+/** The `iconImage` data URL for a PNG file; throws with the unmet limit. */
+export function iconImageOf(path = join(ROOT, ICON_IMAGE_FILE)) {
+  const bytes = readFileSync(path);
+  const problem = validateIconImage(bytes);
+  if (problem !== null) throw new Error(`${ICON_IMAGE_FILE} no sirve como iconImage: ${problem}`);
+  return `${ICON_IMAGE_PREFIX}${bytes.toString('base64')}`;
+}
 
 /** Source text that only exists inside the real package: finding it in the bundle means a
  *  copy of that package was inlined instead of borrowed from Hebra. */
@@ -205,7 +253,8 @@ export async function buildHebra() {
     platforms: ['macos', 'ios', 'linux', 'windows', 'web'],
     main: MAIN_FILE,
     styles: STYLES_FILE,
-    icon: 'folder-tree',
+    icon: FALLBACK_ICON,
+    iconImage: iconImageOf(),
     capabilities: { required: ['vault.read', 'vault.write', 'editor'], optional: [] },
     network: { hosts: [] },
     shared: {},
