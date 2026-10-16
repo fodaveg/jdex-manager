@@ -1,6 +1,6 @@
 {
   "name": "jdex-manager",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Obsidian plugin: create and audit Johnny.Decimal IDs from your JDex.",
   "main": "main.js",
   "license": "MIT",
