@@ -9,6 +9,7 @@
 
 export * from "./audit";
 export * from "./audit-report";
+export * from "./create-id";
 export * from "./debug-log";
 export * from "./description";
 export * from "./detect";
@@ -18,6 +19,7 @@ export * from "./health";
 export * from "./index";
 export * from "./inbox-stale";
 export * from "./journal";
+export * from "./library-port";
 export * from "./pair";
 export * from "./parse";
 export * from "./patterns";
