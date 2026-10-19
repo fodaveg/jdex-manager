@@ -28,7 +28,16 @@ export type JdLibraryErrorCode =
   | "id_taken"
   | "invalid_pattern"
   | "invalid_title"
-  | "plan_stale";
+  | "plan_stale"
+  /** Move into an ID (`move-into-id.ts`). */
+  | "id_not_found"
+  | "source_not_found"
+  | "invalid_name"
+  | "invalid_subfolder"
+  | "destination_taken"
+  | "destination_inside_source"
+  | "already_in_destination"
+  | "folder_has_hidden";
 
 export type JdLibraryResult<T> = { ok: true; value: T } | { ok: false; code: JdLibraryErrorCode; message: string };
 

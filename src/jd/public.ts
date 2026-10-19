@@ -21,6 +21,7 @@ export * from "./index";
 export * from "./inbox-stale";
 export * from "./journal";
 export * from "./library-port";
+export * from "./move-into-id";
 export * from "./pair";
 export * from "./parse";
 export * from "./patterns";
