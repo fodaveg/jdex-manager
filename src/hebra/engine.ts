@@ -22,6 +22,11 @@ export {
   findId,
   childrenPlus,
   categoryUsage,
+  // create-id.ts — planificar y aplicar «crear ID» sobre una interfaz por ids.
+  resolveSettings,
+  loadLibraryState,
+  planNewId,
+  applyPlan,
   // create-validate.ts — validación de «crear ID / cabecera / hijo (+)».
   jdexCreationIndex,
   validateNewId,
@@ -119,6 +124,14 @@ export {
 } from '../jd/public';
 
 export type {
+  LibraryPort,
+  LibraryState,
+  PortFolder,
+  PortNote,
+  EnsureResult,
+  NewIdPlan,
+  NewIdRequest,
+  JdLibraryResult,
   AreaEntry,
   CategoryEntry,
   IdEntry,

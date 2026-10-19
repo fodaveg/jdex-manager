@@ -30,7 +30,8 @@ export interface LibraryPort {
   listFolders(): Promise<PortFolder[]>;
   /** The notes directly inside a folder (no subfolders). */
   listNotes(folderId: string): Promise<PortNote[]>;
-  readNote(id: string): Promise<{ body: string }>;
+  /** `body` is null for a note the host cannot show (a protected note): the engine skips it as a template. */
+  readNote(id: string): Promise<{ body: string | null }>;
   /** Returns the sibling with that name (case-insensitive) with `created: false`, else creates it. */
   ensureFolder(parentId: string | null, name: string): Promise<EnsureResult>;
   /** Returns the note with that title in the folder with `created: false`, else creates it. */

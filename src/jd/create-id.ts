@@ -12,9 +12,9 @@
 import { detectFolders, fillEmpty } from "./detect";
 import { areaCode, buildIndex, knownIds, selectCreationSystem, type JdIndex } from "./index";
 import type { LibraryPort, PortFolder } from "./library-port";
-import { extractJdPrefix, jdexNoteName, nextFreeId } from "./parse";
+import { extractJdPrefix, jdexNoteName, nextFreeId, parseJdNumber } from "./parse";
 import { patternFor } from "./patterns";
-import { DEFAULT_SETTINGS, type JdexManagerSettings } from "./settings";
+import { DEFAULT_SETTINGS, mergeSettings, type JdexManagerSettings } from "./settings";
 import { BUILTIN_TEMPLATES, renderTemplate, templateNameCandidates, todayIso } from "./template";
 import { requireTitle, validateNewId } from "./create-validate";
 
@@ -46,6 +46,13 @@ export interface ResolveSettingsOptions {
   jdexFolderId?: string;
   /** Overrides the detected `00.03` folder. */
   templatesFolderId?: string;
+  /**
+   * The host's own configuration (the Hebra plugin's settings): when given, nothing is
+   * detected. `jdexFolder` and `templatesFolder` are library paths looked up in the folder
+   * tree; an empty or missing templates folder means the built-in templates, a missing JDex
+   * folder is `jdex_not_found`. Explicit ids above still win.
+   */
+  settings?: Partial<JdexManagerSettings>;
 }
 
 export interface ResolvedSettings {
@@ -79,6 +86,13 @@ export interface NewIdRequest {
   createFolder?: boolean;
   /** Also create the category's subfolder pattern inside the ID folder. Default false. */
   createPattern?: boolean;
+  /** A number chosen by the user instead of the next free one; validated like the dialog does. */
+  id?: string;
+  /**
+   * When the ID folder is wanted but the category has no folder: plan the note alone and set
+   * `folderSkipped`, instead of failing with `category_folder_not_found`.
+   */
+  skipMissingCategoryFolder?: boolean;
 }
 
 /** What one expected output of a plan is: a folder or a JDex note, by parent id and exact name. */
@@ -118,6 +132,8 @@ export interface NewIdPlan {
   noteName: string;
   /** Name of the ID folder, or null when no folder is planned. */
   folderName: string | null;
+  /** Set when the folder was wanted but skipped (`skipMissingCategoryFolder`). */
+  folderSkipped?: "category_folder_not_found";
   template: PlannedTemplate;
   preconditions: PlanPrecondition[];
   outputs: PlannedOutput[];
@@ -194,7 +210,8 @@ export async function resolveSettings(port: LibraryPort, options: ResolveSetting
   const paths = folderPathsOf(folders);
   const idByPath = new Map<string, string>();
   for (const [id, path] of [...paths].sort((a, b) => (a[0] < b[0] ? -1 : 1))) if (!idByPath.has(path)) idByPath.set(path, id);
-  const detected = detectFolders([...paths.values()]);
+  const own = options.settings ? mergeSettings(options.settings) : null;
+  const detected = own ? { jdex: null, reports: null, templates: null } : detectFolders([...paths.values()]);
   const pick = (override: string | undefined, found: string | null): ResolvedFolder | null | undefined => {
     if (override !== undefined) {
       const path = paths.get(override);
@@ -203,13 +220,39 @@ export async function resolveSettings(port: LibraryPort, options: ResolveSetting
     const id = found === null ? undefined : idByPath.get(found);
     return found === null || id === undefined ? null : { id, name: lastSegment(found), path: found };
   };
-  const jdex = pick(options.jdexFolderId, detected.jdex);
+  const configured = (path: string | undefined): string | null => (own && path ? path.normalize("NFC") : null);
+  const jdex = pick(options.jdexFolderId, detected.jdex ?? configured(own?.jdexFolder));
   if (!jdex) return fail("jdex_not_found", "No hay carpeta del JDex (00.00).");
-  const templates = pick(options.templatesFolderId, detected.templates);
+  const templates = pick(options.templatesFolderId, detected.templates ?? configured(own?.templatesFolder));
   if (templates === undefined) return fail("templates_not_found", "La carpeta de plantillas indicada no existe.");
-  const base = { ...DEFAULT_SETTINGS, jdexFolder: options.jdexFolderId !== undefined ? jdex.path : "", templatesFolder: options.templatesFolderId !== undefined && templates ? templates.path : "" };
+  const base = { ...(own ?? DEFAULT_SETTINGS), jdexFolder: options.jdexFolderId !== undefined || own ? jdex.path : "", templatesFolder: (options.templatesFolderId !== undefined || own) && templates ? templates.path : "" };
   const settings = fillEmpty(base, detected).next;
   return { ok: true, value: { settings, jdex, templates } };
+}
+
+/** Hex of a note id for the tie-break suffix; a non-canonical id gets a stable FNV-1a hash (as the Hebra plugin does). */
+function noteIdHex(id: string): string {
+  const compact = id.replace(/-/gu, "").toLowerCase();
+  if (/^[0-9a-f]{32}$/u.test(compact)) return compact;
+  let hash = 0x811c9dc5;
+  for (const point of id) hash = Math.imul(hash ^ point.codePointAt(0)!, 0x01000193) >>> 0;
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * Two notes of one folder with the same title share a path and the path-based index would
+ * see only one. The first id keeps the path; the others get Hebra's own tie-break
+ * (`Title--1a2b3c4d.md`), which the engine ignores when comparing titles.
+ */
+function tieBreakPaths<T extends { id: string; path: string }>(notes: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const note of notes) groups.set(note.path, [...(groups.get(note.path) ?? []), note]);
+  const out: T[] = [];
+  for (const [base, group] of groups) {
+    const ordered = [...group].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    ordered.forEach((note, position) => out.push(position === 0 ? note : { ...note, path: `${base.slice(0, -3)}--${noteIdHex(note.id).slice(0, 8)}.md` }));
+  }
+  return out;
 }
 
 /** Reads the library and builds the index (`buildIndex` works on relative paths) plus the maps that let a plan speak in ids. */
@@ -220,10 +263,10 @@ export async function loadLibraryState(port: LibraryPort, resolved: ResolvedSett
   const folderIdByPath = new Map<string, string>();
   for (const f of [...folders].sort((a, b) => (a.id < b.id ? -1 : 1))) if (!folderIdByPath.has(f.path)) folderIdByPath.set(f.path, f.id);
   const jdexPath = paths.get(resolved.jdex.id) ?? resolved.jdex.path;
-  const jdexNotes = (await port.listNotes(resolved.jdex.id)).map((n) => {
+  const jdexNotes = tieBreakPaths((await port.listNotes(resolved.jdex.id)).map((n) => {
     const title = n.title.normalize("NFC");
     return { id: n.id, title, path: `${jdexPath}/${portNoteFileStem(title)}.md` };
-  });
+  }));
   const templateNotes = resolved.templates ? (await port.listNotes(resolved.templates.id)).map((n) => ({ id: n.id, title: n.title.normalize("NFC") })) : [];
   const settings = { ...resolved.settings, jdexFolder: jdexPath };
   const index = buildIndex({ systemRoot: settings.systemRoot, folderPaths: folders.map((f) => f.path), jdexFolder: jdexPath, notePaths: jdexNotes.map((n) => n.path) });
@@ -243,7 +286,13 @@ export async function planNewId(port: LibraryPort, state: LibraryState, request:
   const category = index.categories.find((c) => c.number === request.category);
   if (!category) return fail("category_not_found", `La categoría ${request.category} no existe.`);
   if (await port.hasHidden(category.number)) return fail("category_has_hidden", `La categoría ${category.number} no admite IDs nuevos desde aquí.`);
-  const id = nextFreeId(category.number, knownIds(index, system), system);
+  let id: string | null;
+  if (request.id !== undefined) {
+    const error = validateNewId(index, category.number, request.id, system);
+    if (error) return fail("id_taken", error);
+    const parsed = parseJdNumber(request.id);
+    id = parsed && parsed.kind === "id" ? parsed.id : null;
+  } else id = nextFreeId(category.number, knownIds(index, system), system);
   if (id === null) return fail("category_full", `La categoría ${category.number} no tiene IDs libres.`);
   const taken = validateNewId(index, category.number, id, system);
   if (taken) return fail("id_taken", taken);
@@ -258,7 +307,9 @@ export async function planNewId(port: LibraryPort, state: LibraryState, request:
     for (const name of templateNameCandidates(settings.templateNames.id, { category: category.number, area: areaName })) {
       const ref = state.templateNotes.find((n) => n.title === name);
       if (!ref) continue;
-      text = (await port.readNote(ref.id)).body;
+      const { body: found } = await port.readNote(ref.id);
+      if (found === null) continue; // protected note: next candidate, then the built-in one.
+      text = found;
       template = { source: "templates-folder", noteName: name, noteId: ref.id };
       break;
     }
@@ -282,7 +333,9 @@ export async function planNewId(port: LibraryPort, state: LibraryState, request:
   const writes: PlanWrite[] = [{ kind: "ensure_note", folderId: jdex.id, title: noteName, body }];
   const categoryFolderId: string | null = category.path ? (state.folderIdByPath.get(category.path) ?? null) : null;
   let folderName: string | null = null;
-  if (request.createFolder !== false) {
+  let folderSkipped: NewIdPlan["folderSkipped"];
+  if (request.createFolder !== false && (categoryFolderId === null || !category.path) && request.skipMissingCategoryFolder) folderSkipped = "category_folder_not_found";
+  else if (request.createFolder !== false) {
     if (categoryFolderId === null || !category.path) return fail("category_folder_not_found", `La categoría ${category.number} no tiene carpeta.`);
     folderName = noteName;
     preconditions.splice(1, 0, { kind: "folder", role: "category", folderId: categoryFolderId, name: lastSegment(category.path) });
@@ -307,6 +360,7 @@ export async function planNewId(port: LibraryPort, state: LibraryState, request:
       resolved: state.resolved,
       noteName,
       folderName,
+      ...(folderSkipped ? { folderSkipped } : {}),
       template,
       preconditions,
       outputs,

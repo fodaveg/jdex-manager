@@ -1,18 +1,13 @@
-import { createFakePluginApiV2 } from "hebra-plugin-api/v2/testing";
 import { describe, expect, it } from "vitest";
 import {
   BUILTIN_TEMPLATES,
   DEFAULT_SETTINGS,
   applyPlan,
-  buildIndex,
   jdexNoteName,
-  knownIds,
   loadLibraryState,
-  nextFreeId,
   planNewId,
   renderTemplate,
   resolveSettings,
-  selectCreationSystem,
   todayIso,
   type EnsureResult,
   type LibraryPort,
@@ -20,8 +15,6 @@ import {
   type PortFolder,
   type PortNote,
 } from "../src/jd/public";
-import { createJdexId } from "../src/hebra/jdex-create-write";
-import { FakeJdexVault } from "./hebra/support/fakes";
 
 interface MemNote extends PortNote {
   folderId: string;
@@ -153,31 +146,6 @@ describe("planNewId", () => {
   it("skips the header number and starts at .11 in an empty category", async () => {
     expect((await okPlan(library(), "23", "X")).id).toBe("23.21");
     expect((await okPlan(library(), "24", "X")).id).toBe("24.11");
-  });
-
-  it("matches what the Hebra Create ID flow computes for the same tree", async () => {
-    const port = library();
-    const planned = await okPlan(port, "21", "Nuevo módulo", { createFolder: false });
-    const folderPaths = ["00-09 Sistema", "00-09 Sistema/00 Gestión", "00-09 Sistema/00 Gestión/00.00 JDex", "20-29 Productos", "20-29 Productos/21 Productos de software",
-      "20-29 Productos/21 Productos de software/21.11 Hebra", "20-29 Productos/21 Productos de software/21.22 JDex Manager"];
-    const jdexFolder = "00-09 Sistema/00 Gestión/00.00 JDex";
-    const notePaths = ["20-29 Productos", "21 Productos de software", "21.11 Hebra"].map((n) => `${jdexFolder}/${n}.md`);
-    const index = buildIndex({ systemRoot: "", jdexFolder, folderPaths, notePaths });
-    const category = index.categories.find((c) => c.number === "21")!;
-    const expectedId = nextFreeId("21", knownIds(selectCreationSystem(index, ""), ""));
-    expect(planned.id).toBe(expectedId);
-
-    const vault = new FakeJdexVault();
-    vault.seedFolder({ id: "f-jdex", parentId: null, name: jdexFolder, createdAt: 0, updatedAt: 0 });
-    const walk = { rootFolderId: "root", folderPaths: new Map([["f-jdex", jdexFolder]]), systemFolderPaths: folderPaths,
-      systemNotes: notePaths.map((path, i) => ({ id: `x${i}`, folderId: "f-jdex", title: path.slice(jdexFolder.length + 1, -3), path })) };
-    const markdown = createFakePluginApiV2().api.markdown;
-    const outcome = await createJdexId(vault, markdown, walk, { ...DEFAULT_SETTINGS, jdexFolder }, index, { category, id: expectedId!, title: "Nuevo módulo", createFolder: false });
-    expect(outcome.note.title).toBe(planned.noteName);
-    const write = planned.writes[0];
-    expect(write.kind === "ensure_note" && write.title).toBe(outcome.note.title);
-    // Hebra's host adds only the `title` property on top of the rendered template.
-    expect(outcome.note.body!.replace(/^title:.*\n/m, "")).toBe(write.kind === "ensure_note" ? write.body : "");
   });
 
   it("refuses a category with hidden content without naming a number", async () => {

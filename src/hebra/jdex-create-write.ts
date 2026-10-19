@@ -12,6 +12,8 @@
 import type { PluginFolder, PluginMarkdown, PluginNote, PluginVault } from 'hebra-plugin-api/v2';
 import {
   areaCode,
+  applyPlan,
+  planNewId,
   selectCreationSystem,
   selectSystem,
   findId,
@@ -21,7 +23,6 @@ import {
   nextFreeArea,
   nextFreeCategory,
   parseJdNumber,
-  patternFor,
   renderTemplate,
   standardZeroNames,
   templateNameCandidates,
@@ -35,6 +36,7 @@ import {
   type JdexNoteType,
   type TemplateScope
 } from './engine';
+import { HebraLibraryPort, jdexLibraryState } from './library-port-adapter';
 import { isJdexChildEntry, JDEX_CHILD_OF_CHILD_MESSAGE, jdexCreationIndex, requireTitle, validateNewChildTitle, validateNewHeader, validateNewId } from './jdex-create';
 import { jdexResolveFolderId, readJdexCreationIndex, type JdexLibraryWalk } from './library-index';
 
@@ -180,6 +182,7 @@ export async function createJdexId(
   request: CreateIdRequest
 ): Promise<JdexCreateOutcome> {
   const system = request.category.system ?? namePrefix(settings);
+  const fullIndex = index;
   index = selectCreationSystem(index, system);
   const error = requireTitle(request.title) ?? validateNewId(index, request.category.number, request.id, system);
   if (error) throw new Error(error);
@@ -189,45 +192,40 @@ export async function createJdexId(
   const name = jdexNoteName(parsed.id, request.title, system);
   rejectIfNoteNameTaken(walk, jdexFolderId, name);
 
-  const area = index.areas.find((a) => a.number === request.category.areaNumber);
-  const template = await resolveJdexTemplate(library, walk, settings, 'id', {
+  // El número, los nombres, la plantilla y las escrituras salen del motor (el mismo que usa
+  // hebra-mcp), sobre los ajustes del plugin; el adaptador pone `title:` con `withTitle`.
+  const port = new HebraLibraryPort(library, markdown);
+  const state = jdexLibraryState(walk, fullIndex, settings, jdexFolderId);
+  const planned = await planNewId(port, state, {
     category: request.category.number,
-    area: areaCode(request.category.areaNumber)
+    title: request.title,
+    systemId: system,
+    id: request.id,
+    createFolder: request.createFolder,
+    createPattern: request.createPattern,
+    skipMissingCategoryFolder: true
   });
-  const content = renderTemplate(template, {
-    id: parsed.id,
-    title: request.title.trim(),
-    area: areaCode(request.category.areaNumber),
-    areaTitle: area?.label ?? areaCode(request.category.areaNumber),
-    category: request.category.number,
-    categoryTitle: request.category.label,
-    date: todayIso()
-  });
-  const freshIndex = await readJdexCreationIndex(library, settings);
-  const conflict = validateNewId(freshIndex, request.category.number, request.id, system);
-  if (conflict) throw new Error(conflict);
-  const note = await writeJdexNote(library, markdown, jdexFolderId, content, name);
+  if (!planned.ok) throw new Error(planned.message);
+  const plan = planned.value;
+  const applied = await applyPlan(port, plan);
+  if (!applied.ok) {
+    // Alguien tomó el número mientras tanto: el mismo mensaje que daba la comprobación en vivo.
+    const conflict = validateNewId(await readJdexCreationIndex(library, settings), request.category.number, request.id, system);
+    throw new Error(conflict ?? applied.message);
+  }
+  const noteItem = applied.value.created.concat(applied.value.existing).find((item) => item.kind === 'note')!;
+  const note = port.created.get(noteItem.id) ?? (await library.noteRead(noteItem.id));
+  if (!note) throw new Error(`No se pudo leer la nota «${name}» recién creada.`);
 
   let folderPath: string | null = null;
   let folderNotice: string | null = null;
   if (request.createFolder) {
     if (!request.category.path) {
       folderNotice = `Nota creada. La categoría ${request.category.number} no tiene carpeta en la raíz del sistema: la carpeta del ID no se creó.`;
+    } else if (plan.folderName === null) {
+      folderNotice = `Nota creada. No se encontró la carpeta de ${request.category.number}: la carpeta del ID no se creó.`;
     } else {
-      const categoryFolderId = jdexResolveFolderId(walk, request.category.path);
-      if (categoryFolderId === null) {
-        folderNotice = `Nota creada. No se encontró la carpeta de ${request.category.number}: la carpeta del ID no se creó.`;
-      } else {
-        const idFolderId = await ensureJdexFolder(library, categoryFolderId, name);
-        for (const pattern of request.createPattern ? patternFor(settings, request.category.number) : []) {
-          let parentId = idFolderId;
-          for (const segment of pattern.split('/')) {
-            if (segment === '' || segment === '.' || segment === '..') throw new Error(`Patrón de subcarpetas no válido: ${pattern}.`);
-            parentId = await ensureJdexFolder(library, parentId, segment);
-          }
-        }
-        folderPath = `${request.category.path}/${name}`;
-      }
+      folderPath = `${request.category.path}/${plan.folderName}`;
     }
   }
   return { note, folderPath, folderNotice };
