@@ -9,9 +9,14 @@
  * `applyPlan` (re-reads, re-checks, writes with ensure*).
  */
 
-import type { JdIndex } from "./index";
-import type { LibraryPort } from "./library-port";
-import type { JdexManagerSettings } from "./settings";
+import { detectFolders, fillEmpty } from "./detect";
+import { areaCode, buildIndex, knownIds, selectCreationSystem, type JdIndex } from "./index";
+import type { LibraryPort, PortFolder } from "./library-port";
+import { extractJdPrefix, jdexNoteName, nextFreeId } from "./parse";
+import { patternFor } from "./patterns";
+import { DEFAULT_SETTINGS, type JdexManagerSettings } from "./settings";
+import { BUILTIN_TEMPLATES, renderTemplate, templateNameCandidates, todayIso } from "./template";
+import { requireTitle, validateNewId } from "./create-validate";
 
 export type JdLibraryErrorCode =
   | "jdex_not_found"
@@ -20,6 +25,8 @@ export type JdLibraryErrorCode =
   | "category_folder_not_found"
   | "category_has_hidden"
   | "category_full"
+  | "id_taken"
+  | "invalid_pattern"
   | "invalid_title"
   | "plan_stale";
 
@@ -128,18 +135,238 @@ export interface ApplyOutcome {
   existing: CreatedItem[];
 }
 
-export function resolveSettings(_port: LibraryPort, _options: ResolveSettingsOptions = {}): Promise<JdLibraryResult<ResolvedSettings>> {
-  throw new Error("not implemented");
+function fail<T>(code: JdLibraryErrorCode, message: string): JdLibraryResult<T> {
+  return { ok: false, code, message };
 }
 
-export function loadLibraryState(_port: LibraryPort, _resolved: ResolvedSettings): Promise<LibraryState> {
-  throw new Error("not implemented");
+/** Same filename stem rules as Hebra's `sanitizeNoteFileStem`, so the path the engine sees for
+ *  a note is the one a Hebra host builds. UTF-8 sizes are counted by hand (no host globals). */
+export function portNoteFileStem(title: string): string {
+  // eslint-disable-next-line no-control-regex -- matches Hebra's filename sanitizer.
+  let cleaned = title.normalize("NFC").replace(/[<>:"/\\|?*\u0000-\u001f]/gu, "–").replace(/[ .]+$/gu, "").trim();
+  if (!cleaned) cleaned = "Nota sin título";
+  if (cleaned.startsWith(".")) cleaned = `_${cleaned}`;
+  let stem = "";
+  let bytes = 0;
+  for (const point of cleaned) {
+    const code = point.codePointAt(0)!;
+    const size = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    if (bytes + size > 218 || stem.length + point.length > 218) break;
+    stem += point;
+    bytes += size;
+  }
+  return stem;
 }
 
-export function planNewId(_port: LibraryPort, _state: LibraryState, _request: NewIdRequest, _now?: Date): Promise<JdLibraryResult<NewIdPlan>> {
-  throw new Error("not implemented");
+/** Full path of every folder, rebuilt from the `parentId` chain (names in NFC, case kept). */
+function folderPathsOf(folders: PortFolder[]): Map<string, string> {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const cache = new Map<string, string>();
+  const visiting = new Set<string>();
+  const pathOf = (id: string): string => {
+    const cached = cache.get(id);
+    if (cached !== undefined) return cached;
+    const folder = byId.get(id);
+    if (!folder || visiting.has(id)) return "";
+    visiting.add(id);
+    const parent = folder.parentId === null ? "" : pathOf(folder.parentId);
+    visiting.delete(id);
+    const name = folder.name.normalize("NFC");
+    const path = parent ? `${parent}/${name}` : name;
+    cache.set(id, path);
+    return path;
+  };
+  for (const f of folders) pathOf(f.id);
+  return cache;
 }
 
-export function applyPlan(_port: LibraryPort, _plan: NewIdPlan): Promise<JdLibraryResult<ApplyOutcome>> {
-  throw new Error("not implemented");
+function lastSegment(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
 }
+
+/**
+ * Finds the JDex (`00.00`) and templates (`00.03`) folders from `listFolders`, with
+ * `detectFolders` and `fillEmpty`. An explicit id overrides what was detected.
+ * Without a JDex folder: `jdex_not_found`.
+ */
+export async function resolveSettings(port: LibraryPort, options: ResolveSettingsOptions = {}): Promise<JdLibraryResult<ResolvedSettings>> {
+  const folders = await port.listFolders();
+  const paths = folderPathsOf(folders);
+  const idByPath = new Map<string, string>();
+  for (const [id, path] of [...paths].sort((a, b) => (a[0] < b[0] ? -1 : 1))) if (!idByPath.has(path)) idByPath.set(path, id);
+  const detected = detectFolders([...paths.values()]);
+  const pick = (override: string | undefined, found: string | null): ResolvedFolder | null | undefined => {
+    if (override !== undefined) {
+      const path = paths.get(override);
+      return path === undefined ? undefined : { id: override, name: lastSegment(path), path };
+    }
+    const id = found === null ? undefined : idByPath.get(found);
+    return found === null || id === undefined ? null : { id, name: lastSegment(found), path: found };
+  };
+  const jdex = pick(options.jdexFolderId, detected.jdex);
+  if (!jdex) return fail("jdex_not_found", "No hay carpeta del JDex (00.00).");
+  const templates = pick(options.templatesFolderId, detected.templates);
+  if (templates === undefined) return fail("templates_not_found", "La carpeta de plantillas indicada no existe.");
+  const base = { ...DEFAULT_SETTINGS, jdexFolder: options.jdexFolderId !== undefined ? jdex.path : "", templatesFolder: options.templatesFolderId !== undefined && templates ? templates.path : "" };
+  const settings = fillEmpty(base, detected).next;
+  return { ok: true, value: { settings, jdex, templates } };
+}
+
+/** Reads the library and builds the index (`buildIndex` works on relative paths) plus the maps that let a plan speak in ids. */
+export async function loadLibraryState(port: LibraryPort, resolved: ResolvedSettings): Promise<LibraryState> {
+  const portFolders = await port.listFolders();
+  const paths = folderPathsOf(portFolders);
+  const folders = portFolders.map((f) => ({ id: f.id, parentId: f.parentId, name: f.name.normalize("NFC"), path: paths.get(f.id) ?? "" }));
+  const folderIdByPath = new Map<string, string>();
+  for (const f of [...folders].sort((a, b) => (a.id < b.id ? -1 : 1))) if (!folderIdByPath.has(f.path)) folderIdByPath.set(f.path, f.id);
+  const jdexPath = paths.get(resolved.jdex.id) ?? resolved.jdex.path;
+  const jdexNotes = (await port.listNotes(resolved.jdex.id)).map((n) => {
+    const title = n.title.normalize("NFC");
+    return { id: n.id, title, path: `${jdexPath}/${portNoteFileStem(title)}.md` };
+  });
+  const templateNotes = resolved.templates ? (await port.listNotes(resolved.templates.id)).map((n) => ({ id: n.id, title: n.title.normalize("NFC") })) : [];
+  const settings = { ...resolved.settings, jdexFolder: jdexPath };
+  const index = buildIndex({ systemRoot: settings.systemRoot, folderPaths: folders.map((f) => f.path), jdexFolder: jdexPath, notePaths: jdexNotes.map((n) => n.path) });
+  return { resolved: { ...resolved, settings, jdex: { ...resolved.jdex, path: jdexPath } }, index, folders, folderIdByPath, jdexNotes, templateNotes };
+}
+
+/**
+ * Plans one new content ID in an existing category: the next free number (highest in use
+ * plus one, skipping headers), the JDex note and, by default, the ID folder. Nothing is
+ * written. A category with hidden content is refused without saying which number is taken.
+ */
+export async function planNewId(port: LibraryPort, state: LibraryState, request: NewIdRequest, now = new Date()): Promise<JdLibraryResult<NewIdPlan>> {
+  const titleError = requireTitle(request.title);
+  if (titleError) return fail("invalid_title", titleError);
+  const system = request.systemId ?? "";
+  const index = selectCreationSystem(state.index, system);
+  const category = index.categories.find((c) => c.number === request.category);
+  if (!category) return fail("category_not_found", `La categoría ${request.category} no existe.`);
+  if (await port.hasHidden(category.number)) return fail("category_has_hidden", `La categoría ${category.number} no admite IDs nuevos desde aquí.`);
+  const id = nextFreeId(category.number, knownIds(index, system), system);
+  if (id === null) return fail("category_full", `La categoría ${category.number} no tiene IDs libres.`);
+  const taken = validateNewId(index, category.number, id, system);
+  if (taken) return fail("id_taken", taken);
+
+  const { settings, jdex, templates } = state.resolved;
+  const noteName = jdexNoteName(id, request.title, system);
+  const area = index.areas.find((a) => a.number === category.areaNumber);
+  const areaName = areaCode(category.areaNumber);
+  let template: PlannedTemplate = { source: "builtin" };
+  let text = BUILTIN_TEMPLATES.id;
+  if (templates) {
+    for (const name of templateNameCandidates(settings.templateNames.id, { category: category.number, area: areaName })) {
+      const ref = state.templateNotes.find((n) => n.title === name);
+      if (!ref) continue;
+      text = (await port.readNote(ref.id)).body;
+      template = { source: "templates-folder", noteName: name, noteId: ref.id };
+      break;
+    }
+  }
+  const body = renderTemplate(text, {
+    id,
+    title: request.title.trim(),
+    area: areaName,
+    areaTitle: area?.label ?? areaName,
+    category: category.number,
+    categoryTitle: category.label,
+    date: todayIso(now),
+  });
+
+  const preconditions: PlanPrecondition[] = [
+    { kind: "folder", role: "jdex", folderId: jdex.id, name: jdex.name },
+    { kind: "not_hidden", category: category.number },
+    { kind: "id_free", id, system },
+  ];
+  const outputs: PlannedOutput[] = [{ kind: "note", parentId: jdex.id, name: noteName }];
+  const writes: PlanWrite[] = [{ kind: "ensure_note", folderId: jdex.id, title: noteName, body }];
+  const categoryFolderId: string | null = category.path ? (state.folderIdByPath.get(category.path) ?? null) : null;
+  let folderName: string | null = null;
+  if (request.createFolder !== false) {
+    if (categoryFolderId === null || !category.path) return fail("category_folder_not_found", `La categoría ${category.number} no tiene carpeta.`);
+    folderName = noteName;
+    preconditions.splice(1, 0, { kind: "folder", role: "category", folderId: categoryFolderId, name: lastSegment(category.path) });
+    outputs.push({ kind: "folder", parentId: categoryFolderId, name: folderName });
+    writes.push({ kind: "ensure_folder", parent: { folderId: categoryFolderId }, name: folderName });
+    const idFolderWrite = writes.length - 1;
+    for (const pattern of request.createPattern ? patternFor(settings, category.number) : []) {
+      let parent: { folderId: string } | { write: number } = { write: idFolderWrite };
+      for (const segment of pattern.split("/")) {
+        if (segment === "" || segment === "." || segment === "..") return fail("invalid_pattern", `Patrón de subcarpetas no válido: ${pattern}.`);
+        writes.push({ kind: "ensure_folder", parent, name: segment });
+        parent = { write: writes.length - 1 };
+      }
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      id,
+      system,
+      category: { number: category.number, label: category.label, folderId: categoryFolderId },
+      resolved: state.resolved,
+      noteName,
+      folderName,
+      template,
+      preconditions,
+      outputs,
+      writes,
+    },
+  };
+}
+
+/** Why a precondition no longer holds, or null when it does. */
+async function brokenPrecondition(port: LibraryPort, state: LibraryState, plan: NewIdPlan, pre: PlanPrecondition): Promise<string | null> {
+  switch (pre.kind) {
+    case "folder":
+      return state.folders.some((f) => f.id === pre.folderId && f.name === pre.name.normalize("NFC")) ? null : `la carpeta «${pre.name}» ya no está`;
+    case "not_hidden":
+      return (await port.hasHidden(pre.category)) ? `la categoría ${pre.category} cambió` : null;
+    case "id_free": {
+      // Only outputs of this very plan may hold the number: exact name under the planned parent.
+      const ownFolder = (parentId: string | null, name: string): boolean => plan.outputs.some((out) => out.kind === "folder" && out.parentId === parentId && out.name.normalize("NFC") === name);
+      for (const folder of state.folders) {
+        const prefix = extractJdPrefix(folder.name);
+        if (!prefix || prefix.number.kind !== "id" || (prefix.number.system ?? "") !== pre.system || prefix.number.id !== pre.id) continue;
+        if (!ownFolder(folder.parentId, folder.name)) return `el ID ${pre.id} lo ocupa ya otra cosa`;
+      }
+      for (const raw of state.index.rawIdNotes) {
+        if ((raw.system ?? "") !== pre.system || raw.id.replace(/\+$/, "") !== pre.id) continue;
+        const notes = state.jdexNotes.filter((n) => n.path === raw.path);
+        const own = notes.length > 0 && notes.every((n) => plan.outputs.some((out) => out.kind === "note" && out.parentId === state.resolved.jdex.id && out.name.normalize("NFC") === n.title));
+        if (!own) return `el ID ${pre.id} lo ocupa ya otra cosa`;
+      }
+      return null;
+    }
+  }
+}
+
+/**
+ * Re-reads the library, re-checks the plan's preconditions and, if all hold, runs its
+ * writes in order with the port's ensure* calls. A retry after a failure half way completes
+ * what is missing without duplicating: the "ID free" precondition accepts an ID occupied
+ * only by this plan's own expected outputs (same name under the same parent). Anything
+ * else changed returns `plan_stale` and nothing is written.
+ */
+export async function applyPlan(port: LibraryPort, plan: NewIdPlan): Promise<JdLibraryResult<ApplyOutcome>> {
+  const state = await loadLibraryState(port, plan.resolved);
+  for (const pre of plan.preconditions) {
+    const broken = await brokenPrecondition(port, state, plan, pre);
+    if (broken) return fail("plan_stale", `El plan ya no vale: ${broken}. No se ha cambiado nada.`);
+  }
+  const outcome: ApplyOutcome = { created: [], existing: [] };
+  const folderIds: string[] = [];
+  const resolveParent = (parent: { folderId: string } | { write: number }): string => ("folderId" in parent ? parent.folderId : folderIds[parent.write]);
+  for (const [position, write] of plan.writes.entries()) {
+    if (write.kind === "ensure_note") {
+      const result = await port.ensureNote(write.folderId, write.title, write.body);
+      (result.created ? outcome.created : outcome.existing).push({ kind: "note", id: result.id, name: write.title });
+    } else {
+      const result = await port.ensureFolder(resolveParent(write.parent), write.name);
+      folderIds[position] = result.id;
+      (result.created ? outcome.created : outcome.existing).push({ kind: "folder", id: result.id, name: write.name });
+    }
+  }
+  return { ok: true, value: outcome };
+}
+
