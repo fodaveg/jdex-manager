@@ -87,7 +87,8 @@ import {
   walkJdexLibrary,
   type JdexAuditEntry,
   type JdexInboxSummary,
-  type JdexLibraryWalk
+  type JdexLibraryWalk,
+  type JdexNoteRef
 } from './library-index';
 import { mountJdexSettingsPanel } from './jdex-settings-panel';
 import { autodetectJdexSettings, jdexSettingsChangeNeedsRebuild, jdexSettingsFromStored, loadJdexSettings, persistJdexSettings, trackJdexSettingsSaves } from './settings';
@@ -144,7 +145,6 @@ import {
   jdexInboxArchiveTarget,
   jdexInboxQueue,
   moveJdexInboxNote,
-  moveJdexInboxNoteCreatingFolder,
   trashJdexInboxNote
 } from './jdex-inbox-process';
 import { mountJdexInboxProcessView } from './jdex-inbox-process-view';
@@ -1021,6 +1021,19 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   // ---- Lote 4, tarea 1: «Procesar inbox» -------------------------------------
 
+  /** «Mover» del inbox por el motor: carpeta del ID creada si falta, nombre ocupado rechazado. */
+  async function moveInboxNote(note: JdexNoteRef, entry: IdEntry, currentWalk: JdexLibraryWalk, currentIndex: JdIndex): Promise<void> {
+    const label = entry.folderPath ? `Mover inbox a ${entry.label}` : `Crear carpeta de ${entry.label} y mover desde el inbox`;
+    await moveJdexInboxNote(note, entry, currentWalk, {
+      index: currentIndex,
+      settings,
+      library: api.vault,
+      markdown: api.markdown,
+      run: (action) => journal.run('move', label, action)
+    });
+    await rebuild();
+  }
+
   /** «Procesar inbox»: la cola sale de `inboxSummary`+`walk` (sin consulta nueva,
    *  `jdexInboxQueue`); mover reutiliza el mismo buscador que «ir a un ID»
    *  (`jdex-id-picker.ts`, vía `mountJdexInboxProcessView`). Se lanza desde ⌘K y
@@ -1046,11 +1059,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
           entries: currentIndex.ids,
           folderLabel: (note) => labelByFolderId.get(note.folderId) ?? 'Bandeja de entrada',
           archiveTarget: (note) => jdexInboxArchiveTarget(note, currentWalk, currentIndex)?.label ?? null,
-          onMove: async (note, entry) => {
-            if (!entry.folderPath) throw new Error(`${entry.label} no tiene carpeta.`);
-            await journal.run('move', `Mover inbox a ${entry.label}`, (vault) => moveJdexInboxNote(vault, note, currentWalk, entry.folderPath!));
-            await rebuild();
-          },
+          onMove: (note, entry) => moveInboxNote(note, entry, currentWalk, currentIndex),
           onArchive: async (note) => {
             await journal.run('move', 'Archivar nota de inbox', (vault) => archiveJdexInboxNote(vault, api.markdown, note, currentWalk, currentIndex, settings.dateFormat));
             await rebuild();
@@ -1061,10 +1070,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
             await journal.run('fix', `Papelera desde el inbox: ${note.title}`, (vault) => trashJdexInboxNote(vault, note));
             await rebuild();
           },
-          onMoveCreatingFolder: async (note, entry) => {
-            await journal.run('move', `Crear carpeta de ${entry.label} y mover desde el inbox`, (vault) => moveJdexInboxNoteCreatingFolder(vault, note, currentWalk, currentIndex, entry));
-            await rebuild();
-          }
+          onMoveCreatingFolder: (note, entry) => moveInboxNote(note, entry, currentWalk, currentIndex)
         }),
       { title: 'JDex: procesar inbox' }
     );

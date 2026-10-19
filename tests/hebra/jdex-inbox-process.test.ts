@@ -1,16 +1,29 @@
 import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { buildIndex } from '../../src/hebra/engine';
+import type { PluginVault } from 'hebra-plugin-api/v2';
+import {
+  applyMovePlan,
+  buildIndex,
+  DEFAULT_SETTINGS,
+  loadLibraryState,
+  planMoveIntoId,
+  resolveSettings,
+  type EnsureResult,
+  type IdEntry,
+  type JdexManagerSettings,
+  type LibraryMovePort,
+  type PortFolder,
+  type PortNote
+} from '../../src/hebra/engine';
 import {
   archiveJdexInboxNote,
   jdexInboxArchiveTarget,
   jdexInboxQueue,
   jdexZeroTarget,
   moveJdexInboxNote,
-  moveJdexInboxNoteCreatingFolder,
   trashJdexInboxNote
 } from '../../src/hebra/jdex-inbox-process';
-import type { JdexInboxSummary, JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
+import { buildJdexIndexInput, walkJdexLibrary, type JdexInboxSummary, JdexLibraryWalk, JdexNoteRef } from '../../src/hebra/library-index';
 import { FakeJdexVault, fakeFolder, fakeNote } from './support/fakes';
 
 const markdown = createFakePluginApiV2().api.markdown;
@@ -42,28 +55,160 @@ describe('jdexInboxQueue', () => {
   });
 });
 
-describe('moveJdexInboxNote', () => {
-  it('resuelve la carpeta de destino y llama a noteMove', async () => {
-    const walk = {
-      rootFolderId: 'root',
-      folderPaths: new Map([['f-target', '21 Cat/21.11 Hebra']])
-    };
-    const noteMove = vi.fn(async () => fakeNote('n1', 'f-target', ''));
-    await moveJdexInboxNote({ noteMove }, note('n1', 'f-inbox', 'Suelta'), walk, '21 Cat/21.11 Hebra');
-    expect(noteMove).toHaveBeenCalledWith('n1', 'f-target');
+/** Un sistema pequeño: 21.11 con carpeta, 21.12 sin ella, y la nota suelta en el inbox. */
+function moveSeed(): FakeJdexVault {
+  const vault = new FakeJdexVault();
+  for (const folder of [
+    fakeFolder('jdex', null, 'JDex'),
+    fakeFolder('inbox', null, 'Inbox'),
+    fakeFolder('area', null, '20-29 Productos'),
+    fakeFolder('cat', 'area', '21 Software'),
+    fakeFolder('id11', 'cat', '21.11 Algo')
+  ]) vault.seedFolder(folder);
+  vault.seedNote(fakeNote('jn-11', 'jdex', '# 21.11 Algo\n'));
+  vault.seedNote(fakeNote('jn-12', 'jdex', '# 21.12 Otro\n'));
+  vault.seedNote(fakeNote('n1', 'inbox', '# Informe\n'));
+  return vault;
+}
+
+const moveSettings: JdexManagerSettings = { ...DEFAULT_SETTINGS, jdexFolder: 'JDex', templatesFolder: '', dateOnMove: true };
+
+async function moveContext(vault: FakeJdexVault) {
+  const folders = (await vault.foldersList()).filter((f) => f.id !== vault.rootFolderId());
+  const walk = await walkJdexLibrary(vault, folders, '', vault.rootFolderId(), undefined, 'JDex');
+  const index = buildIndex(buildJdexIndexInput(walk, moveSettings));
+  return { walk, index, folders, entry: (id: string): IdEntry => index.ids.find((e) => e.id === id)! };
+}
+
+async function moveFromInbox(vault: FakeJdexVault, toId: string, noteRef: JdexNoteRef = note('n1', 'inbox', 'Informe')) {
+  const { walk, index, entry } = await moveContext(vault);
+  const run = vi.fn((action: (v: PluginVault) => Promise<unknown>) => action(vault));
+  const result = moveJdexInboxNote(noteRef, entry(toId), walk, { index, settings: moveSettings, library: vault, markdown, run });
+  return { result, run };
+}
+
+describe('moveJdexInboxNote (motor compartido)', () => {
+  it('mueve la nota a la carpeta del ID dentro del diario', async () => {
+    const vault = moveSeed();
+    const { result, run } = await moveFromInbox(vault, '21.11');
+    await result;
+    expect(run).toHaveBeenCalledOnce();
+    expect(vault.peek('n1').folderId).toBe('id11');
   });
 
-  it('sin carpeta que resuelva la ruta, lanza', async () => {
-    const noteMove = vi.fn(async () => fakeNote('n1', 'f-target', ''));
-    await expect(
-      moveJdexInboxNote(
-        { noteMove },
-        note('n1', 'f-inbox', 'Suelta'),
-        { rootFolderId: 'root', folderPaths: new Map() },
-        'no existe'
-      )
-    ).rejects.toThrow('No se encontró la carpeta de destino.');
-    expect(noteMove).not.toHaveBeenCalled();
+  it('crea la carpeta del ID que falta bajo su categoría y mueve la nota', async () => {
+    const vault = moveSeed();
+    const { result } = await moveFromInbox(vault, '21.12');
+    await result;
+    const created = (await vault.foldersList()).find((f) => f.name === '21.12 Otro');
+    expect(created?.parentId).toBe('cat');
+    expect(vault.peek('n1').folderId).toBe(created!.id);
+  });
+
+  it('con el nombre ocupado en el destino rechaza sin mover ni abrir el diario', async () => {
+    const vault = moveSeed();
+    vault.seedNote(fakeNote('twin', 'id11', '# Informe\n'));
+    const { result, run } = await moveFromInbox(vault, '21.11');
+    await expect(result).rejects.toThrow('En el destino ya hay algo llamado «Informe».');
+    expect(vault.peek('n1').folderId).toBe('inbox');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('una nota que ya no está donde se vio se rechaza sin mover nada', async () => {
+    const vault = moveSeed();
+    vault.seedFolder(fakeFolder('elsewhere', null, 'Otra'));
+    await vault.noteMove('n1', 'elsewhere');
+    const { result, run } = await moveFromInbox(vault, '21.11');
+    await expect(result).rejects.toThrow();
+    expect(vault.peek('n1').folderId).toBe('elsewhere');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('una nota renombrada entre el plan y la escritura se rechaza sin mover', async () => {
+    const vault = moveSeed();
+    const { walk, index, entry } = await moveContext(vault);
+    const run = async (action: (v: PluginVault) => Promise<unknown>) => {
+      vault.saveElsewhere('n1', '# Otro título\n');
+      return action(vault);
+    };
+    await expect(moveJdexInboxNote(note('n1', 'inbox', 'Informe'), entry('21.11'), walk, { index, settings: moveSettings, library: vault, markdown, run })).rejects.toThrow();
+    expect(vault.peek('n1').folderId).toBe('inbox');
+  });
+
+  it('una nota que cambia justo antes de mover se rechaza (noteMoveIfUnchanged devuelve null)', async () => {
+    const vault = moveSeed();
+    const { walk, index, entry } = await moveContext(vault);
+    const guarded = vi.spyOn(vault, 'noteMoveIfUnchanged').mockResolvedValue(null);
+    const run = (action: (v: PluginVault) => Promise<unknown>) => action(vault);
+    await expect(moveJdexInboxNote(note('n1', 'inbox', 'Informe'), entry('21.11'), walk, { index, settings: moveSettings, library: vault, markdown, run })).rejects.toThrow();
+    expect(guarded).toHaveBeenCalledOnce();
+    expect(vault.peek('n1').folderId).toBe('inbox');
+  });
+
+  it('sin carpeta del JDex avisa y no planifica', async () => {
+    const vault = moveSeed();
+    const { walk, index, entry } = await moveContext(vault);
+    const run = vi.fn();
+    await expect(moveJdexInboxNote(note('n1', 'inbox', 'Informe'), entry('21.11'), walk, { index, settings: { ...moveSettings, jdexFolder: 'No existe' }, library: vault, markdown, run })).rejects.toThrow('No se encontró la carpeta del JDex.');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  describe('paridad con planMoveIntoId sobre un puerto en memoria', () => {
+    class MemoryMovePort implements LibraryMovePort {
+      moved: { id: string; folderId: string }[] = [];
+      constructor(public folders: PortFolder[], public notes: (PortNote & { folderId: string })[]) {}
+      async listFolders() { return this.folders; }
+      async listNotes(folderId: string) { return this.notes.filter((n) => n.folderId === folderId).map(({ id, title }) => ({ id, title })); }
+      async readNote() { return { body: '' }; }
+      async ensureFolder(parentId: string | null, name: string): Promise<EnsureResult> {
+        const found = this.folders.find((f) => f.parentId === parentId && f.name.toLowerCase() === name.toLowerCase());
+        if (found) return { id: found.id, created: false };
+        const id = `m-f${this.folders.length}`;
+        this.folders.push({ id, parentId, name });
+        return { id, created: true };
+      }
+      async ensureNote(): Promise<EnsureResult> { throw new Error('no se usa'); }
+      async hasHidden() { return false; }
+      async listFiles() { return []; }
+      async hiddenInside() { return false; }
+      async moveNote(id: string, _expected: unknown, to: { folderId: string }) { this.moved.push({ id, folderId: to.folderId }); return { ok: true }; }
+      async moveFile() { return { ok: true }; }
+      async moveFolder() { return { ok: true }; }
+    }
+
+    it.each([
+      ['con carpeta', '21.11', false],
+      ['sin carpeta', '21.12', false],
+      ['nombre ocupado', '21.11', true]
+    ])('mismo resultado que el motor, ID %s', async (_name, toId, occupied) => {
+      const vault = moveSeed();
+      if (occupied) vault.seedNote(fakeNote('twin', 'id11', '# Informe\n'));
+      const { walk, folders } = await moveContext(vault);
+
+      const memory = new MemoryMovePort(
+        folders.map((f) => ({ id: f.id, parentId: f.parentId, name: f.name })),
+        walk.systemNotes.map((ref) => ({ id: ref.id, title: ref.title, folderId: ref.folderId }))
+      );
+      memory.notes.push({ id: 'n1', title: 'Informe', folderId: 'inbox' });
+      if (occupied) memory.notes.push({ id: 'twin', title: 'Informe', folderId: 'id11' });
+      const resolved = await resolveSettings(memory, { settings: moveSettings });
+      if (!resolved.ok) throw new Error(resolved.code);
+      const planned = await planMoveIntoId(memory, await loadLibraryState(memory, resolved.value), { source: { kind: 'note', id: 'n1', folderId: 'inbox' }, toId });
+      if (planned.ok) await applyMovePlan(memory, planned.value);
+
+      const { result } = await moveFromInbox(vault, toId);
+      if (planned.ok) {
+        await result;
+        const target = vault.peek('n1').folderId;
+        const targetName = (await vault.foldersList()).find((f) => f.id === target)?.name;
+        const memoryTarget = memory.folders.find((f) => f.id === memory.moved[0].folderId)?.name;
+        expect(targetName).toBe(memoryTarget);
+        expect(planned.value.writes.length).toBe(toId === '21.12' ? 1 : 0);
+      } else {
+        await expect(result).rejects.toThrow(planned.message);
+        expect(memory.moved).toEqual([]);
+      }
+    });
   });
 });
 
@@ -80,33 +225,6 @@ describe('trashJdexInboxNote', () => {
     library.seedNote(fakeNote('n1', 'elsewhere', '# Suelta\n'));
     await expect(trashJdexInboxNote(library, note('n1', 'inbox', 'Suelta'))).rejects.toThrow('cambió');
     expect((await library.noteRead('n1'))?.trashedAt).toBeNull();
-  });
-});
-
-describe('moveJdexInboxNoteCreatingFolder', () => {
-  const folders = ['20-29 Productos', '20-29 Productos/21 Software'];
-  const jdex = '00-09 Sistema/00 Sistema/00.00 JDex';
-  const index = buildIndex({ systemRoot: '', jdexFolder: jdex, folderPaths: [...folders, jdex], notePaths: [`${jdex}/21.11 Hebra.md`] });
-  const entry = index.ids.find((e) => e.id === '21.11')!;
-
-  it('creates the ID folder under its category and moves the note there', async () => {
-    const library = new FakeJdexVault();
-    library.seedFolder(fakeFolder('cat', 'root', '21 Software'));
-    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
-    const walk = { rootFolderId: 'root', folderPaths: new Map([['cat', '20-29 Productos/21 Software']]) };
-    expect(entry.folderPath).toBeUndefined();
-    await moveJdexInboxNoteCreatingFolder(library, note('n1', 'inbox', 'Suelta'), walk, index, entry);
-    const created = (await library.foldersList()).find((f) => f.name === '21.11 Hebra');
-    expect(created?.parentId).toBe('cat');
-    expect((await library.noteRead('n1'))?.folderId).toBe(created?.id);
-  });
-
-  it('refuses an ID whose category has no folder, creating nothing', async () => {
-    const library = new FakeJdexVault();
-    library.seedNote(fakeNote('n1', 'inbox', '# Suelta\n'));
-    const create = vi.spyOn(library, 'folderCreate');
-    await expect(moveJdexInboxNoteCreatingFolder(library, note('n1', 'inbox', 'Suelta'), { rootFolderId: 'root', folderPaths: new Map() }, index, entry)).rejects.toThrow('no tiene carpeta');
-    expect(create).not.toHaveBeenCalled();
   });
 });
 

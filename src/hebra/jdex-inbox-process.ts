@@ -9,8 +9,8 @@
  * sola.
  */
 import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
-import { datedName, idFolderOfPath, sameSystem, zeroOf, type DateFormat, type IdEntry, type JdIndex } from './engine';
-import { ensureJdexFolder } from './jdex-create-write';
+import { applyMovePlan, datedName, idFolderOfPath, planMoveIntoId, zeroOf, type DateFormat, type IdEntry, type JdIndex, type JdexManagerSettings } from './engine';
+import { HebraMovePort, jdexLibraryState, type HebraMoveVault } from './library-port-adapter';
 import {
   jdexResolveFolderId,
   type JdexInboxSummary,
@@ -28,21 +28,41 @@ export function jdexInboxQueue(summary: JdexInboxSummary, walk: JdexLibraryWalk)
   return walk.systemNotes.filter((note) => folderIds.has(note.folderId));
 }
 
-export type JdexInboxMoveLibrary = Pick<PluginVault, 'noteMove'>;
+/** Lo que «Mover» necesita para planificar (lecturas) y del diario para escribir. */
+export interface JdexInboxMoveContext {
+  readonly index: JdIndex;
+  readonly settings: Partial<JdexManagerSettings>;
+  /** La biblioteca, solo para planificar; la escritura va por el `vault` del diario. */
+  readonly library: HebraMoveVault;
+  readonly markdown: Pick<PluginMarkdown, 'withTitle'>;
+  /** Abre una entrada del diario (`journal.run`) y entrega su `vault`. */
+  readonly run: (action: (vault: PluginVault) => Promise<unknown>) => Promise<unknown>;
+}
 
-/** «Mover»: como `moveActiveNoteToEntry` (`jdex-runtime.ts`), la nota va a la carpeta
- *  del ID elegido. `targetFolderPath` viene del ID que el selector de «ir a un ID»
- *  (`jdex-id-picker.ts`) ya filtró a los que SÍ tienen carpeta; aun así se comprueba
- *  aquí, por si la biblioteca cambió entre medias. */
+/** «Mover» desde el inbox por el motor compartido (`planMoveIntoId` y `applyMovePlan`, como
+ *  `hebra_jd_move` y «Mover la nota abierta aquí»): crea la carpeta del ID si falta, rechaza un
+ *  nombre ocupado en el destino y mueve con guarda (`noteMoveIfUnchanged` vía `HebraMovePort`).
+ *  Lanza con el mensaje del motor, que la vista pone en su banner; un rechazo del plan no abre
+ *  el diario. El nombre no se fecha (en Hebra el nombre es el título). */
 export async function moveJdexInboxNote(
-  library: JdexInboxMoveLibrary,
   note: JdexNoteRef,
-  walk: Pick<JdexLibraryWalk, 'folderPaths' | 'rootFolderId'>,
-  targetFolderPath: string
+  entry: IdEntry,
+  walk: JdexLibraryWalk,
+  context: JdexInboxMoveContext
 ): Promise<void> {
-  const folderId = jdexResolveFolderId(walk, targetFolderPath);
-  if (!folderId) throw new Error('No se encontró la carpeta de destino.');
-  await library.noteMove(note.id, folderId);
+  const jdexFolderId = jdexResolveFolderId(walk, context.settings.jdexFolder ?? '');
+  if (!jdexFolderId) throw new Error('No se encontró la carpeta del JDex.');
+  const planned = await planMoveIntoId(
+    new HebraMovePort(context.library, context.markdown),
+    jdexLibraryState(walk, context.index, context.settings, jdexFolderId),
+    { source: { kind: 'note', id: note.id, folderId: note.folderId }, toId: entry.id, systemId: entry.system ?? '' }
+  );
+  if (!planned.ok) throw new Error(planned.message);
+  const plan = planned.value;
+  await context.run(async (vault) => {
+    const applied = await applyMovePlan(new HebraMovePort(vault, context.markdown), plan);
+    if (!applied.ok) throw new Error(applied.message);
+  });
 }
 
 /** A note in `.01` can be archived only when its own category has a live `.09` folder. */
@@ -134,22 +154,4 @@ export async function trashJdexInboxNote(
   }
   const trashed = await library.noteTrashIfUnchanged(note.id, { revision: current.revision, folderId: current.folderId });
   if (!trashed) throw new Error('La nota cambió antes de mandarla a la papelera; se conserva en el inbox.');
-}
-
-/** Optional and explicit: create the folder of an ID that has none (inside the folder of
- *  its category, through the library API) and move the note there. The caller asks the
- *  user first; this never runs on its own. */
-export async function moveJdexInboxNoteCreatingFolder(
-  library: Pick<PluginVault, 'noteMove' | 'foldersList' | 'folderCreate'>,
-  note: JdexNoteRef,
-  walk: Pick<JdexLibraryWalk, 'folderPaths' | 'rootFolderId'>,
-  index: JdIndex,
-  entry: IdEntry
-): Promise<void> {
-  if (entry.folderPath) throw new Error(`${entry.label} ya tiene carpeta.`);
-  const category = index.categories.find((c) => c.number === entry.category && sameSystem(c, entry));
-  const parentId = category?.path ? jdexResolveFolderId(walk, category.path) : null;
-  if (!parentId) throw new Error(`La categoría de ${entry.label} no tiene carpeta donde crear la del ID.`);
-  const folderId = await ensureJdexFolder(library, parentId, entry.label);
-  await library.noteMove(note.id, folderId);
 }
