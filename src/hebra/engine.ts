@@ -22,6 +22,14 @@ export {
   findId,
   childrenPlus,
   categoryUsage,
+  // create-validate.ts — validación de «crear ID / cabecera / hijo (+)».
+  jdexCreationIndex,
+  validateNewId,
+  validateNewHeader,
+  isJdexChildEntry,
+  JDEX_CHILD_OF_CHILD_MESSAGE,
+  validateNewChildTitle,
+  requireTitle,
   // detect.ts — autodetección de las carpetas de gestión (00.00, 00.02, 00.03).
   detectFolders,
   fillEmpty,
