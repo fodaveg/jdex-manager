@@ -64,7 +64,7 @@ export async function moveJdexNoteToEntry(
   try {
     const jdexFolderId = jdexResolveFolderId(walk, context.settings.jdexFolder ?? '');
     if (!jdexFolderId) {
-      ports.notice(`No se encontró la carpeta de ${entry.label}.`);
+      ports.notice('No se encontró la carpeta del JDex.');
       return;
     }
     const planned = await planMoveIntoId(
