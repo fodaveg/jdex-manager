@@ -160,6 +160,11 @@ export interface ApplyOutcome {
   existing: CreatedItem[];
 }
 
+/** Name of the folder of an ID: the JDex note name (`21.34 Title`). Shared by new IDs and moves into an ID without a folder. */
+export function idFolderName(id: string, title: string, system = ""): string {
+  return jdexNoteName(id, title, system);
+}
+
 function fail<T>(code: JdLibraryErrorCode, message: string): JdLibraryResult<T> {
   return { ok: false, code, message };
 }
@@ -346,7 +351,7 @@ export async function planNewId(port: LibraryPort, state: LibraryState, request:
   if (request.createFolder !== false && (categoryFolderId === null || !category.path) && request.skipMissingCategoryFolder) folderSkipped = "category_folder_not_found";
   else if (request.createFolder !== false) {
     if (categoryFolderId === null || !category.path) return fail("category_folder_not_found", `La categoría ${category.number} no tiene carpeta.`);
-    folderName = noteName;
+    folderName = idFolderName(id, request.title, system);
     preconditions.splice(1, 0, { kind: "folder", role: "category", folderId: categoryFolderId, name: lastSegment(category.path) });
     outputs.push({ kind: "folder", parentId: categoryFolderId, name: folderName });
     writes.push({ kind: "ensure_folder", parent: { folderId: categoryFolderId }, name: folderName });
