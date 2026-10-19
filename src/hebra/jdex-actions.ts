@@ -4,10 +4,11 @@
  * journal and the index, so each one runs without activating the runtime. The runtime
  * passes the real ports; `tests/hebra/jdex-actions.test.ts` passes fakes.
  */
-import type { PluginVault } from 'hebra-plugin-api/v2';
-import { isRepeatedId, planMoveToId, repeatedIdMessage, type IdEntry, type JdIndex, type MoveToIdHost } from './engine';
+import type { PluginMarkdown, PluginVault } from 'hebra-plugin-api/v2';
+import { applyMovePlan, isRepeatedId, planMoveIntoId, repeatedIdMessage, type IdEntry, type JdIndex, type JdexManagerSettings, type MovePlan } from './engine';
 import type { JdexJournal } from './jdex-journal';
 import { jdexResolveFolderId, type JdexLibraryWalk } from './library-index';
+import { HebraMovePort, jdexLibraryState, type HebraMoveVault } from './library-port-adapter';
 
 export interface JdexActionPorts {
   notice(text: string): void;
@@ -20,9 +21,6 @@ export interface JdexActionPorts {
   /** Asks before an action that cannot be undone by repeating it; `false` when cancelled. */
   confirm(message: string, confirmLabel: string): Promise<boolean>;
 }
-
-/** What Hebra allows when moving a note into an ID: no folder creation, no dated name. */
-const HEBRA_MOVE_HOST: MoveToIdHost = { createMissingFolder: false, dateOnMove: false };
 
 const errorMessage =(error: unknown): string => (pluginErrorMessage(error));
 
@@ -44,26 +42,45 @@ export async function copyJdexText(
 }
 
 /** «Mover la nota abierta aquí»: the ACTIVE note, never one picked apart (the picker does
- *  not list notes again; ⌘K alone already searches them). */
+ *  not list notes again; ⌘K alone already searches them). It plans and applies with the
+ *  shared engine (`planMoveIntoId`/`applyMovePlan`, as `hebra_jd_move` does) through
+ *  `HebraMovePort`: a missing ID folder is created, and something already named like the
+ *  note in the destination refuses the move. Hebra never dates the name (the name is the
+ *  note's title), so the plan carries no `as`. */
 export async function moveJdexNoteToEntry(
   ports: Pick<JdexActionPorts, 'notice' | 'journal' | 'rebuild'>,
-  note: { readonly id: string; readonly title?: string } | null,
+  note: { readonly id: string; readonly folderId?: string; readonly title?: string } | null,
   entry: IdEntry,
   walk: JdexLibraryWalk,
-  context: { readonly index: JdIndex; readonly settings: { readonly jdexFolder: string; readonly templatesFolder: string; readonly reportsFolder: string } }
+  context: {
+    readonly index: JdIndex;
+    readonly settings: Partial<JdexManagerSettings>;
+    /** The library, to plan (reads only); the write goes through the journal's own vault. */
+    readonly library: HebraMoveVault;
+    readonly markdown: Pick<PluginMarkdown, 'withTitle'>;
+  }
 ): Promise<void> {
   if (!note) return;
-  // The same decision Obsidian takes (`planMoveToId`), with Hebra's host: it never creates a
-  // missing ID folder and never dates the name, since the name is the note's title.
-  const plan = planMoveToId(context.index, context.settings, entry, note.title ?? '', HEBRA_MOVE_HOST);
-  if (plan.type !== 'move') return;
-  const folderId = jdexResolveFolderId(walk, plan.folder);
-  if (!folderId) {
-    ports.notice(`No se encontró la carpeta de ${entry.label}.`);
-    return;
-  }
   try {
-    await ports.journal.run('move', `Mover nota a ${entry.label}`, (vault) => vault.noteMove(note.id, folderId));
+    const jdexFolderId = jdexResolveFolderId(walk, context.settings.jdexFolder ?? '');
+    if (!jdexFolderId) {
+      ports.notice(`No se encontró la carpeta de ${entry.label}.`);
+      return;
+    }
+    const planned = await planMoveIntoId(
+      new HebraMovePort(context.library, context.markdown),
+      jdexLibraryState(walk, context.index, context.settings, jdexFolderId),
+      { source: { kind: 'note', id: note.id, ...(note.folderId !== undefined ? { folderId: note.folderId } : {}) }, toId: entry.id, systemId: entry.system ?? '' }
+    );
+    if (!planned.ok) {
+      ports.notice(planned.message);
+      return;
+    }
+    const plan: MovePlan = planned.value;
+    await ports.journal.run('move', `Mover nota a ${entry.label}`, async (vault) => {
+      const applied = await applyMovePlan(new HebraMovePort(vault, context.markdown), plan);
+      if (!applied.ok) throw new Error(applied.message);
+    });
     ports.notice(`Movida a ${entry.label}.`);
     await ports.rebuild();
   } catch (error) {

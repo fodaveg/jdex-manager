@@ -950,7 +950,7 @@ export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> 
 
   /** «Mover la nota abierta aquí»: la nota ACTIVA (`latestNote`). */
   function moveActiveNoteToEntry(entry: IdEntry, currentWalk: JdexLibraryWalk): Promise<void> {
-    return moveJdexNoteToEntry(actionPorts, latestNote, entry, currentWalk, { index: index ?? buildIndex(buildJdexIndexInput(currentWalk, settings)), settings });
+    return moveJdexNoteToEntry(actionPorts, latestNote, entry, currentWalk, { index: index ?? buildIndex(buildJdexIndexInput(currentWalk, settings)), settings, library: api.vault, markdown: api.markdown });
   }
 
   /** «Retirar este ID» with the walk and index of the dialog it was chosen in. */

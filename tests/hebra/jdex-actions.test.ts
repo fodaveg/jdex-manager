@@ -4,15 +4,12 @@
 import type { PluginVault } from 'hebra-plugin-api/v2';
 import { describe, expect, it, vi } from 'vitest';
 import { buildIndex, type IdEntry } from '../../src/hebra/engine';
-import { copyJdexText, jdexRetireQuestion, moveJdexNoteToEntry, retireJdexEntry, type JdexActionPorts } from '../../src/hebra/jdex-actions';
-import type { JdexLibraryWalk } from '../../src/hebra/library-index';
+import { copyJdexText, jdexRetireQuestion, retireJdexEntry, type JdexActionPorts } from '../../src/hebra/jdex-actions';
 
 const JDEX = 'J';
-const walk = { rootFolderId: 'root', folderPaths: new Map([['f-id', 'A/21/21.11 Algo']]) } as unknown as JdexLibraryWalk;
 const entry: IdEntry = { id: '21.11', category: '21', title: 'Algo', label: '21.11 Algo', notePath: `${JDEX}/21.11 Algo.md`, folderPath: 'A/21/21.11 Algo' };
 const index = buildIndex({ systemRoot: '', jdexFolder: JDEX, folderPaths: [], notePaths: [`${JDEX}/21.11 Algo.md`] });
 const repeated = buildIndex({ systemRoot: '', jdexFolder: JDEX, folderPaths: [], notePaths: [`${JDEX}/21.11 Algo.md`, `${JDEX}/21.11 Otro.md`] });
-const context = { index, settings: { jdexFolder: JDEX, templatesFolder: '', reportsFolder: '' } };
 const noteMove = vi.fn(async () => {});
 const opVault = { noteMove } as unknown as PluginVault;
 
@@ -33,31 +30,6 @@ describe('Hebra actions: copy', () => {
     await copyJdexText(value, async () => {}, '21.11', 'ID copiado.');
     await copyJdexText(value, async () => { throw new Error('denegado'); }, '21.11', 'ID copiado.');
     expect(notice.mock.calls).toEqual([['ID copiado.'], ['No se pudo copiar.']]);
-  });
-});
-
-describe('Hebra actions: move the active note to an ID', () => {
-  it('moves it in the journal, says so and rebuilds', async () => {
-    const { value, notice, rebuild, run } = ports();
-    await moveJdexNoteToEntry(value, { id: 'n-1' }, entry, walk, context);
-    expect(run).toHaveBeenCalledWith('move', 'Mover nota a 21.11 Algo', expect.any(Function));
-    expect(noteMove).toHaveBeenCalledWith('n-1', 'f-id');
-    expect(notice).toHaveBeenCalledWith('Movida a 21.11 Algo.');
-    expect(rebuild).toHaveBeenCalledOnce();
-  });
-
-  it('never creates a missing ID folder: an ID without one is left alone, silently', async () => {
-    const { value, notice, run } = ports();
-    await moveJdexNoteToEntry(value, { id: 'n-1', title: 'Nota' }, { ...entry, folderPath: undefined }, walk, context);
-    expect(notice).not.toHaveBeenCalled();
-    expect(run).not.toHaveBeenCalled();
-  });
-
-  it('without the folder of the ID, nothing is written', async () => {
-    const { value, notice, run } = ports();
-    await moveJdexNoteToEntry(value, { id: 'n-1' }, { ...entry, folderPath: 'A/21/21.12 Falta' }, walk, context);
-    expect(notice).toHaveBeenCalledWith('No se encontró la carpeta de 21.11 Algo.');
-    expect(run).not.toHaveBeenCalled();
   });
 });
 

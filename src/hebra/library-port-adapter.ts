@@ -11,13 +11,19 @@
  * salta como plantilla).
  */
 import type { PluginMarkdown, PluginNote, PluginVault } from 'hebra-plugin-api/v2';
-import { mergeSettings, type EnsureResult, type JdIndex, type JdexManagerSettings, type LibraryPort, type LibraryState, type PortFolder, type PortNote } from './engine';
+import { mergeSettings, type EnsureResult, type JdIndex, type JdexManagerSettings, type LibraryMovePort, type LibraryPort, type LibraryState, type PortFolder, type PortNote } from './engine';
 import type { JdexLibraryWalk } from './library-index';
 
 const NOTES_PAGE_SIZE = 200;
 
 /** Lo que usa el adaptador del `vault` de la API. */
 export type HebraLibraryVault = Pick<PluginVault, 'noteCreate' | 'noteRead' | 'folderCreate' | 'foldersList' | 'notesPage' | 'rootFolderId'>;
+
+/** Lo que usa `HebraMovePort` del `vault`: lo de `HebraLibraryVault` más mover y renombrar. */
+export type HebraMoveVault = HebraLibraryVault &
+  Pick<PluginVault, 'noteMove' | 'noteMoveIfUnchanged' | 'noteSave' | 'folderMoveIfUnchanged' | 'folderRenameIfUnchanged' | 'filesPage'>;
+
+const same = (a: string, b: string): boolean => a.normalize('NFC') === b.normalize('NFC');
 
 export class HebraLibraryPort implements LibraryPort {
   /** Las notas que `ensureNote` ha creado, por id: el flujo devuelve la nota completa. */
@@ -73,6 +79,70 @@ export class HebraLibraryPort implements LibraryPort {
 
   async hasHidden(): Promise<boolean> {
     return false;
+  }
+}
+
+/**
+ * `LibraryMovePort` sobre la API de plugins: lo que el motor necesita para «mover a un ID».
+ * Cada movimiento comprueba antes lo esperado y usa las variantes `IfUnchanged` de la API
+ * (que fallan sin efectos si la nota o la carpeta cambió). `{ ok: false }` = ya no está como
+ * se esperaba. La API no tiene mover ni renombrar ficheros sueltos, así que `moveFile`
+ * siempre devuelve `{ ok: false }` (el plugin solo mueve la nota activa).
+ */
+export class HebraMovePort extends HebraLibraryPort implements LibraryMovePort {
+  constructor(
+    private readonly moveVault: HebraMoveVault,
+    private readonly moveMarkdown: Pick<PluginMarkdown, 'withTitle'>
+  ) {
+    super(moveVault, moveMarkdown);
+  }
+
+  async listFiles(folderId: string): Promise<{ id: string; name: string }[]> {
+    const out: { id: string; name: string }[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await this.moveVault.filesPage(folderId, false, cursor, NOTES_PAGE_SIZE);
+      for (const file of page.items) if (file.trashedAt === null) out.push({ id: file.id, name: file.name });
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    return out;
+  }
+
+  /** El usuario del plugin ve toda su biblioteca: nada oculto. */
+  async hiddenInside(): Promise<boolean> {
+    return false;
+  }
+
+  async moveNote(id: string, expected: { folderId: string; title: string }, to: { folderId: string; title?: string }): Promise<{ ok: boolean }> {
+    const note = await this.moveVault.noteRead(id);
+    if (!note || note.trashedAt !== null || note.folderId !== expected.folderId || !same(note.title, expected.title)) return { ok: false };
+    let current = note;
+    if (to.folderId !== note.folderId) {
+      // Una nota protegida no se puede mover con guarda de revisión: se mueve sin ella, como siempre.
+      const moved = note.locked
+        ? await this.moveVault.noteMove(id, to.folderId)
+        : await this.moveVault.noteMoveIfUnchanged(id, to.folderId, { revision: note.revision, folderId: note.folderId });
+      if (!moved) return { ok: false };
+      current = moved;
+    }
+    if (to.title !== undefined && !same(to.title, note.title)) {
+      if (current.locked || current.body === null) return { ok: false };
+      const saved = await this.moveVault.noteSave({ id, body: this.moveMarkdown.withTitle(current.body, to.title), expected: current.revision });
+      if (saved.outcome !== 'saved') return { ok: false };
+    }
+    return { ok: true };
+  }
+
+  async moveFile(): Promise<{ ok: boolean }> {
+    return { ok: false };
+  }
+
+  async moveFolder(id: string, expected: { parentId: string; name: string }, to: { parentId: string; name?: string }): Promise<{ ok: boolean }> {
+    const folder = (await this.moveVault.foldersList()).find((candidate) => candidate.id === id);
+    if (!folder || folder.parentId !== expected.parentId || !same(folder.name, expected.name)) return { ok: false };
+    if (to.parentId !== folder.parentId && !(await this.moveVault.folderMoveIfUnchanged(id, to.parentId, { name: folder.name, parentId: folder.parentId }))) return { ok: false };
+    if (to.name !== undefined && !same(to.name, folder.name) && !(await this.moveVault.folderRenameIfUnchanged(id, to.name, { name: folder.name, parentId: to.parentId }))) return { ok: false };
+    return { ok: true };
   }
 }
 

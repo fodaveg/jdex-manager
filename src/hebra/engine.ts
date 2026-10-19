@@ -27,6 +27,9 @@ export {
   loadLibraryState,
   planNewId,
   applyPlan,
+  // move-into-id.ts — planificar y aplicar «mover a un ID» sobre una interfaz por ids.
+  planMoveIntoId,
+  applyMovePlan,
   // create-validate.ts — validación de «crear ID / cabecera / hijo (+)».
   jdexCreationIndex,
   validateNewId,
@@ -125,6 +128,9 @@ export {
 
 export type {
   LibraryPort,
+  LibraryMovePort,
+  MovePlan,
+  MoveRequest,
   LibraryState,
   PortFolder,
   PortNote,
