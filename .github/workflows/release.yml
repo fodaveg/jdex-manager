@@ -5,7 +5,7 @@ name: Release
 #
 #   1. the tag's commit must be on origin/main, and release-notes/<tag>.md must exist
 #      (both checked before any build is spent);
-#   2. the gate (`npm run check`, which also builds the Hebra plugin and its hebra.json) and
+#   2. the gate (`npm run check`, skipped when ci.yml's `check` job already passed on this SHA; it also builds the Hebra plugin and its hebra.json) and
 #      the tag/manifest/hebra.json/versions.json agreement;
 #   3. the sha256 of the six assets is computed HERE, from the build output, before upload:
 #      that file is the reference everything else is compared with;
@@ -53,11 +53,30 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      checks: read
     env:
       TAG: ${{ github.ref_name }}
       REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Reuse ci.yml: if its `check` job already succeeded on this exact SHA, `npm run check` is not repeated.
+      # Any doubt (no run yet, failed, query error) leaves ok=false and the gate runs as before.
+      - name: Look up the green CI check for this commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          conclusion=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?check_name=check&filter=latest" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions")] | sort_by(.started_at) | last | .conclusion // ""' 2>/dev/null) || conclusion=""
+          if [ "$conclusion" = "success" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "ci.yml job 'check' already passed on $GITHUB_SHA: the repeated step is skipped"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "no green 'check' check-run for $GITHUB_SHA (got '${conclusion:-none}'): the gate runs here"
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -95,7 +114,15 @@ jobs:
       - run: npm ci
 
       - name: Gate
+        if: steps.ci.outputs.ok != 'true'
         run: npm run check
+
+      # `npm run check` also produces the assets that are hashed and uploaded below
+      # (main.js, hebra.json, hebra-main.mjs, hebra-styles.css), so when the gate is
+      # skipped the two builds still run here.
+      - name: Build the assets (gate skipped, CI was green)
+        if: steps.ci.outputs.ok == 'true'
+        run: npm run build && npm run build:hebra
 
       - name: Refuse a tag that is not the manifest version
         run: |
