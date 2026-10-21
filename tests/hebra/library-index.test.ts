@@ -449,7 +449,7 @@ describe('rendimiento con una biblioteca del tamaño real (~3.300 notas)', () =>
         new Proxy(note, {
           get(target, key, receiver) {
             noteReads += 1;
-            return Reflect.get(target, key, receiver);
+            return Reflect.get(target, key, receiver) as unknown;
           }
         })
     );
@@ -461,7 +461,7 @@ describe('rendimiento con una biblioteca del tamaño real (~3.300 notas)', () =>
     // donde se esconde un recorrido anidado (rawIdFolders.find por carpeta, etc.).
     let predicateCalls = 0;
     const restores = (['find', 'some', 'filter', 'findIndex'] as const).map((name) => {
-      const original = Array.prototype[name] as (...a: unknown[]) => unknown;
+      const original = Reflect.get(Array.prototype, name) as (...a: unknown[]) => unknown;
       const spy = vi.spyOn(Array.prototype, name as 'find').mockImplementation(function (
         this: unknown[],
         predicate: (...a: unknown[]) => unknown,
