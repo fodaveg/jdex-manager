@@ -20,7 +20,7 @@
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.9",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.4",
     "@typescript-eslint/eslint-plugin": "^8.35.1",
     "@typescript-eslint/parser": "^8.35.1",
     "@vitest/coverage-v8": "^5.0.4",
