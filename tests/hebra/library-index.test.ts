@@ -16,6 +16,7 @@ import {
   jdexFolderPaths,
   jdexNotePath,
   jdexResolveFolderId,
+  type JdexLibraryPort,
   walkJdexLibrary
 } from '../../src/hebra/library-index';
 import {
@@ -410,24 +411,101 @@ function buildLargeFixture(noteCount: number) {
   return { folders, notesByFolder, totalNotes: noteSeq };
 }
 
+// Presupuesto en OPERACIONES, no en milisegundos (21 oct 2026): un reloj real falla con la
+// máquina cargada por otras sesiones. Lo que el test protege es el contrato del recorrido
+// ("una consulta por carpeta viva, nunca por nota") y que construir el índice sea lineal en
+// las notas: se cuentan las consultas a la biblioteca y las lecturas de las notas del
+// recorrido durante la construcción del índice. Ambas cifras son deterministas.
+// Lecturas de propiedades por nota al construir la entrada del índice (medido: 1; tope: el doble).
+const MAX_LECTURAS_POR_NOTA = 2;
+// Predicados de find/some/filter que ejecuta buildIndex (medido: 1820; tope: ×1.5).
+const MAX_PREDICADOS_INDICE = Math.ceil(1820 * 1.5);
+
 describe('rendimiento con una biblioteca del tamaño real (~3.300 notas)', () => {
-  it('construye el índice completo sin tardar segundos', async () => {
+  it('recorre con una consulta por carpeta y construye el índice en trabajo lineal', async () => {
     const { folders, notesByFolder, totalNotes } = buildLargeFixture(3300);
-    const library = fakeLibrary(notesByFolder);
-    const start = performance.now();
+    const vault = fakeLibrary(notesByFolder);
+    const calls = { notesPage: 0, noteRead: 0, noteSummary: 0 };
+    const library: JdexLibraryPort = {
+      notesPage: (cursor, limit, scope) => {
+        calls.notesPage += 1;
+        return vault.notesPage(cursor, limit, scope);
+      },
+      noteRead: (id) => {
+        calls.noteRead += 1;
+        return vault.noteRead(id);
+      },
+      noteSummary: (ids) => {
+        calls.noteSummary += 1;
+        return vault.noteSummary(ids);
+      }
+    };
     const walk = await walkJdexLibrary(library, folders, '', ROOT_FOLDER_ID);
-    const input = buildJdexIndexInput(walk, { systemRoot: '', jdexFolder: '' });
-    const index = buildIndex(input);
-    const elapsedMs = performance.now() - start;
+
+    // Cada nota cuenta sus lecturas de propiedades al construir el índice.
+    let noteReads = 0;
+    const countedNotes = walk.systemNotes.map(
+      (note) =>
+        new Proxy(note, {
+          get(target, key, receiver) {
+            noteReads += 1;
+            return Reflect.get(target, key, receiver);
+          }
+        })
+    );
+    const input = buildJdexIndexInput(
+      { ...walk, systemNotes: countedNotes },
+      { systemRoot: '', jdexFolder: '' }
+    );
+    // ...y cada invocación de predicado de find/some/filter dentro de `buildIndex`, que es
+    // donde se esconde un recorrido anidado (rawIdFolders.find por carpeta, etc.).
+    let predicateCalls = 0;
+    const restores = (['find', 'some', 'filter', 'findIndex'] as const).map((name) => {
+      const original = Array.prototype[name] as (...a: unknown[]) => unknown;
+      const spy = vi.spyOn(Array.prototype, name as 'find').mockImplementation(function (
+        this: unknown[],
+        predicate: (...a: unknown[]) => unknown,
+        ...rest: unknown[]
+      ) {
+        return original.call(
+          this,
+          (...args: unknown[]) => {
+            predicateCalls += 1;
+            return predicate(...args);
+          },
+          ...rest
+        );
+      } as never);
+      return spy;
+    });
+    let index: ReturnType<typeof buildIndex>;
+    try {
+      index = buildIndex(input);
+    } finally {
+      for (const spy of restores) spy.mockRestore();
+    }
 
     expect(totalNotes).toBeGreaterThanOrEqual(3300);
     expect(walk.systemNotes.length).toBe(totalNotes);
     expect(index.ids.length).toBe(10 * 9 * 9); // 10 áreas × 9 categorías × 9 ids de contenido.
-     
+
     console.log(
-      `[jdex perf] ${totalNotes} notas, ${walk.systemFolderPaths.length} carpetas: ${elapsedMs.toFixed(1)} ms`
+      `[jdex perf] ${totalNotes} notas, ${walk.systemFolderPaths.length} carpetas: ` +
+        `${calls.notesPage} consultas, ${noteReads} lecturas de nota, ${predicateCalls} predicados`
     );
-    expect(elapsedMs).toBeLessThan(2000);
+    // Contrato del recorrido: una página por carpeta (+ la raíz) y ninguna lectura por nota.
+    // Cada carpeta cabe en una página (≤ NOTES_PAGE_SIZE notas), así que no hay más.
+    expect(calls.noteRead).toBe(0);
+    expect(calls.noteSummary).toBe(0);
+    expect(calls.notesPage).toBeLessThanOrEqual(walk.systemFolderPaths.length + 1);
+    // Construir el índice lee cada nota un nº acotado de veces: una pasada por nota
+    // dentro de otra (cuadrática) daría del orden de 3.300 × 3.300.
+    expect(noteReads, `índice: ${noteReads} lecturas de nota`).toBeLessThanOrEqual(
+      MAX_LECTURAS_POR_NOTA * totalNotes
+    );
+    expect(predicateCalls, `buildIndex: ${predicateCalls} predicados`).toBeLessThanOrEqual(
+      MAX_PREDICADOS_INDICE
+    );
   });
 });
 
