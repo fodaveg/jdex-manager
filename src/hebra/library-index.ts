@@ -33,6 +33,7 @@ import {
   readJdexFrontmatter,
   type JdexFrontmatterMarkdown
 } from './frontmatter';
+import { readNotes } from './read-gate';
 
 /** Same filename stem rules as Hebra's sanitizeNoteFileStem; never let a title
  * introduce a pseudo-directory into the pure engine's paths. */
@@ -367,6 +368,7 @@ export async function loadJdexAuditEntries(
   for (let start = 0; start < refs.length; start += NOTE_SUMMARY_MAX_IDS) {
     const batch = refs.slice(start, start + NOTE_SUMMARY_MAX_IDS);
     const summaries = new Map((await library.noteSummary(batch.map((ref) => ref.id))).map((item) => [item.id, item]));
+    const toRead: string[] = [];
     for (const ref of batch) {
       const summary = summaries.get(ref.id);
       if (!summary || summary.trashedAt !== null || summary.archivedAt !== null) continue;
@@ -376,8 +378,14 @@ export async function loadJdexAuditEntries(
         entries.set(ref.id, known);
         continue;
       }
-      const row = await library.noteRead(ref.id);
-      if (row) entries.set(ref.id, jdexAuditEntryOf(row, markdown));
+      toRead.push(ref.id);
+    }
+    // Las que hay que leer (nuevas o con cuerpo distinto) se leen de golpe: con la capacidad
+    // `vault.read.batch` del host, en una operación de la cola; sin ella, por la puerta.
+    const rows = await readNotes(library, toRead);
+    for (const id of toRead) {
+      const row = rows.get(id) ?? null;
+      if (row) entries.set(id, jdexAuditEntryOf(row, markdown));
     }
   }
   return entries;
@@ -451,6 +459,7 @@ export async function applyJdexNoteChanges(
   const notes = new Map(walk.systemNotes.map((note) => [note.id, note]));
   const entries = new Map(state.entries);
   let changed = false;
+  const toRead: string[] = [];
   for (const id of unique) {
     const summary = summaries.get(id);
     let next: JdexNoteRef | null = null;
@@ -491,15 +500,24 @@ export async function applyJdexNoteChanges(
       // Host 1.0.0: el resumen no trae `bodySha256`; el tipo (1.1) lo da por presente.
       const summarySha = (summary as { bodySha256?: unknown }).bodySha256;
       if (known && typeof summarySha === 'string' && summarySha === known.sha) continue;
-      const row = await library.noteRead(id);
+      toRead.push(id);
+    } else if (entries.delete(id)) {
+      changed = true;
+    }
+  }
+  if (toRead.length > 0) {
+    // Lectura de golpe de las notas JDex cambiadas: `notesReadBatch` si el host la tiene
+    // (una operación de la cola por lote), `noteRead` por la puerta si no.
+    const rows = await readNotes(library, toRead);
+    for (const id of toRead) {
+      const row = rows.get(id) ?? null;
+      const known = entries.get(id);
       if (!row) {
         if (entries.delete(id)) changed = true; // purgada entre medias: no cuenta.
       } else if (!known || known.sha !== row.revision.bodySha256) {
         entries.set(id, jdexAuditEntryOf(row, markdown));
         changed = true;
       }
-    } else if (entries.delete(id)) {
-      changed = true;
     }
   }
   if (!changed) return { kind: 'unchanged' };

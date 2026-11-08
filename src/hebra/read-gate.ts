@@ -80,6 +80,37 @@ export function gateVaultNoteReads<T extends PluginVault>(vault: T, maxConcurren
   });
 }
 
+/** Tope de ids por operación de lectura por lotes (el del host, como `noteSummary`). */
+export const NOTES_READ_BATCH_MAX = 200;
+
+/** Lo que `readNotes` pide del vault: `noteRead` siempre; `notesReadBatch` si el host la tiene
+ *  (capacidad `vault.read.batch` de la API de Hebra, aún no en todas). */
+export interface BatchReadCapable {
+  noteRead(id: string): Promise<PluginNote | null>;
+  notesReadBatch?(ids: readonly string[]): Promise<readonly (PluginNote | null)[]>;
+}
+
+/**
+ * Lee varias notas de golpe y devuelve `id → nota` (`null` si no existe). Con la capacidad
+ * `vault.read.batch` del host usa `notesReadBatch` en lotes de `NOTES_READ_BATCH_MAX` —una
+ * operación de la cola del almacén por lote, en vez de una por nota—; sin ella, `noteRead` por
+ * id (que pasa por la puerta de concurrencia si `vault` es el envuelto con `gateVaultNoteReads`).
+ */
+export async function readNotes(vault: BatchReadCapable, ids: readonly string[]): Promise<Map<string, PluginNote | null>> {
+  const out = new Map<string, PluginNote | null>();
+  if (ids.length === 0) return out;
+  if (typeof vault.notesReadBatch === 'function') {
+    for (let start = 0; start < ids.length; start += NOTES_READ_BATCH_MAX) {
+      const slice = ids.slice(start, start + NOTES_READ_BATCH_MAX);
+      const rows = await vault.notesReadBatch(slice);
+      slice.forEach((id, index) => out.set(id, rows[index] ?? null));
+    }
+    return out;
+  }
+  await Promise.all(ids.map(async (id) => out.set(id, await vault.noteRead(id))));
+  return out;
+}
+
 /**
  * Envuelve el `api` del plugin para que todo `api.vault.noteRead` que use el runtime pase por
  * la puerta; el resto del api queda tal cual.

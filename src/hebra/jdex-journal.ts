@@ -19,6 +19,7 @@
 import type { PluginDeviceStorage, PluginNote, PluginNoteRevision, PluginVault } from 'hebra-plugin-api/v2';
 import { appendOperation, JOURNAL_MAX, JOURNAL_REMOVED_MAX, JOURNAL_VERSION, journalOperationId, mergeJournals, newJournalId, withJournalIds, type Operation, type OperationKind } from './engine';
 import { updateJdexStoredSettings, type JdexSettingsStorage } from './settings';
+import { readNotes } from './read-gate';
 
 /** `pending`: apuntado antes de escribir y sin confirmar. `undoing`: su inversa empezó. */
 type JournalFlags = { pending?: boolean; undoing?: boolean };
@@ -64,6 +65,9 @@ export interface JdexJournal {
 
 /** Optional host extension: only removes an unchanged empty folder, never its contents. */
 export type JdexJournalVault = PluginVault & {
+  /** Capacidad `vault.read.batch` de la API de Hebra: lectura de varias notas en una
+   *  operación de la cola del almacén. Opcional porque un host puede no tenerla. */
+  notesReadBatch?(ids: readonly string[]): Promise<readonly (PluginNote | null)[]>;
   folderTrashEmpty?(id: string, expected: { name: string; parentId: string | null }): Promise<boolean>;
   noteRestore?(id: string, expected: { trashedAt: number; revision: PluginNoteRevision }): Promise<boolean>;
   noteRestoreIfUnchanged?(id: string, expected: { trashedAt: number; revision: PluginNoteRevision }): Promise<PluginNote | null>;
@@ -296,7 +300,9 @@ export async function createJdexJournal(vault: JdexJournalVault, storage: JdexSe
         await touch();
       };
       const rewriteWithIntents = async (requests: Parameters<PluginVault['notesRewriteBatch']>[0], batchOptions?: Parameters<PluginVault['notesRewriteBatch']>[1]): Promise<BatchWithCommits> => {
-        const before = new Map(await Promise.all(requests.map(async (entry) => [entry.id, await vault.noteRead(entry.id)] as const)));
+        // Con `vault.read.batch` del host, un lote entero se lee en una operación de la cola;
+        // sin ella, `noteRead` por nota pasando por la puerta de concurrencia.
+        const before = new Map(await readNotes(vault, requests.map((entry) => entry.id)));
         const intents: Extract<JdexJournalEffect, { kind: 'note-rewrite' }>[] = [];
         for (const request of requests) {
           const prior = before.get(request.id);
