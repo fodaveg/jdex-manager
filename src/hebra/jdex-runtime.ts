@@ -164,6 +164,7 @@ import { createJdexDebugLog } from './jdex-debug-log';
 import { createJdexHealthReport } from './jdex-health';
 import { createJdexSystemReport } from './jdex-system-report';
 import { createRebuildScheduler } from './rebuild-scheduler';
+import { gatePluginApiNoteReads } from './read-gate';
 import { copyJdexText, moveJdexNoteToEntry, retireJdexEntry, type JdexActionPorts } from './jdex-actions';
 import { registerJdexCommands, type JdexCommandHandlers } from './jdex-commands';
 import { createJdexAuditPanel } from './jdex-audit-panel';
@@ -215,7 +216,11 @@ function report(error: unknown, where: string): void {
   debugSink?.(error, where);
 }
 
-export async function activateJdex(api: HebraPluginApi): Promise<PluginCleanup> {
+export async function activateJdex(rawApi: HebraPluginApi): Promise<PluginCleanup> {
+  // Toda `noteRead` del plugin pasa por la puerta de concurrencia (`./read-gate.ts`): la cola
+  // nativa del almacén atiende las lecturas de una en una y las ráfagas concurrentes del plugin
+  // se esperaban entre sí y retrasaban al resto de Hebra (medido el 7 nov 2026).
+  const api = gatePluginApiNoteReads(rawApi);
   // Dialogs opened through `host` are closed by the cleanup.
   const modals = trackJdexModals(api.ui);
   const host = modals.ui;
