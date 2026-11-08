@@ -6,7 +6,8 @@
 // diario un `Promise.all` de 8 `noteRead` (`jdex-journal.ts`), y con la puerta no pueden
 // entrar en la cola nativa del almacén más de `MAX_CONCURRENT_NOTE_READS` a la vez.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PluginFolder, PluginNote, PluginVault } from 'hebra-plugin-api/v2';
+import type { HebraPluginApi, PluginCapability, PluginFolder, PluginNote, PluginVault } from 'hebra-plugin-api/v2';
+import { createFakePluginApiV2 } from 'hebra-plugin-api/v2/testing';
 import {
   MAX_CONCURRENT_NOTE_READS,
   NOTES_READ_BATCH_MAX,
@@ -228,8 +229,11 @@ describe('activateJdex — la puerta arropa las ráfagas de lecturas', () => {
     return { base, jdexId };
   }
 
-  async function runNormalizeAll(base: PluginVault, counterVault: PluginVault) {
-    const { api, fake } = await createJdexTestApi({ vault: counterVault });
+  async function runNormalizeAll(base: PluginVault, counterVault: PluginVault, withBatchCapability = false) {
+    const { api, fake } = await createJdexTestApi({
+      vault: counterVault,
+      ...(withBatchCapability ? { capabilities: ['vault.read', 'vault.write', 'editor', 'vault.read.batch'] as const } : {})
+    });
     await activateJdex(api);
     const command = fake.recorded.commands.find((c) => c.id === JDEX_COMMAND_NORMALIZE_ALL);
     expect(command).toBeTruthy();
@@ -259,11 +263,62 @@ describe('activateJdex — la puerta arropa las ráfagas de lecturas', () => {
   it('con la capacidad vault.read.batch del host, el lote se lee en operaciones batch', async () => {
     const { base } = buildEightNoteFixture();
     const counter = countingReads(base, true);
-    await runNormalizeAll(base, counter.vault);
+    await runNormalizeAll(base, counter.vault, true);
 
     // El diario leyó las 8 notas del lote con notesReadBatch (una operación de la cola),
     // no con 8 noteRead sueltas.
     expect(counter.batchCalls()).toBeGreaterThan(0);
     expect(counter.peak()).toBeLessThanOrEqual(MAX_CONCURRENT_NOTE_READS);
+  });
+});
+
+describe('gatePluginApiNoteReads + readNotes con el host falso de hebra-plugin-api/v2/testing', () => {
+  /** Host falso con N notas; cuenta las llamadas a `notesReadBatch` y a `noteRead` del vault. */
+  function hostWith(count: number, capabilities: readonly PluginCapability[]): {
+    api: HebraPluginApi;
+    ids: string[];
+    batchSizes: number[];
+    individual: () => number;
+  } {
+    const seeds = Object.fromEntries(Array.from({ length: count }, (_, i) => [`n${i}`, `# N${i}\n`]));
+    const fake = createFakePluginApiV2({ capabilities, notes: seeds });
+    const batchSizes: number[] = [];
+    let individual = 0;
+    const real = fake.api.vault;
+    // La fachada del host está congelada: se envuelve en un objeto nuevo, no en un Proxy suyo.
+    const vault: PluginVault = {
+      ...real,
+      notesReadBatch: (ids) => {
+        batchSizes.push(ids.length);
+        return real.notesReadBatch!(ids);
+      },
+      noteRead: (id) => {
+        individual += 1;
+        return real.noteRead(id);
+      }
+    };
+    const api: HebraPluginApi = { ...fake.api, vault };
+    return { api, ids: Object.keys(seeds), batchSizes, individual: () => individual };
+  }
+
+  it('con vault.read.batch, N notas son ceil(N/200) llamadas a notesReadBatch y 0 a noteRead', async () => {
+    const { api, ids, batchSizes, individual } = hostWith(450, ['vault.read', 'vault.read.batch']);
+    expect(api.has('vault.read.batch')).toBe(true);
+    const out = await readNotes(gatePluginApiNoteReads(api).vault, [...ids, 'no-existe']);
+    expect(batchSizes).toHaveLength(Math.ceil(451 / NOTES_READ_BATCH_MAX));
+    expect(batchSizes).toEqual([200, 200, 51]);
+    expect(individual()).toBe(0);
+    expect([...out.keys()]).toEqual([...ids, 'no-existe']);
+    expect(out.get('n449')?.id).toBe('n449');
+    expect(out.get('no-existe')).toBeNull();
+  });
+
+  it('sin la capacidad vuelve a noteRead una a una y no llama a notesReadBatch', async () => {
+    const { api, ids, batchSizes, individual } = hostWith(30, ['vault.read']);
+    expect(api.has('vault.read.batch')).toBe(false);
+    const out = await readNotes(gatePluginApiNoteReads(api).vault, ids);
+    expect(batchSizes).toEqual([]);
+    expect(individual()).toBe(30);
+    expect(out.size).toBe(30);
   });
 });

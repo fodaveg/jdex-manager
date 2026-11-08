@@ -413,6 +413,7 @@ export class FakeJdexVault implements PluginVault {
         updatedAt: note.updatedAt,
         favorite: note.favorite,
         locked: note.locked,
+        conflictOf: null,
         folderId: note.folderId,
         trashedAt: note.trashedAt,
         archivedAt: note.archivedAt,
@@ -447,7 +448,8 @@ export class FakeJdexVault implements PluginVault {
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
       favorite: note.favorite,
-      locked: note.locked
+      locked: note.locked,
+      conflictOf: null
     }));
     return {
       items,

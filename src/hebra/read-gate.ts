@@ -70,12 +70,14 @@ function boundProperty<T extends object>(target: T, property: string | symbol): 
  */
 export function gateVaultNoteReads<T extends PluginVault>(vault: T, maxConcurrent: number = MAX_CONCURRENT_NOTE_READS): T {
   const gate = createReadGate(maxConcurrent);
-  return new Proxy(vault, {
-    get(target, property) {
+  // El Proxy envuelve un objeto vacío, no `vault`: la fachada del host está congelada (`Object.freeze`)
+  // y un `get` que devuelve otro valor que una propiedad congelada lanza `TypeError`.
+  return new Proxy({} as T, {
+    get(_target, property) {
       if (property === 'noteRead') {
-        return (id: string): Promise<PluginNote | null> => gate(() => target.noteRead(id));
+        return (id: string): Promise<PluginNote | null> => gate(() => vault.noteRead(id));
       }
-      return boundProperty(target, property);
+      return boundProperty(vault, property);
     }
   });
 }
@@ -116,11 +118,21 @@ export async function readNotes(vault: BatchReadCapable, ids: readonly string[])
  * la puerta; el resto del api queda tal cual.
  */
 export function gatePluginApiNoteReads(api: HebraPluginApi, maxConcurrent: number = MAX_CONCURRENT_NOTE_READS): HebraPluginApi {
-  const vault = gateVaultNoteReads(api.vault, maxConcurrent);
-  return new Proxy(api, {
-    get(target, property) {
+  const gated = gateVaultNoteReads(api.vault, maxConcurrent);
+  // La fachada del host expone `notesReadBatch` siempre (es una llamada RPC); solo vale si la
+  // capacidad `vault.read.batch` está declarada y el host la sirve. Si no, se oculta y
+  // `readNotes` cae a `noteRead` por la puerta.
+  const vault = api.has('vault.read.batch')
+    ? gated
+    : new Proxy({} as PluginVault, {
+        get(_target, property) {
+          return property === 'notesReadBatch' ? undefined : boundProperty(gated, property);
+        }
+      });
+  return new Proxy({} as HebraPluginApi, {
+    get(_target, property) {
       if (property === 'vault') return vault;
-      return boundProperty(target, property);
+      return boundProperty(api, property);
     }
   });
 }

@@ -255,7 +255,7 @@ export async function buildHebra() {
     styles: STYLES_FILE,
     icon: FALLBACK_ICON,
     iconImage: iconImageOf(),
-    capabilities: { required: ['vault.read', 'vault.write', 'editor'], optional: [] },
+    capabilities: { required: ['vault.read', 'vault.write', 'editor'], optional: ['vault.read.batch'] },
     network: { hosts: [] },
     shared: {},
     files: { [MAIN_FILE]: sha256(MAIN_FILE), [STYLES_FILE]: sha256(STYLES_FILE) },
